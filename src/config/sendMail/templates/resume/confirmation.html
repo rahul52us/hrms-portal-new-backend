@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Submitted</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 10px;
+            margin: 20px auto;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+        .header img {
+            max-width: 150px;
+            margin: 0 auto 20px;
+            display: block;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            color: #333;
+        }
+        .message {
+            font-size: 16px;
+            color: #555;
+            margin-top: 20px;
+        }
+        .footer {
+            font-size: 14px;
+            color: #777;
+            margin-top: 20px;
+        }
+        .footer a {
+            color: #007bff;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .footer a:hover {
+            color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="{{logoUrl}}" alt="Company Logo">
+            <h1>Application Received</h1>
+        </div>
+        <p class="message">Hello <strong style="color: #007bff;">{{firstName}} {{lastName}}</strong>,</p>
+        <p class="message">We have received your application. Thank you for submitting your details. Our team will review your request and get back to you shortly.</p>
+        <p class="message"><strong>Email:</strong> {{email}}</p>
+        <p class="message"><strong>Phone:</strong> {{phone}}</p>
+        <div class="footer">
+            <p>If you have any questions, feel free to contact us.</p>
+            <p>© {{year}} <a href="#">{{companyName}}</a></p>
+        </div>
+    </div>
+</body>
+</html>

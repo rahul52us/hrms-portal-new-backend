@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      color: #333;
+      line-height: 1.5;
+    }
+    .container {
+      background-color: #ffffff;
+      max-width: 600px;
+      margin: 30px auto;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
+    }
+    .logo {
+      display: block;
+      max-width: 160px;
+      margin: 0 auto 30px;
+    }
+    .content {
+      padding: 20px;
+      border-radius: 8px;
+      background-color: #f9f9f9;
+      margin-bottom: 30px;
+    }
+    .content h1 {
+      color: #007bff;
+      margin-top: 0;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .content p {
+      margin: 15px 0;
+      font-size: 16px;
+    }
+    .button {
+      display: inline-block;
+      padding: 14px 28px;
+      background-color: #007bff;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+      text-align: center;
+      font-size: 16px;
+      margin-top: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      transition: background-color 0.3s, box-shadow 0.3s;
+      width: 100%;
+    }
+    .button:hover {
+      background-color: #0056b3;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+    }
+    .footer {
+      font-size: 14px;
+      color: #666;
+      text-align: center;
+      margin-top: 30px;
+    }
+    .footer p {
+      margin: 5px 0;
+    }
+    .footer a {
+      color: #007bff;
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
+    }
+    .social-icons {
+      margin-top: 20px;
+    }
+    .social-icons a {
+      margin: 0 10px;
+      display: inline-block;
+      color: #007bff;
+      text-decoration: none;
+    }
+    .social-icons a img {
+      width: 24px;
+      height: 24px;
+    }
+
+    @media only screen and (max-width: 600px) {
+      .container {
+        padding: 20px;
+      }
+      .content h1 {
+        font-size: 22px;
+      }
+      .button {
+        padding: 12px 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="{{logoUrl}}" alt="Company Logo" class="logo">
+    <div class="content">
+      <h1>Invitation to Join: {{tripName}}</h1>
+      <p>Hello {{name}},</p>
+      <p>You have been invited to join the Trip "<strong>{{tripName}}</strong>". We're excited to have you as part of our team!</p>
+      <p>Please click the button below to accept the invitation and activate your role in the project:</p>
+      <a href="{{link}}" class="button">Accept Invitation</a>
+      <p>If you encounter any issues with the button, please contact us for assistance.</p>
+    </div>
+    <div class="footer">
+      <p>If you have any questions or need further assistance, please don't hesitate to <a href="mailto:support@yourcompany.com">contact our friendly support team</a>. We're here to help!</p>
+      <p>Best regards,<br>The {{companyName}} Team</p>
+      <p>&copy; {{year}} {{companyName}}. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

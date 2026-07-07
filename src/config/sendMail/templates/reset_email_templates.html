@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      /* Define your CSS styles here */
+      body {
+        font-family: Arial, sans-serif;
+      }
+      .container {
+        background-color: #f5f5f5;
+        padding: 20px;
+        border-radius: 4px;
+      }
+      .logo {
+        max-width: 150px;
+        margin-bottom: 20px;
+      }
+      .content {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 4px;
+      }
+      .message {
+        font-size: 18px;
+        margin-bottom: 20px;
+      }
+      .button {
+        display: inline-block;
+        padding: 12px 24px;
+        background-color: #007bff;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <img src={{logoUrl}} alt="Logo" class="logo">
+      <div class="content">
+        <h1>Password Changed Successfully</h1>
+        <p class="message">Hello, {{name}}!</p>
+        <p>We are pleased to inform you that your password has been changed successfully.</p>
+        <a href="{{link}}" class="button">Login and Visit Our Site</a>
+        <p>If you did not initiate this change, please contact our support team immediately for further assistance.</p>
+        <p>If you have any questions or need additional assistance, please do not hesitate to reach out to us. We're here to help!</p>
+        <p>Best regards,<br>Your Company</p>
+      </div>
+    </div>
+  </body>
+</html>

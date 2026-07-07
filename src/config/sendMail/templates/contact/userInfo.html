@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Information</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 10px;
+            margin: 20px auto;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e0e0e0;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header img {
+            max-width: 150px;
+            margin: 0 auto 20px;
+            display: block;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            color: #333;
+        }
+        .greeting-container {
+            background-color: #e9f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .greeting {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            margin: 0;
+        }
+        .introduction {
+            font-size: 16px;
+            color: #555;
+            margin-top: 5px;
+        }
+        .profile-pic {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 2px solid #007bff;
+            margin: 20px auto;
+            display: block;
+        }
+        .user-info {
+            margin-bottom: 20px;
+            padding: 20px;
+            border-left: 4px solid #007bff;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .user-info:hover {
+            background-color: #e9f3ff;
+        }
+        .user-info p {
+            font-size: 16px;
+            margin: 10px 0;
+            line-height: 1.5;
+            color: #555;
+        }
+        .description {
+            font-style: italic;
+            margin: 15px 0;
+            color: #777;
+        }
+        .footer {
+            text-align: center;
+            font-size: 14px;
+            color: #777;
+            margin-top: 20px;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+        .footer a {
+            color: #007bff;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .footer a:hover {
+            color: #0056b3;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            .header h1 {
+                font-size: 24px;
+            }
+            .user-info p {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="{{logoUrl}}" alt="Company Logo">
+            <h1>User Information</h1>
+        </div>
+        <div class="greeting-container">
+            <p class="greeting">Hello, <strong style="color: #007bff;">{{reciever_mail}}</strong></p>
+            <p class="introduction">Here are the details of the user who recently submitted their information:</p>
+        </div>
+        <div class="user-info">
+            <p><i class="fas fa-user"></i> <strong>First Name:</strong> {{firstName}}</p>
+            <p><i class="fas fa-user"></i> <strong>Last Name:</strong> {{lastName}}</p>
+            <p><i class="fas fa-envelope"></i> <strong>Email:</strong> <a href="mailto:{{email}}" style="color: #007bff; text-decoration: none;">{{email}}</a></p>
+            <p><i class="fas fa-phone"></i> <strong>Phone:</strong> <a href="tel:{{phone}}" style="color: #007bff; text-decoration: none;">{{phone}}</a></p>
+            <p class="description"><strong>Description:</strong> {{description}}</p>
+        </div>
+        <div class="footer">
+            <p>Thank you for reviewing this user information.</p>
+            <p>© {{year}} <a href="#">{{companyName}}</a></p>
+        </div>
+    </div>
+</body>
+</html>
