@@ -46,36 +46,6 @@ const forgotEmailValidation = Joi.object({
   }),
 });
 
-const otpRequestValidation = Joi.object({
-  phone: Joi.string().trim().pattern(/^\d{10}$/).required().messages({
-    "string.pattern.base": "Phone must be a valid 10-digit number",
-    "any.required": "Phone is required",
-  }),
-  purpose: Joi.string().valid("login", "register").required().messages({
-    "any.only": "Purpose must be either 'login' or 'register'",
-    "any.required": "Purpose is required",
-  }),
-}).options({ abortEarly: false });
-
-const otpVerifyValidation = Joi.object({
-  token: Joi.string().trim().required().messages({
-    "any.required": "OTP session token is required",
-    "string.empty": "OTP session token is required",
-  }),
-  phone: Joi.string().trim().pattern(/^\d{10}$/).required().messages({
-    "string.pattern.base": "Phone must be a valid 10-digit number",
-    "any.required": "Phone is required",
-  }),
-  otp: Joi.string().trim().length(6).required().messages({
-    "string.length": "OTP must be 6 digits",
-    "any.required": "OTP is required",
-  }),
-  purpose: Joi.string().valid("login", "register").required().messages({
-    "any.only": "Purpose must be either 'login' or 'register'",
-    "any.required": "Purpose is required",
-  }),
-}).options({ abortEarly: false });
-
 const resetPasswordValidation = Joi.object({
   password: Joi.string()
     .pattern(/^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/)
@@ -88,19 +58,34 @@ const resetPasswordValidation = Joi.object({
   })
 })
 
-const loginValidation = Joi.object({
-  token: Joi.string().trim().required().messages({
-    "any.required": "OTP session token is required",
-    "string.empty": "OTP session token is required",
+const passwordLoginValidation = Joi.object({
+  email: Joi.string().trim().lowercase().email().required().messages({
+    "string.email": "Email must be valid",
+    "any.required": "Email is required",
+    "string.empty": "Email is required",
   }),
-  phone: Joi.string().trim().pattern(/^\d{10}$/).required().messages({
+  password: Joi.string().min(8).max(128).required().messages({
+    "any.required": "Password is required",
+    "string.empty": "Password is required",
+  }),
+}).options({ abortEarly: false });
+
+const bootstrapSuperadminValidation = Joi.object({
+  name: Joi.string().trim().min(2).max(80).required(),
+  email: Joi.string().trim().lowercase().email().required().messages({
+    "string.email": "Email must be valid",
+    "any.required": "Email is required",
+  }),
+  phone: Joi.string().trim().pattern(/^\d{10}$/).optional().messages({
     "string.pattern.base": "Phone must be a valid 10-digit number",
-    "any.required": "Phone is required",
   }),
-  otp: Joi.string().trim().length(6).required().messages({
-    "string.length": "OTP must be 6 digits",
-    "any.required": "OTP is required",
-  }),
+  password: Joi.string()
+    .pattern(/^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/)
+    .message(
+      "Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit."
+    )
+    .required(),
+  setupKey: Joi.string().trim().allow("").optional(),
 }).options({ abortEarly: false });
 
 const registrationLocationValidation = Joi.object({
@@ -184,10 +169,9 @@ const changePasswordValidation = Joi.object({
 export {
   UserValidation,
   forgotEmailValidation,
-  otpRequestValidation,
-  otpVerifyValidation,
   resetPasswordValidation,
-  loginValidation,
+  passwordLoginValidation,
+  bootstrapSuperadminValidation,
   learnerRegistrationValidation,
   adminRegistrationValidation,
   changePasswordValidation,

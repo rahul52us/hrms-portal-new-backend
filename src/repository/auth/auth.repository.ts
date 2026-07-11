@@ -79,17 +79,50 @@ function buildIdentityConflictError(existingUser: any, phone: string) {
   );
 }
 
-const findUserByPhone = async (phone: string) => {
-  const normalizedPhone = String(phone || "").trim();
-  if (!normalizedPhone) {
+function normalizeLoginEmail(value: unknown) {
+  return String(value || "").trim();
+}
+
+function buildAuthResponseUser(user: any) {
+  return {
+    authorization_token: generateToken({ userId: user._id }),
+    userId: user._id,
+    role: user.role,
+    userType: user.userType,
+    company: user.company || null,
+  };
+}
+
+function requireValidSuperadminSetupKey(setupKey?: string) {
+  const configuredSetupKey = String(process.env.SUPERADMIN_SETUP_KEY || "").trim();
+  const providedSetupKey = String(setupKey || "").trim();
+  const isProduction = String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+
+  if (!configuredSetupKey && isProduction) {
+    throw generateError("SUPERADMIN_SETUP_KEY must be configured before bootstrapping in production.", 500);
+  }
+
+  if (configuredSetupKey && providedSetupKey !== configuredSetupKey) {
+    throw generateError("Invalid superadmin setup key.", 403);
+  }
+}
+
+async function findUserByLoginEmail(email: string) {
+  const normalizedEmail = normalizeLoginEmail(email);
+  if (!normalizedEmail) {
     return null;
   }
 
+  const emailRegex = new RegExp(`^${escapeRegex(normalizedEmail)}$`, "i");
+
   return User.findOne({
-    $or: [{ mobileNumber: normalizedPhone }, { username: normalizedPhone }],
+    $or: [
+      { username: emailRegex },
+      { email: emailRegex },
+    ],
     deletedAt: { $exists: false },
   });
-};
+}
 
 const findUserByUserName = async (data: any) => {
   try {
@@ -120,33 +153,104 @@ const findUserById = async (id: any) => {
   }
 };
 
-const loginUser = async (data: any): Promise<any> => {
+const loginUserWithPassword = async (data: any): Promise<any> => {
   try {
-    const normalizedPhone = String(data.phone || "").trim();
-    const existUser = await findUserByPhone(normalizedPhone);
+    const email = normalizeLoginEmail(data.email);
+    const existUser = await findUserByLoginEmail(email);
     if (!existUser) {
-      throw generateError(`${normalizedPhone} user does not exist`, 401);
+      throw generateError("Invalid credentials.", 401);
     }
 
     ensureUserAccountEnabled(existUser);
 
     if (!existUser.is_active) {
-      throw generateError(`Account is inactive. Complete manager assignment first`, 403);
+      throw generateError("Account is inactive. Please contact your administrator.", 403);
     }
 
-    const responseUser = {
-      authorization_token: generateToken({ userId: existUser._id }),
-      userType : existUser?.userType
-    };
+    if (!existUser.password) {
+      throw generateError("Password login is not enabled for this account.", 403);
+    }
+
+    const passwordMatches = await compareBcrypt(String(data.password || ""), existUser.password);
+    if (!passwordMatches) {
+      throw generateError("Invalid credentials.", 401);
+    }
 
     return {
       status: "success",
-      data: responseUser,
-      message: `${existUser?.name} has been logged in successfully`,
+      data: buildAuthResponseUser(existUser),
+      message: `${existUser?.name || existUser?.username} has been logged in successfully`,
     };
   } catch (err) {
     return { status: "error", data: err };
   }
+};
+
+const bootstrapSuperadmin = async (data: any) => {
+  requireValidSuperadminSetupKey(data.setupKey);
+
+  const existingSuperadmin = await User.findOne({
+    role: "superadmin",
+    deletedAt: { $exists: false },
+  }).select("_id username email");
+
+  if (existingSuperadmin) {
+    throw generateError("A superadmin account already exists.", 409);
+  }
+
+  const email = String(data.email || "").trim().toLowerCase();
+  const phone = String(data.phone || "").trim();
+  const identityQueries: any[] = [
+    { email: new RegExp(`^${escapeRegex(email)}$`, "i") },
+    { username: new RegExp(`^${escapeRegex(email)}$`, "i") },
+  ];
+
+  if (phone) {
+    identityQueries.push({ mobileNumber: phone }, { username: phone });
+  }
+
+  const existingIdentity = await User.findOne({
+    $or: identityQueries,
+    deletedAt: { $exists: false },
+  }).select("_id username email mobileNumber");
+
+  if (existingIdentity) {
+    throw generateError("An account already exists with this email or phone.", 409);
+  }
+
+  const user = new User({
+    name: String(data.name || "").trim(),
+    email,
+    username: email,
+    ...(phone ? { mobileNumber: phone } : {}),
+    code: await generateUniqueUserCode("SADM"),
+    role: "superadmin",
+    userType: "superadmin",
+    password: await hashBcrypt(data.password),
+    is_active: true,
+    is_enabled: true,
+  });
+
+  const savedUser = await user.save();
+
+  try {
+    const profileDetails = await ProfileDetails.create({
+      user: savedUser._id,
+      personalInfo: {
+        name: savedUser.name,
+        email: savedUser.email,
+        username: savedUser.username,
+        code: savedUser.code,
+      },
+    });
+    savedUser.profile_details = profileDetails._id;
+    await savedUser.save();
+  } catch (error) {
+    await User.deleteOne({ _id: savedUser._id });
+    throw error;
+  }
+
+  return buildAuthResponseUser(savedUser);
 };
 
 async function generateUniqueUserCode(prefix = "USR") {
@@ -449,4 +553,13 @@ const getRoleUsers = async (data : any) => {
   }
 };
 
-export { loginUser, registerLearner, registerAdmin, changePassword, findUserById, findUserByPhone, findUserByUserName, getRoleUsers };
+export {
+  loginUserWithPassword,
+  bootstrapSuperadmin,
+  registerLearner,
+  registerAdmin,
+  changePassword,
+  findUserById,
+  findUserByUserName,
+  getRoleUsers,
+};

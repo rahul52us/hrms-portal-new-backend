@@ -584,6 +584,17 @@ function hasPassword(user: any) {
   return Boolean(typeof user?.password === "string" && user.password.trim());
 }
 
+function validatePasswordStrength(password: string) {
+  return /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,}$/.test(password);
+}
+
+function createSetupToken() {
+  return {
+    token: crypto.randomBytes(32).toString("hex"),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  };
+}
+
 async function tryUploadUserPicture(pic: any) {
   if (!pic || !pic.filename || pic?.buffer === "" || !Object.entries(pic || {}).length) {
     return null;
@@ -687,7 +698,7 @@ function getSetupEmailConfig() {
   const fromName =
     normalizeEnvValue(process.env.SMTP_FROM_NAME) ||
     normalizeEnvValue(process.env.COMPANY_NAME) ||
-    "LMS Team";
+    "HRMS Team";
 
   return {
     host,
@@ -726,7 +737,7 @@ function formatSetupMailError(error: any) {
     /sender/i.test(error?.response || "");
 
   if (isAuthFailure) {
-    return `SMTP authentication failed for ${config.host}. Check SMTP_USER and SMTP_PASS in lms-backend/.env. For Brevo, SMTP_USER must be the SMTP login email and SMTP_PASS must be a valid SMTP key, not your account password or API key.`;
+    return `SMTP authentication failed for ${config.host}. Check SMTP_USER and SMTP_PASS in the backend environment. For Brevo, SMTP_USER must be the SMTP login email and SMTP_PASS must be a valid SMTP key, not your account password or API key.`;
   }
 
   if (isSenderFailure) {
@@ -773,15 +784,15 @@ async function sendSetupPasswordEmail(user: any) {
     await transporter.sendMail({
       from: `"${config.fromName}" <${config.fromAddress}>`,
       to: user.email || user.username,
-      subject: "Set up your LMS password",
+      subject: "Set up your HRMS password",
       html: `
         <div style="margin:0;padding:32px 16px;background:#eef4ff;font-family:Arial,Helvetica,sans-serif;color:#10213a;">
           <div style="max-width:620px;margin:0 auto;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 18px 60px rgba(37,99,235,0.16);">
             <div style="padding:32px 36px;background:linear-gradient(135deg,#1d4ed8 0%,#0ea5e9 100%);color:#ffffff;">
-              <div style="font-size:13px;letter-spacing:0.16em;text-transform:uppercase;opacity:0.86;margin-bottom:10px;">Learning Management System</div>
+              <div style="font-size:13px;letter-spacing:0.16em;text-transform:uppercase;opacity:0.86;margin-bottom:10px;">Human Resource Management System</div>
               <h1 style="margin:0;font-size:30px;line-height:1.2;">Your account is ready</h1>
               <p style="margin:12px 0 0;font-size:15px;line-height:1.7;opacity:0.96;">
-                ${creatorName} added you to ${companyName}. Set your password to start using your LMS workspace.
+                ${creatorName} added you to ${companyName}. Set your password to start using your HRMS workspace.
               </p>
             </div>
             <div style="padding:36px;">
@@ -858,7 +869,11 @@ async function findUserByPhone(
   }
 
   const query: any = {
-    $or: [{ mobileNumber: normalizedPhone }, { username: normalizedPhone }],
+    $or: [
+      { mobileNumber: normalizedPhone },
+      { username: normalizedPhone },
+      { email: new RegExp(`^${escapeRegex(normalizedPhone)}$`, "i") },
+    ],
     deletedAt: { $exists: false },
   };
 
@@ -1095,7 +1110,11 @@ function serializeUser(user: any) {
     canLogin: Boolean(user?.is_active) && user?.is_enabled !== false,
     status: lifecycleStatus,
     passwordStatus: hasPassword(user) ? "SET" : "NOT_SET",
-    authMethod: "PHONE_OTP",
+    authMethod: hasPassword(user)
+      ? "PASSWORD"
+      : user?.setupToken
+        ? "PASSWORD_SETUP_PENDING"
+        : "PASSWORD_NOT_SET",
     pic: user?.pic || null,
     setupTokenExpiry: user?.setupTokenExpiry || null,
     createdAt: user?.createdAt || null,
@@ -1141,6 +1160,7 @@ async function saveManagedUser({
   const mobileNumber = normalizeText(payload?.mobileNumber || payload?.phoneNumber);
   const designation = normalizeText(payload?.designation);
   const role = normalizeRole(payload?.role);
+  const password = normalizeText(payload?.password);
   const managersInput = parseManagersPayload(payload?.managers);
   const requestedManagerLevels = Math.max(
     1,
@@ -1163,20 +1183,23 @@ async function saveManagedUser({
     throw generateError("Enter a valid email address", 400);
   }
 
-  if (!mobileNumber) {
-    throw generateError("Mobile number is required", 400);
+  if (!email) {
+    throw generateError("Email is required for account access", 400);
   }
 
-  if (!isValidPhoneNumber(mobileNumber)) {
+  if (mobileNumber && !isValidPhoneNumber(mobileNumber)) {
     throw generateError("Enter a valid mobile number", 400);
-  }
-
-  if (!designation) {
-    throw generateError("Designation is required", 400);
   }
 
   if (!normalizeText(payload?.role)) {
     throw generateError("Role is required", 400);
+  }
+
+  if (password && !validatePasswordStrength(password)) {
+    throw generateError(
+      "Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",
+      400
+    );
   }
 
   const selfManagerIdentifiers = [email, mobileNumber].filter(Boolean);
@@ -1189,7 +1212,7 @@ async function saveManagedUser({
     throw generateError(`${email} is already registered`, 400);
   }
 
-  const existingPhoneUser = await findUserByPhone(mobileNumber, existingUserId);
+  const existingPhoneUser = mobileNumber ? await findUserByPhone(mobileNumber, existingUserId) : null;
   if (existingPhoneUser) {
     throw generateError(`${mobileNumber} is already registered`, 400);
   }
@@ -1229,6 +1252,9 @@ async function saveManagedUser({
 
   let user = existingUserId ? await User.findById(existingUserId) : null;
   const isCreate = !user;
+  if (isCreate && !password && !sendSetupEmail) {
+    throw generateError("Enter a password or send a setup invite", 400);
+  }
   const payloadIncludesDepartment = Object.prototype.hasOwnProperty.call(payload || {}, "department");
   const payloadIncludesDateOfBirth =
     Object.prototype.hasOwnProperty.call(payload || {}, "dateOfBirth") ||
@@ -1314,7 +1340,7 @@ async function saveManagedUser({
   user.role = role;
   user.userType = role;
   user.company = company._id;
-  user.mobileNumber = mobileNumber;
+  (user as any).mobileNumber = mobileNumber || undefined;
   user.city = normalizeText(payload?.city || user.city);
   user.state = normalizeText(payload?.state || user.state);
   user.designation = designation;
@@ -1332,8 +1358,27 @@ async function saveManagedUser({
   if (!user.profileId) {
     user.profileId = await generateUniqueProfileId(company.company_name || "USER");
   }
-  user.setupToken = undefined;
-  user.setupTokenExpiry = undefined;
+
+  let setupInfo: {
+    setupUrl: string;
+    setupTokenExpiry: Date;
+    emailSent?: boolean;
+    emailError?: string;
+  } | null = null;
+
+  if (password) {
+    user.password = await hashBcrypt(password);
+    user.setupToken = undefined;
+    user.setupTokenExpiry = undefined;
+  } else if (isCreate && sendSetupEmail && email) {
+    const setupToken = createSetupToken();
+    user.setupToken = setupToken.token;
+    user.setupTokenExpiry = setupToken.expiresAt;
+    setupInfo = {
+      setupUrl: buildSetupUrl(setupToken.token),
+      setupTokenExpiry: setupToken.expiresAt,
+    };
+  }
 
   if (payload?.pic?.isDeleted && user.pic?.name) {
     await deleteFile(user.pic.name).catch(() => undefined);
@@ -1364,8 +1409,17 @@ async function saveManagedUser({
       .populate("createdBy", "name email username role")
       .populate("managers.managerId", "name email username role");
 
+  if (setupInfo && populatedUser) {
+    const emailResult = await sendSetupPasswordEmail(populatedUser);
+    setupInfo.emailSent = Boolean(emailResult.success);
+    if (!emailResult.success) {
+      setupInfo.emailError = emailResult.message || "Setup email was not sent";
+    }
+  }
+
   return {
     user: populatedUser,
+    setup: setupInfo,
     companyWasAutoCreated:
       actor.role === "superadmin" &&
       !effectiveCompanyId &&
@@ -1407,6 +1461,7 @@ async function ensureManagerHierarchyUsers({
       payload: {
         code: await generateUniqueUserCode(),
         name: manager.managerName || deriveNameFromEmail(manager.managerEmail),
+        email: manager.managerEmail,
         mobileNumber: manager.managerEmail,
         role: `l${manager.level}-manager`,
         companyId: payload?.companyId,
@@ -2108,7 +2163,7 @@ export async function createManagedUserHandler(req: Request, res: Response) {
     const result = await saveManagedUser({
       payload: req.body,
       actor: requester,
-      sendSetupEmail: false,
+      sendSetupEmail: Boolean(req.body?.sendInvite || req.body?.sendSetupEmail),
     });
 
     return res.status(201).json({
@@ -2116,12 +2171,57 @@ export async function createManagedUserHandler(req: Request, res: Response) {
       message: getManagedUserSuccessMessage("created"),
       data: {
         user: serializeUser(result.user),
+        setup: result.setup || null,
       },
     });
   } catch (error: any) {
     return res.status(error?.statusCode || 500).json({
       success: false,
       error: error?.message || "Failed to create user",
+    });
+  }
+}
+
+export async function createCompanyAdminHandler(req: Request, res: Response) {
+  try {
+    const requester = assertSuperAdminRequester(req);
+    const companyId = normalizeText(req.body?.companyId || req.body?.company);
+
+    if (!companyId) {
+      throw generateError("Company is required", 400);
+    }
+
+    await ensureCompanyManagementAccess({
+      actor: requester,
+      requestedCompanyId: companyId,
+      actionLabel: "add an admin to this company",
+      allowSuperadminWithoutCompany: false,
+    });
+
+    const result = await saveManagedUser({
+      payload: {
+        ...req.body,
+        companyId,
+        role: "admin",
+        code: normalizeText(req.body?.code) || await generateUniqueUserCode(),
+        designation: normalizeText(req.body?.designation) || "Company Admin",
+      },
+      actor: requester,
+      sendSetupEmail: !normalizeText(req.body?.password) && req.body?.sendInvite !== false,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Company admin created successfully",
+      data: {
+        user: serializeUser(result.user),
+        setup: result.setup || null,
+      },
+    });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      error: error?.message || "Failed to create company admin",
     });
   }
 }

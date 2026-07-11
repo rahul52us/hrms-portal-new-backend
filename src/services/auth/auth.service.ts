@@ -1,23 +1,18 @@
 import { NextFunction, Request, Response } from "express";
 import {
-  adminRegistrationValidation,
+  bootstrapSuperadminValidation,
   changePasswordValidation,
   forgotEmailValidation,
-  learnerRegistrationValidation,
-  loginValidation,
-  otpRequestValidation,
-  otpVerifyValidation,
+  passwordLoginValidation,
   resetPasswordValidation,
 } from "./utils/validation";
 import { generateError } from "../../config/Error/functions";
 import {
   changePassword,
-  findUserByPhone,
   findUserByUserName,
   getRoleUsers,
-  loginUser,
-  registerAdmin,
-  registerLearner,
+  loginUserWithPassword,
+  bootstrapSuperadmin,
   updateUserRole,
 } from "../../repository/auth/auth.repository";
 import SendMail from "../../config/sendMail/sendMail";
@@ -26,193 +21,56 @@ import { FORGOT_PASSWORD_EMAIL_TOKEN_TYPE } from "../../config/sendMail/utils";
 import Token from "../../schemas/Token/Token";
 import { baseURL } from "../../config/helper/urls";
 import { setPasswordFromSetupToken } from "../adminUsers/adminUsers.service";
-import {
-  assertRegistrationOtpVerification,
-  consumeRegistrationOtpVerification,
-  getDummyOtpCode,
-  isDevelopmentOtpMode,
-  requestOtpChallenge,
-  verifyOtpChallenge,
-} from "./otp.service";
 
-const loginUserService = async (
+const passwordLoginService = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<any> => {
   try {
-    const result = loginValidation.validate(req.body);
+    const result = passwordLoginValidation.validate(req.body);
     if (result.error) {
-      throw generateError(result.error.details, 422);
+      throw generateError(
+        result.error.details.map((detail) => detail.message).join(", "),
+        422
+      );
     }
 
-    await verifyOtpChallenge({
-      phone: result.value.phone,
-      otp: result.value.otp,
-      purpose: "login",
-      token: result.value.token,
-    });
-
-    const { status, data, message } = await loginUser(result.value);
+    const { status, data, message } = await loginUserWithPassword(result.value);
     if (status === "success") {
-      res.status(200).send({
-        message: message,
-        data: data,
-        statusCode: 200,
-        success: true,
-      });
-    } else {
-      next(data);
-    }
-  } catch (err) {
-    next(err);
-  }
-};
-
-const registerLearnerService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const result = learnerRegistrationValidation.validate(req.body);
-    if (result.error) {
-      throw generateError(
-        result.error.details.map((detail) => detail.message).join(", "),
-        422
-      );
-    }
-
-    await assertRegistrationOtpVerification(result.value.verificationToken, result.value.phone);
-    const data = await registerLearner(result.value);
-    await consumeRegistrationOtpVerification(result.value.verificationToken);
-    return res.status(201).send({
-      message: "Learner account created successfully",
-      data,
-      statusCode: 201,
-      success: true,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-const registerAdminService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const result = adminRegistrationValidation.validate(req.body);
-    if (result.error) {
-      throw generateError(
-        result.error.details.map((detail) => detail.message).join(", "),
-        422
-      );
-    }
-
-    await assertRegistrationOtpVerification(result.value.verificationToken, result.value.phone);
-    const data = await registerAdmin(result.value);
-    await consumeRegistrationOtpVerification(result.value.verificationToken);
-    return res.status(201).send({
-      message: "Admin account created successfully",
-      data,
-      statusCode: 201,
-      success: true,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-const requestOtpService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const result = otpRequestValidation.validate(req.body);
-    if (result.error) {
-      throw generateError(
-        result.error.details.map((detail) => detail.message).join(", "),
-        422
-      );
-    }
-
-    const { phone, purpose } = result.value;
-    const existingUser = await findUserByPhone(phone);
-
-    if (purpose === "login" && !existingUser) {
-      throw generateError("User does not exist.", 404);
-    }
-
-    if (purpose === "register" && existingUser) {
-      throw generateError("User already exists.", 409);
-    }
-
-    const otpSession = await requestOtpChallenge({ phone, purpose });
-
-    return res.status(200).send({
-      message: "OTP sent successfully",
-      data: {
-        ...otpSession,
-        ...(isDevelopmentOtpMode()
-          ? { otpHint: `Use ${getDummyOtpCode()} for the current dummy flow.` }
-          : {}),
-      },
-      success: true,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-const verifyOtpService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<any> => {
-  try {
-    const result = otpVerifyValidation.validate(req.body);
-    if (result.error) {
-      throw generateError(
-        result.error.details.map((detail) => detail.message).join(", "),
-        422
-      );
-    }
-
-    const { phone, otp, purpose } = result.value;
-
-    if (purpose === "login") {
-      const existingUser = await findUserByPhone(phone);
-      if (!existingUser) {
-        throw generateError("User does not exist.", 404);
-      }
-    }
-
-    const verification = await verifyOtpChallenge({
-      phone,
-      otp,
-      purpose,
-      token: result.value.token,
-    });
-
-    if (purpose === "login") {
-      const { status, data, message } = await loginUser({ phone });
-      if (status !== "success") {
-        throw data;
-      }
-
       return res.status(200).send({
         message,
         data,
+        statusCode: 200,
         success: true,
       });
     }
 
-    return res.status(200).send({
-      message: "OTP verified successfully",
-      data: verification,
+    next(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+const bootstrapSuperadminService = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<any> => {
+  try {
+    const result = bootstrapSuperadminValidation.validate(req.body);
+    if (result.error) {
+      throw generateError(
+        result.error.details.map((detail) => detail.message).join(", "),
+        422
+      );
+    }
+
+    const data = await bootstrapSuperadmin(result.value);
+    return res.status(201).send({
+      message: "Superadmin account created successfully",
+      data,
+      statusCode: 201,
       success: true,
     });
   } catch (err) {
@@ -392,11 +250,8 @@ const handleContactServiceMail = (req : any , res : Response) => {
 }
 
 export {
-  registerLearnerService,
-  registerAdminService,
-  requestOtpService,
-  verifyOtpService,
-  loginUserService,
+  bootstrapSuperadminService,
+  passwordLoginService,
   changePasswordService,
   forgotPasswordService,
   setPasswordService,

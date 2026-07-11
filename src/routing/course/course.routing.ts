@@ -59,7 +59,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const uploadDir = path.join(os.tmpdir(), 'lms-backend', 'uploads', 'temp');
+const uploadDir = path.join(os.tmpdir(), 'hrms-backend', 'uploads', 'temp');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }

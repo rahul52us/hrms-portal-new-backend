@@ -8,7 +8,6 @@ export interface IEmailToken extends Document {
   type: string;
   is_active?: boolean;
   isActive?: boolean;
-  otpHash?: string;
   expiresAt?: Date;
   createdAt: Date;
   deletedAt?: Date
@@ -39,9 +38,6 @@ const Token: Schema<IEmailToken> = new Schema({
     type: Boolean,
     default: false,
     index: true,
-  },
-  otpHash: {
-    type: String,
   },
   expiresAt: {
     type: Date,

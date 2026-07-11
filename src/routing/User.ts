@@ -2,11 +2,8 @@ import express from "express";
 import { MeUser, createUser,resetPassword, VerifyEmailToken, getUsersByCompany, updateUserProfile } from "../modules/User/User";
 import authenticate from "../modules/config/authenticate";
 import {
-  registerAdminService,
-  registerLearnerService,
-  requestOtpService,
-  verifyOtpService,
-  loginUserService,
+  bootstrapSuperadminService,
+  passwordLoginService,
   changePasswordService,
   forgotPasswordService,
   handleContactServiceMail,
@@ -16,11 +13,8 @@ import { processResumeData } from "../config/common/resumeProcessor";
 const router = express.Router();
 
 router.post("/create", createUser);
-router.post('/register/learner', registerLearnerService)
-router.post('/register/admin', registerAdminService)
-router.post('/otp/request', requestOtpService)
-router.post('/otp/verify', verifyOtpService)
-router.post('/login', loginUserService)
+router.post('/bootstrap/superadmin', bootstrapSuperadminService)
+router.post('/login/password', passwordLoginService)
 router.post('/set-password', setPasswordService)
 router.post('/me',authenticate,MeUser)
 router.post('/forgot-password',forgotPasswordService)

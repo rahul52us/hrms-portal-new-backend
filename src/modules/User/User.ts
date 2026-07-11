@@ -23,6 +23,7 @@ import { baseURL } from "../../config/helper/urls";
 import {
   convertIdsToObjects,
   createCatchError,
+  hashBcrypt,
 } from "../../config/helper/function";
 import { statusCode } from "../../config/helper/statusCode";
 import { createToken } from "../../services/token/token.service";
@@ -107,13 +108,15 @@ const createUser = async (
         throw generateError(`Company does not exist`, 400);
       }
 
+      const hashedPassword = await hashBcrypt(req.body.password);
       const user = new User({
         username: req.body.username,
         name: req.body.name,
         mobileNumber: req.body.mobileNumber,
-        password: req.body.password,
+        password: hashedPassword,
         company: selectedCompany._id,
         role: req.body.role,
+        userType: req.body.role === "admin" ? "admin" : "user",
         refrenceBy:req.body.refrenceBy || undefined,
         is_active: selectedCompany.verified_email_allowed ? false : true,
       });
@@ -175,8 +178,13 @@ const createUser = async (
     } else {
       const user = new User({
         username: req.body.username,
+        email: req.body.username,
+        name: req.body.name || "Superadmin",
+        code: `SADM-${Date.now().toString(36).toUpperCase()}`,
         role: req.body.role,
+        userType: "superadmin",
         is_active: false,
+        is_enabled: true,
       });
       const createdUser = await user.save();
       if (!createdUser) {
@@ -317,12 +325,13 @@ const resetPassword = async (
     }
 
     const token: any = await Token.findOne({ token: req.body.token });
-    if (!token && token?.type !== FORGOT_PASSWORD_EMAIL_TOKEN_TYPE) {
+    if (!token || token?.type !== FORGOT_PASSWORD_EMAIL_TOKEN_TYPE) {
       throw generateError(`Invalid token or token has expired`, 400);
     }
 
+    const hashedPassword = await hashBcrypt(req.body.password);
     const user = await User.findByIdAndUpdate(token.userId, {
-      $set: { password: req.body.password },
+      $set: { password: hashedPassword },
     });
 
     if (!user) {

@@ -56,7 +56,7 @@ export const createManagedCompanyService = async (
     const { status, data, statusCode, message } = await createManagedCompany({
       ...value,
       companyOrg,
-      // createdBy: req.userId,
+      createdBy: req.userId,
       activeUser: req.userId,
     });
 

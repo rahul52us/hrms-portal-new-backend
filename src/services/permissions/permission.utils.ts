@@ -19,6 +19,7 @@ export const PERMISSION_KEYS = {
   MANAGE_BATCHES: "manage_batches",
   VIEW_LEARNER_PROGRESS_RESULTS: "view_learner_progress_results",
   MANAGE_PERMISSIONS: "manage_permissions",
+  COMPANY_SETTINGS: "company_settings",
   VIEW_PROFILE: "view_profile",
 } as const;
 
@@ -48,7 +49,7 @@ const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
   {
     key: PERMISSION_KEYS.CREATE_USERS,
     label: "Create Users",
-    description: "Create learner accounts.",
+    description: "Create employee accounts.",
     category: "Users",
   },
   {
@@ -142,6 +143,12 @@ const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
     category: "Navigation",
   },
   {
+    key: PERMISSION_KEYS.COMPANY_SETTINGS,
+    label: "Company Settings",
+    description: "Open and manage the company HRMS settings.",
+    category: "Company",
+  },
+  {
     key: PERMISSION_KEYS.MANAGE_PERMISSIONS,
     label: "Manage Permissions",
     description: "Edit role defaults and user-level permission overrides.",
@@ -181,6 +188,7 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_BATCHES,
   PERMISSION_KEYS.MANAGE_BATCHES,
   PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
+  PERMISSION_KEYS.COMPANY_SETTINGS,
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
 
@@ -310,6 +318,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.VIEW_BATCHES,
       PERMISSION_KEYS.MANAGE_BATCHES,
       PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
+      PERMISSION_KEYS.COMPANY_SETTINGS,
       PERMISSION_KEYS.VIEW_PROFILE,
     ]);
   }

@@ -3,6 +3,7 @@ import multer from "multer";
 import authenticate from "../modules/config/authenticate";
 import {
   bulkManagedUsersHandler,
+  createCompanyAdminHandler,
   createManagedUserHandler,
   deleteManagedUserHandler,
   downloadBulkUploadTemplateHandler,
@@ -20,6 +21,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get("/", authenticate, listManagedUsersHandler);
 router.get("/bulk/template", authenticate, downloadBulkUploadTemplateHandler);
 router.get("/permissions/config", authenticate, getPermissionConfigHandler);
+router.post("/company-admin", authenticate, createCompanyAdminHandler);
 router.post("/", authenticate, createManagedUserHandler);
 router.post("/bulk", authenticate, upload.single("file"), bulkManagedUsersHandler);
 router.delete("/:id", authenticate, deleteManagedUserHandler);

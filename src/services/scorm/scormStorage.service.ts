@@ -15,9 +15,9 @@ import { Readable } from "stream";
 import { v4 as uuidv4 } from "uuid";
 
 const LOCAL_SCORM_ROOT = process.env.VERCEL
-  ? path.join(os.tmpdir(), "lms-backend", "public", "uploads", "courses")
+  ? path.join(os.tmpdir(), "hrms-backend", "public", "uploads", "courses")
   : path.join(process.cwd(), "public", "uploads", "courses");
-const TEMP_UPLOAD_ROOT = path.join(os.tmpdir(), "lms-backend", "uploads", "temp");
+const TEMP_UPLOAD_ROOT = path.join(os.tmpdir(), "hrms-backend", "uploads", "temp");
 const TEMP_EXTRACT_ROOT = path.join(TEMP_UPLOAD_ROOT, "scorm-extract");
 const TEMP_CHUNK_ROOT = path.join(TEMP_UPLOAD_ROOT, "chunked-scorm");
 
@@ -914,7 +914,7 @@ async function getScormOcrWorker() {
     scormOcrWorkerPromise = (async () => {
       const { createWorker, PSM } = require("tesseract.js");
       const worker = await createWorker(process.env.SCORM_OCR_LANG || "eng", 1, {
-        cachePath: path.join(os.tmpdir(), "lms-backend", "tesseract-cache"),
+        cachePath: path.join(os.tmpdir(), "hrms-backend", "tesseract-cache"),
       });
       await worker.setParameters({
         tessedit_pageseg_mode: PSM.AUTO,

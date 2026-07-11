@@ -46,9 +46,7 @@ export const createManagedCompanyValidation = Joi.object({
     }),
   workNo: Joi.string().trim().allow("", null).default(""),
   webLink: Joi.string().trim().allow("", null).default(""),
-  bio: Joi.string().trim().min(10).required().messages({
-    "any.required": "Company description is required",
-    "string.empty": "Company description is required",
+  bio: Joi.string().trim().min(10).allow("", null).default("").messages({
     "string.min": "Company description should be at least 10 characters",
   }),
   primaryThemeColor: Joi.string()

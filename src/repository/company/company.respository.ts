@@ -380,12 +380,14 @@ export const createManagedCompany = async (data: any) => {
 
     const tenantUrl = buildTenantUrl(tenantSlug, customDomain);
 
+    const createdBy = data.createdBy || data.activeUser;
+
     const company = new Company({
       company_name: companyName,
       companyCode,
       companyType: data.companyType || "company",
       companyOrg: data.companyOrg,
-      createdBy: data.createdBy,
+      createdBy,
       activeUser: data.activeUser,
       is_active: true,
       verified_email_allowed: Boolean(data.verified_email_allowed),
@@ -422,18 +424,27 @@ export const createManagedCompany = async (data: any) => {
 
     const savedCompany = await company.save();
 
-    await Promise.all([
-      new CompanyPolicy({
-        company: savedCompany._id,
-        createdBy: data.createdBy,
-      }).save(),
-      new companyDetails({
-        company: savedCompany._id,
-        details: [],
-        faq: [],
-        homeFaq: [],
-      }).save(),
-    ]);
+    try {
+      await Promise.all([
+        new CompanyPolicy({
+          company: savedCompany._id,
+          createdBy,
+        }).save(),
+        new companyDetails({
+          company: savedCompany._id,
+          details: [],
+          faq: [],
+          homeFaq: [],
+        }).save(),
+      ]);
+    } catch (setupError) {
+      await Promise.allSettled([
+        Company.deleteOne({ _id: savedCompany._id }),
+        CompanyPolicy.deleteMany({ company: savedCompany._id }),
+        companyDetails.deleteMany({ company: savedCompany._id }),
+      ]);
+      throw setupError;
+    }
 
     return {
       status: "success",

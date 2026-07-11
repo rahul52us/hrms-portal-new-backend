@@ -81,7 +81,7 @@ function formatNotificationMailError(error: any) {
     /sender/i.test(error?.response || "");
 
   if (isAuthFailure) {
-    return `SMTP authentication failed for ${config.host}. Check SMTP_USER and SMTP_PASS in lms-backend/.env.`;
+    return `SMTP authentication failed for ${config.host}. Check SMTP_USER and SMTP_PASS in the backend environment.`;
   }
 
   if (isSenderFailure) {
