@@ -2,6 +2,7 @@ import { NextFunction, Response } from "express";
 import mongoose from "mongoose";
 import {
   createManagedCompany,
+  deleteManagedCompanyArtifacts,
   getCompanyCount,
   getCompanyDetailsByName,
   getManagedCompanies,
@@ -24,6 +25,7 @@ import {
 import { generateError } from "../../config/Error/functions";
 import ExcelJS from "exceljs";
 import { createManagedCompanyValidation } from "./utils/validations";
+import { createCompanyAdminForCompanyCreation } from "../adminUsers/adminUsers.service";
 
 const ensureSuperAdmin = (req: any) => {
   const role = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
@@ -53,17 +55,53 @@ export const createManagedCompanyService = async (
     }
 
     const companyOrg = req.bodyData?.companyOrg || req.bodyData?.company;
+    const { companyAdmin, ...companyPayload } = value;
     const { status, data, statusCode, message } = await createManagedCompany({
-      ...value,
+      ...companyPayload,
       companyOrg,
       createdBy: req.userId,
       activeUser: req.userId,
     });
 
+    if (status !== "success") {
+      return res.status(statusCode).send({
+        status,
+        data,
+        message,
+      });
+    }
+
+    const shouldCreateAdmin = Boolean(companyAdmin?.create);
+    let createdAdmin: any = null;
+
+    if (shouldCreateAdmin) {
+      try {
+        createdAdmin = await createCompanyAdminForCompanyCreation({
+          companyId: String(data?._id || ""),
+          admin: companyAdmin,
+          actor: {
+            role: "superadmin",
+            userId: req.userId ? String(req.userId) : undefined,
+          },
+        });
+      } catch (adminError) {
+        await deleteManagedCompanyArtifacts(String(data?._id || ""));
+        throw adminError;
+      }
+    }
+
     return res.status(statusCode).send({
       status,
-      data,
-      message,
+      data: shouldCreateAdmin
+        ? {
+            company: data,
+            admin: createdAdmin?.user || null,
+            setup: createdAdmin?.setup || null,
+          }
+        : data,
+      message: shouldCreateAdmin
+        ? `${data.company_name} company and admin have been created successfully`
+        : message,
     });
   } catch (err: any) {
     next(err);

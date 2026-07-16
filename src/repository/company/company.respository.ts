@@ -457,6 +457,20 @@ export const createManagedCompany = async (data: any) => {
   }
 };
 
+export const deleteManagedCompanyArtifacts = async (companyId: string) => {
+  if (!mongoose.Types.ObjectId.isValid(String(companyId))) {
+    return;
+  }
+
+  const companyObjectId = new mongoose.Types.ObjectId(String(companyId));
+  await Promise.allSettled([
+    User.deleteMany({ company: companyObjectId }),
+    Company.deleteOne({ _id: companyObjectId }),
+    CompanyPolicy.deleteMany({ company: companyObjectId }),
+    companyDetails.deleteMany({ company: companyObjectId }),
+  ]);
+};
+
 export const getManagedCompanies = async (data: any) => {
   try {
     const match: any = {

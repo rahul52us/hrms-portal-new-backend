@@ -12,6 +12,29 @@ const addressSchema = Joi.object({
   pinCode: Joi.string().allow("", null).default(""),
 });
 
+const companyAdminSchema = Joi.object({
+  create: Joi.boolean().default(false),
+  name: Joi.when("create", {
+    is: true,
+    then: Joi.string().trim().required().messages({
+      "any.required": "Company admin name is required",
+      "string.empty": "Company admin name is required",
+    }),
+    otherwise: Joi.string().trim().allow("", null).default(""),
+  }),
+  email: Joi.when("create", {
+    is: true,
+    then: Joi.string().trim().email({ tlds: { allow: false } }).required().messages({
+      "any.required": "Company admin email is required",
+      "string.empty": "Company admin email is required",
+      "string.email": "Enter a valid company admin email address",
+    }),
+    otherwise: Joi.string().trim().allow("", null).default(""),
+  }),
+  password: Joi.string().allow("", null).default(""),
+  sendInvite: Joi.boolean().default(true),
+}).default({ create: false });
+
 export const createManagedCompanyValidation = Joi.object({
   company_name: Joi.string().trim().required().messages({
     "any.required": "Company name is required",
@@ -82,4 +105,5 @@ export const createManagedCompanyValidation = Joi.object({
       Joi.object().max(0)
     )
     .allow(null),
+  companyAdmin: companyAdminSchema,
 });

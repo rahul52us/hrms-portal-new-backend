@@ -1513,6 +1513,41 @@ function assertSuperAdminRequester(req: any) {
   return requester;
 }
 
+export async function createCompanyAdminForCompanyCreation({
+  companyId,
+  admin,
+  actor,
+}: {
+  companyId: string;
+  admin: any;
+  actor: {
+    role: string;
+    userId?: string;
+    companyId?: string;
+    department?: string;
+    permissions?: Record<string, boolean>;
+    permissionOverrides?: Record<string, boolean>;
+    effectivePermissions?: Record<string, boolean>;
+  };
+}) {
+  const result = await saveManagedUser({
+    payload: {
+      ...admin,
+      companyId,
+      role: "admin",
+      code: normalizeText(admin?.code) || await generateUniqueUserCode(),
+      designation: normalizeText(admin?.designation) || "Company Admin",
+    },
+    actor,
+    sendSetupEmail: !normalizeText(admin?.password) && admin?.sendInvite !== false,
+  });
+
+  return {
+    user: serializeUser(result.user),
+    setup: result.setup || null,
+  };
+}
+
 async function parseBulkWorkbook(
   fileBuffer: Buffer,
   options: {
