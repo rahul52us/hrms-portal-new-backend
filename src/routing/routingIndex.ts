@@ -16,6 +16,7 @@ import courseDetailsRouting from "./course/course.routing";
 import courseAccessRouting from "./courseAccess.routing";
 import batchRouting from "./batch.routing";
 import departmentRouting from "./departments.routing";
+import officeLocationRouting from "./officeLocations.routing";
 import certificateRouting from "./certificate.routing";
 
 const importRoutings = (app: any) => {
@@ -39,6 +40,7 @@ const importRoutings = (app: any) => {
   app.use('/api', courseAccessRouting);
   app.use('/api', batchRouting);
   app.use('/api/department', departmentRouting);
+  app.use('/api/locations', officeLocationRouting);
 };
 
 export default importRoutings;

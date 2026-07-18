@@ -49,6 +49,7 @@ export interface UserInterface extends Document {
   refrenceBy?:any;
   defaultWorkflow?: mongoose.Types.ObjectId;
   department?: string;
+  officeLocation?: Schema.Types.ObjectId;
 }
 
 const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
@@ -120,6 +121,11 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     default: "user"
   },
   department: { type: String, trim: true },
+  officeLocation: {
+    type: Schema.Types.ObjectId,
+    ref: "OfficeLocation",
+    index: true,
+  },
   permissions : {
     type : mongoose.Schema.Types.Mixed,
     default : {}

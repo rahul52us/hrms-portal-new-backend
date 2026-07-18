@@ -8,6 +8,7 @@ import { deleteFile, uploadFile } from "../../repository/uploadDoc.repository";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import User from "../../schemas/User/User";
 import Company from "../../schemas/company/Company";
+import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import {
   PERMISSION_CATALOG,
   PERMISSION_KEYS,
@@ -242,6 +243,7 @@ async function syncManagedUserProfileDetails(user: any, company: any) {
     joiningDate: user?.joiningDate || null,
     mobileNumber: user?.mobileNumber || "",
     department: user?.department || "",
+    officeLocation: user?.officeLocation || null,
     profileId: user?.profileId || "",
     gender: user?.gender ?? null,
     dob: user?.dateOfBirth || null,
@@ -993,6 +995,62 @@ async function resolveManagers(
   return resolvedManagers;
 }
 
+function normalizeObjectIdLike(value: any) {
+  if (value && typeof value === "object" && "_id" in value) {
+    return normalizeText(value._id);
+  }
+
+  return normalizeText(value);
+}
+
+async function resolveOfficeLocationForCompany(
+  rawLocation: any,
+  companyId: string | mongoose.Types.ObjectId
+) {
+  const locationId = normalizeObjectIdLike(rawLocation);
+  if (!locationId) {
+    return null;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(locationId)) {
+    throw generateError("Invalid office location id", 400);
+  }
+
+  const location = await OfficeLocation.findOne({
+    _id: new mongoose.Types.ObjectId(locationId),
+    company: new mongoose.Types.ObjectId(String(companyId)),
+    deletedAt: null,
+  });
+
+  if (!location) {
+    throw generateError("Office location not found for this company", 404);
+  }
+
+  if (location.is_active === false) {
+    throw generateError("Selected office location is inactive", 400);
+  }
+
+  return location;
+}
+
+function serializeOfficeLocation(value: any) {
+  if (!value || typeof value !== "object" || !("_id" in value)) {
+    return null;
+  }
+
+  return {
+    _id: value._id,
+    name: value.name || "",
+    code: value.code || "",
+    address: value.address || "",
+    city: value.city || "",
+    state: value.state || "",
+    country: value.country || "",
+    pinCode: value.pinCode || "",
+    is_active: value.is_active !== false,
+  };
+}
+
 export async function syncUserManagerStateById(userId: string | mongoose.Types.ObjectId) {
   const user = await User.findById(userId);
   if (!user) {
@@ -1038,6 +1096,8 @@ function serializeUser(user: any) {
     user?.company && typeof user.company === "object" && "company_name" in user.company
       ? user.company
       : null;
+  const officeLocation = serializeOfficeLocation(user?.officeLocation);
+  const officeLocationId = officeLocation?._id || normalizeObjectIdLike(user?.officeLocation);
   const createdBy =
     user?.createdBy && typeof user.createdBy === "object" && "name" in user.createdBy
       ? user.createdBy
@@ -1080,6 +1140,9 @@ function serializeUser(user: any) {
     city: user?.city || "",
     state: user?.state || "",
     department: user?.department || "",
+    officeLocationId: officeLocationId || "",
+    officeLocation,
+    officeLocationName: officeLocation?.name || "",
     designation: user?.designation || "",
     joiningDate: user?.joiningDate || null,
     dateOfBirth: user?.dateOfBirth || null,
@@ -1256,6 +1319,9 @@ async function saveManagedUser({
     throw generateError("Enter a password or send a setup invite", 400);
   }
   const payloadIncludesDepartment = Object.prototype.hasOwnProperty.call(payload || {}, "department");
+  const payloadIncludesOfficeLocation =
+    Object.prototype.hasOwnProperty.call(payload || {}, "officeLocationId") ||
+    Object.prototype.hasOwnProperty.call(payload || {}, "officeLocation");
   const payloadIncludesDateOfBirth =
     Object.prototype.hasOwnProperty.call(payload || {}, "dateOfBirth") ||
     Object.prototype.hasOwnProperty.call(payload || {}, "dob");
@@ -1271,6 +1337,12 @@ async function saveManagedUser({
       : payloadIncludesDepartment
         ? normalizeText(payload?.department)
         : normalizeText(user?.department);
+  const resolvedOfficeLocation = payloadIncludesOfficeLocation
+    ? await resolveOfficeLocationForCompany(
+        payload?.officeLocationId ?? payload?.officeLocation,
+        company._id
+      )
+    : null;
 
   if (payloadIncludesDateOfBirth && rawDateOfBirth && !parsedDateOfBirth) {
     throw generateError("Enter a valid date of birth", 400);
@@ -1353,6 +1425,9 @@ async function saveManagedUser({
   }
   user.title = normalizeText(payload?.title || user.title);
   user.department = resolvedDepartment;
+  if (payloadIncludesOfficeLocation) {
+    user.officeLocation = resolvedOfficeLocation?._id || undefined;
+  }
   user.updatedAt = new Date();
   user.managers = await resolveManagers(managersInput, String(user._id), company._id);
   if (!user.profileId) {
@@ -1406,6 +1481,7 @@ async function saveManagedUser({
 
   const populatedUser = await User.findById(user._id)
       .populate("company", "company_name managerLevels")
+      .populate("officeLocation", "name code address city state country pinCode is_active")
       .populate("createdBy", "name email username role")
       .populate("managers.managerId", "name email username role");
 
@@ -1469,6 +1545,7 @@ async function ensureManagerHierarchyUsers({
         companyManagerLevels: payload?.companyManagerLevels,
         city: payload?.city,
         state: payload?.state,
+        officeLocationId: payload?.officeLocationId || payload?.officeLocation,
         department: actor.role === "departmenthead" ? actor.department : payload?.department,
         managers: higherManagers,
       },
@@ -1952,6 +2029,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const search = normalizeText(req.query.search);
     const requestedRoleText = normalizeText(req.query.role);
     const requestedRole = requestedRoleText ? normalizeRole(requestedRoleText) : "";
+    const officeLocationId = normalizeText(req.query.officeLocationId || req.query.locationId);
     const companyId =
       requester.role === "superadmin"
         ? normalizeText(req.query.companyId)
@@ -1963,6 +2041,10 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
 
     if (companyId && !mongoose.Types.ObjectId.isValid(companyId)) {
       throw generateError("Invalid company id", 400);
+    }
+
+    if (officeLocationId && !mongoose.Types.ObjectId.isValid(officeLocationId)) {
+      throw generateError("Invalid office location id", 400);
     }
 
     const accessibleCompanyMatch: any = {
@@ -2068,6 +2150,12 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       });
     }
 
+    if (officeLocationId) {
+      matchClauses.push({
+        officeLocation: new mongoose.Types.ObjectId(officeLocationId),
+      });
+    }
+
     const match =
       matchClauses.length === 1
         ? matchClauses[0]
@@ -2087,6 +2175,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const users = total
       ? await User.find(match)
           .populate("company", "company_name managerLevels rolePermissions")
+          .populate("officeLocation", "name code address city state country pinCode is_active")
           .populate("createdBy", "name email username role")
           .populate("managers.managerId", "name email username role")
           .sort({ createdAt: -1 })
