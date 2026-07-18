@@ -4,6 +4,7 @@ export interface DepartmentI extends Document {
   company: mongoose.Schema.Types.ObjectId;
   departmentName: string;
   code: string;
+  departmentHead?: mongoose.Schema.Types.ObjectId;
   deletedAt?: Date;
   createdAt?: Date;
 }
@@ -22,6 +23,11 @@ const DepartmentSchema: Schema<DepartmentI> = new Schema<DepartmentI>({
   code: {
     type: String,
     required: true,
+  },
+  departmentHead: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    index: true,
   },
   deletedAt: {
     type: Date,

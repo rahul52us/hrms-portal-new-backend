@@ -1,11 +1,12 @@
 import express from 'express'
 import authenticate from "../modules/config/authenticate";
-import { createDepartmentService, deleteDepartmentService, getDepartmentsService, updateDepartmentService } from '../services/department/department.service';
+import { assignDepartmentHeadService, createDepartmentService, deleteDepartmentService, getDepartmentsService, updateDepartmentService } from '../services/department/department.service';
 
 
 const departmentRouting = express.Router()
 departmentRouting.post("/create",authenticate, createDepartmentService);
 departmentRouting.put("/update/:id",authenticate, updateDepartmentService);
+departmentRouting.put("/head/:id", authenticate, assignDepartmentHeadService);
 departmentRouting.delete("/delete/:id", authenticate, deleteDepartmentService);
 departmentRouting.get("/list",authenticate, getDepartmentsService);
 

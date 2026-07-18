@@ -1,25 +1,23 @@
 import Department from "../../schemas/Department/Department.schema";
 
-// CREATE
+const departmentHeadPopulate = "name email username role userType department";
+
 export const create_department_repo = async (data: any) => {
   return Department.create(data);
 };
 
-// UPDATE
 export const update_department_repo = async (id: string, data: any) => {
   return Department.findOneAndUpdate(
-    { _id: id, deletedAt: null }, // ✅ ensures record exists & not deleted
+    { _id: id, deletedAt: null },
     data,
     { new: true }
-  );
+  ).populate("departmentHead", departmentHeadPopulate);
 };
 
-// DELETE (soft delete)
 export const delete_department_repo = async (id: string) => {
   return Department.findOneAndDelete({ _id: id, deletedAt: null });
 };
 
-// GET ALL
 export const get_departments_repo = async (
   company: string,
   page: number,
@@ -29,6 +27,7 @@ export const get_departments_repo = async (
 
   const [data, total] = await Promise.all([
     Department.find({ company, deletedAt: null })
+      .populate("departmentHead", departmentHeadPopulate)
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 }),

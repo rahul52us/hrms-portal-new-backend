@@ -2029,6 +2029,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const search = normalizeText(req.query.search);
     const requestedRoleText = normalizeText(req.query.role);
     const requestedRole = requestedRoleText ? normalizeRole(requestedRoleText) : "";
+    const departmentFilter = normalizeText(req.query.department);
     const officeLocationId = normalizeText(req.query.officeLocationId || req.query.locationId);
     const companyId =
       requester.role === "superadmin"
@@ -2153,6 +2154,12 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     if (officeLocationId) {
       matchClauses.push({
         officeLocation: new mongoose.Types.ObjectId(officeLocationId),
+      });
+    }
+
+    if (departmentFilter) {
+      matchClauses.push({
+        department: { $regex: new RegExp(`^${escapeRegex(departmentFilter)}$`, "i") },
       });
     }
 
