@@ -77,6 +77,17 @@ const serializeDepartmentHead = (head: any) => {
   };
 };
 
+const serializeDepartmentTeams = (teams: any[] = []) =>
+  (Array.isArray(teams) ? teams : []).map((team: any) => ({
+    _id: team?._id,
+    name: team?.name || "",
+    code: team?.code || "",
+    description: team?.description || "",
+    isActive: team?.isActive !== false,
+    createdAt: team?.createdAt || null,
+    updatedAt: team?.updatedAt || null,
+  }));
+
 const enrichDepartmentsWithStats = async (companyId: string, departments: any[]) => {
   const plainDepartments = departments.filter(Boolean).map(toPlainDepartment);
   const departmentNames = plainDepartments
@@ -87,6 +98,8 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
     return plainDepartments.map((department) => ({
       ...department,
       departmentHead: serializeDepartmentHead(department.departmentHead),
+      teams: serializeDepartmentTeams(department.teams),
+      teamCount: serializeDepartmentTeams(department.teams).length,
       employeeCount: 0,
       activeEmployeeCount: 0,
       managerCount: 0,
@@ -124,15 +137,66 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
 
   return plainDepartments.map((department) => {
     const stats = statsByDepartment[normalizeText(department.departmentName)] || {};
+    const teams = serializeDepartmentTeams(department.teams);
     return {
       ...department,
       departmentHead: serializeDepartmentHead(department.departmentHead),
+      teams,
+      teamCount: teams.length,
       employeeCount: stats.employeeCount || 0,
       activeEmployeeCount: stats.activeEmployeeCount || 0,
       managerCount: stats.managerCount || 0,
     };
   });
 };
+
+const findDepartmentForMutation = async (req: any, id: string) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw generateError("Invalid department id", 400);
+  }
+
+  const department = await Department.findOne({
+    _id: id,
+    deletedAt: null,
+  });
+
+  if (!department) {
+    throw generateError("Department not found", 404);
+  }
+
+  await ensureCompanyManagementAccess({
+    actor: req.bodyData || req.user,
+    requestedCompanyId: String(department.company || ""),
+    actionLabel: "manage departments for this company",
+    allowSuperadminWithoutCompany: false,
+  });
+
+  return department;
+};
+
+const getDepartmentTeams = (department: any) =>
+  Array.isArray(department?.teams) ? department.teams : [];
+
+const findTeamById = (department: any, teamId: string) =>
+  getDepartmentTeams(department).find((team: any) => String(team?._id || "") === String(teamId || ""));
+
+const findDuplicateTeam = (
+  department: any,
+  name: string,
+  excludeTeamId?: string
+) => {
+  const normalizedName = normalizeText(name).toLowerCase();
+  return getDepartmentTeams(department).find((team: any) => {
+    if (excludeTeamId && String(team?._id || "") === String(excludeTeamId)) {
+      return false;
+    }
+
+    return normalizeText(team?.name).toLowerCase() === normalizedName;
+  });
+};
+
+const getPopulatedDepartment = (id: string) =>
+  Department.findById(id).populate("departmentHead", "name email username role userType department");
 
 const syncCompanyDepartmentNames = async (
   companyId: string,
@@ -437,6 +501,169 @@ export const assignDepartmentHeadService = async (
       status: "success",
       data: (await enrichDepartmentsWithStats(String(department.company), [updated]))[0],
       message: "Department head assigned successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ================= ADD TEAM =================
+export const addDepartmentTeamService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    const { id } = req.params;
+    const name = normalizeText(req.body?.name || req.body?.teamName);
+    const code = normalizeText(req.body?.code);
+    const description = normalizeText(req.body?.description);
+
+    if (!name) {
+      throw generateError("Team name is required", 400);
+    }
+
+    const department = await findDepartmentForMutation(req, id);
+    if (findDuplicateTeam(department, name)) {
+      throw generateError("Team already exists in this department", 400);
+    }
+
+    (department as any).teams = [
+      ...getDepartmentTeams(department),
+      {
+        name,
+        code,
+        description,
+        isActive: req.body?.isActive !== false,
+        createdAt: new Date(),
+      },
+    ];
+    await department.save();
+
+    const updated = await getPopulatedDepartment(id);
+
+    return res.status(201).send({
+      status: "success",
+      data: (await enrichDepartmentsWithStats(String(department.company), [updated]))[0],
+      message: "Team added successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ================= UPDATE TEAM =================
+export const updateDepartmentTeamService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    const { id, teamId } = req.params;
+    const department = await findDepartmentForMutation(req, id);
+    const team = findTeamById(department, teamId);
+
+    if (!team) {
+      throw generateError("Team not found", 404);
+    }
+
+    const oldName = normalizeText(team.name);
+    const hasName = Object.prototype.hasOwnProperty.call(req.body || {}, "name") ||
+      Object.prototype.hasOwnProperty.call(req.body || {}, "teamName");
+    const nextName = hasName ? normalizeText(req.body?.name || req.body?.teamName) : oldName;
+
+    if (!nextName) {
+      throw generateError("Team name is required", 400);
+    }
+
+    if (
+      nextName.toLowerCase() !== oldName.toLowerCase() &&
+      findDuplicateTeam(department, nextName, teamId)
+    ) {
+      throw generateError("Team already exists in this department", 400);
+    }
+
+    team.name = nextName;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "code")) {
+      team.code = normalizeText(req.body?.code);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "description")) {
+      team.description = normalizeText(req.body?.description);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
+      team.isActive = req.body?.isActive !== false;
+    }
+    team.updatedAt = new Date();
+
+    await department.save();
+
+    if (oldName && nextName && oldName !== nextName) {
+      await User.updateMany(
+        {
+          company: department.company,
+          department: String(department.departmentName || ""),
+          team: oldName,
+          deletedAt: { $exists: false },
+        },
+        {
+          team: nextName,
+          updatedAt: new Date(),
+        }
+      );
+    }
+
+    const updated = await getPopulatedDepartment(id);
+
+    return res.status(200).send({
+      status: "success",
+      data: (await enrichDepartmentsWithStats(String(department.company), [updated]))[0],
+      message: "Team updated successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ================= DELETE TEAM =================
+export const deleteDepartmentTeamService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    const { id, teamId } = req.params;
+    const department = await findDepartmentForMutation(req, id);
+    const team = findTeamById(department, teamId);
+
+    if (!team) {
+      throw generateError("Team not found", 404);
+    }
+
+    const assignedUsers = await User.countDocuments({
+      company: department.company,
+      department: String(department.departmentName || ""),
+      team: normalizeText(team.name),
+      deletedAt: { $exists: false },
+    });
+
+    if (assignedUsers > 0) {
+      throw generateError("This team has assigned employees. Move employees before deleting it.", 400);
+    }
+
+    (department as any).teams = getDepartmentTeams(department).filter(
+      (item: any) => String(item?._id || "") !== String(teamId)
+    );
+    await department.save();
+
+    const updated = await getPopulatedDepartment(id);
+
+    return res.status(200).send({
+      status: "success",
+      data: (await enrichDepartmentsWithStats(String(department.company), [updated]))[0],
+      message: "Team deleted successfully",
     });
   } catch (err) {
     next(err);

@@ -5,9 +5,30 @@ export interface DepartmentI extends Document {
   departmentName: string;
   code: string;
   departmentHead?: mongoose.Schema.Types.ObjectId;
+  teams?: {
+    _id?: mongoose.Types.ObjectId;
+    name: string;
+    code?: string;
+    description?: string;
+    isActive?: boolean;
+    createdAt?: Date;
+    updatedAt?: Date;
+  }[];
   deletedAt?: Date;
   createdAt?: Date;
 }
+
+const DepartmentTeamSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    code: { type: String, trim: true },
+    description: { type: String, trim: true },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date },
+  },
+  { _id: true }
+);
 
 const DepartmentSchema: Schema<DepartmentI> = new Schema<DepartmentI>({
   company: {
@@ -28,6 +49,10 @@ const DepartmentSchema: Schema<DepartmentI> = new Schema<DepartmentI>({
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     index: true,
+  },
+  teams: {
+    type: [DepartmentTeamSchema],
+    default: [],
   },
   deletedAt: {
     type: Date,

@@ -9,6 +9,7 @@ import ProfileDetails from "../../schemas/User/ProfileDetails";
 import User from "../../schemas/User/User";
 import Company from "../../schemas/company/Company";
 import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
+import Department from "../../schemas/Department/Department.schema";
 import {
   PERMISSION_CATALOG,
   PERMISSION_KEYS,
@@ -243,6 +244,7 @@ async function syncManagedUserProfileDetails(user: any, company: any) {
     joiningDate: user?.joiningDate || null,
     mobileNumber: user?.mobileNumber || "",
     department: user?.department || "",
+    team: user?.team || "",
     officeLocation: user?.officeLocation || null,
     profileId: user?.profileId || "",
     gender: user?.gender ?? null,
@@ -392,6 +394,7 @@ function buildTemplateHeaders(uploadRole: string, companyManagerLevels: number) 
     "Phone Number",
     "Email ID (Optional)",
     isUserUpload ? "Branch (Optional)" : "Branch",
+    "Team (Optional)",
     "City",
     "State",
   ];
@@ -414,16 +417,19 @@ function buildTemplateRows(uploadRole: string, companyManagerLevels: number) {
   const commonRows = [
     {
       branch: "Corporate",
+      team: "Fullstack",
       city: "Mumbai",
       state: "Maharashtra",
     },
     {
       branch: "Operations",
+      team: "Python",
       city: "Bangalore",
       state: "Karnataka",
     },
     {
       branch: "Finance",
+      team: "",
       city: "Pune",
       state: "Maharashtra",
     },
@@ -493,6 +499,7 @@ function buildTemplateRows(uploadRole: string, companyManagerLevels: number) {
       entry.user.phone,
       entry.user.email,
       commonRows[index].branch,
+      commonRows[index].team,
       commonRows[index].city,
       commonRows[index].state,
       entry.user.designation,
@@ -514,6 +521,7 @@ function buildTemplateRows(uploadRole: string, companyManagerLevels: number) {
       currentManager.phone,
       currentManager.email,
       commonRows[index].branch,
+      commonRows[index].team,
       commonRows[index].city,
       commonRows[index].state,
       ...expectedManagerLevels.map((level) => getManagerProfile(entry, level, index).phone),
@@ -1033,6 +1041,48 @@ async function resolveOfficeLocationForCompany(
   return location;
 }
 
+async function resolveTeamForDepartment({
+  companyId,
+  departmentName,
+  teamName,
+}: {
+  companyId: string | mongoose.Types.ObjectId;
+  departmentName: string;
+  teamName: string;
+}) {
+  const normalizedTeam = normalizeText(teamName);
+  if (!normalizedTeam) {
+    return "";
+  }
+
+  const normalizedDepartment = normalizeText(departmentName);
+  if (!normalizedDepartment) {
+    throw generateError("Select a department before assigning a team", 400);
+  }
+
+  const department = await Department.findOne({
+    company: new mongoose.Types.ObjectId(String(companyId)),
+    departmentName: { $regex: new RegExp(`^${escapeRegex(normalizedDepartment)}$`, "i") },
+    deletedAt: null,
+  }).lean();
+
+  if (!department) {
+    throw generateError(`Department "${normalizedDepartment}" does not exist for this company`, 400);
+  }
+
+  const team = (Array.isArray((department as any).teams) ? (department as any).teams : []).find(
+    (item: any) =>
+      item?.isActive !== false &&
+      normalizeText(item?.name).toLowerCase() === normalizedTeam.toLowerCase()
+  );
+
+  if (!team) {
+    throw generateError(`Team "${normalizedTeam}" does not exist in ${normalizedDepartment}`, 400);
+  }
+
+  return normalizeText(team.name);
+}
+
 function serializeOfficeLocation(value: any) {
   if (!value || typeof value !== "object" || !("_id" in value)) {
     return null;
@@ -1140,6 +1190,7 @@ function serializeUser(user: any) {
     city: user?.city || "",
     state: user?.state || "",
     department: user?.department || "",
+    team: user?.team || "",
     officeLocationId: officeLocationId || "",
     officeLocation,
     officeLocationName: officeLocation?.name || "",
@@ -1319,6 +1370,7 @@ async function saveManagedUser({
     throw generateError("Enter a password or send a setup invite", 400);
   }
   const payloadIncludesDepartment = Object.prototype.hasOwnProperty.call(payload || {}, "department");
+  const payloadIncludesTeam = Object.prototype.hasOwnProperty.call(payload || {}, "team");
   const payloadIncludesOfficeLocation =
     Object.prototype.hasOwnProperty.call(payload || {}, "officeLocationId") ||
     Object.prototype.hasOwnProperty.call(payload || {}, "officeLocation");
@@ -1337,6 +1389,12 @@ async function saveManagedUser({
       : payloadIncludesDepartment
         ? normalizeText(payload?.department)
         : normalizeText(user?.department);
+  const previousDepartment = normalizeText(user?.department);
+  const requestedTeam = payloadIncludesTeam
+    ? normalizeText(payload?.team)
+    : resolvedDepartment === previousDepartment
+      ? normalizeText(user?.team)
+      : "";
   const resolvedOfficeLocation = payloadIncludesOfficeLocation
     ? await resolveOfficeLocationForCompany(
         payload?.officeLocationId ?? payload?.officeLocation,
@@ -1371,6 +1429,14 @@ async function saveManagedUser({
       );
     }
   }
+
+  const resolvedTeam = requestedTeam
+    ? await resolveTeamForDepartment({
+        companyId: company._id,
+        departmentName: resolvedDepartment,
+        teamName: requestedTeam,
+      })
+    : "";
 
   if (isCreate) {
     if (role === "departmenthead") {
@@ -1425,6 +1491,7 @@ async function saveManagedUser({
   }
   user.title = normalizeText(payload?.title || user.title);
   user.department = resolvedDepartment;
+  user.team = resolvedTeam;
   if (payloadIncludesOfficeLocation) {
     user.officeLocation = resolvedOfficeLocation?._id || undefined;
   }
@@ -1547,6 +1614,7 @@ async function ensureManagerHierarchyUsers({
         state: payload?.state,
         officeLocationId: payload?.officeLocationId || payload?.officeLocation,
         department: actor.role === "departmenthead" ? actor.department : payload?.department,
+        team: payload?.team,
         managers: higherManagers,
       },
       actor,
@@ -1680,6 +1748,7 @@ async function parseBulkWorkbook(
     "department (optional)",
     "branch (optional)"
   );
+  const teamColumn = resolveHeader("team", "team (optional)");
   const cityColumn = resolveHeader("city");
   const stateColumn = resolveHeader("state");
   const designationColumn = resolveHeader("designation");
@@ -1768,6 +1837,7 @@ async function parseBulkWorkbook(
     const email = normalizeEmail(readCell(emailColumn));
     const mobileNumber = normalizeText(readCell(mobileNumberColumn));
     const department = normalizeText(readCell(departmentColumn));
+    const team = normalizeText(readCell(teamColumn));
     const city = normalizeText(readCell(cityColumn));
     const state = normalizeText(readCell(stateColumn));
     const designation = normalizeText(readCell(designationColumn));
@@ -1794,6 +1864,7 @@ async function parseBulkWorkbook(
       Boolean(email) ||
       Boolean(mobileNumber) ||
       Boolean(department) ||
+      Boolean(team) ||
       Boolean(city) ||
       Boolean(state) ||
       Boolean(designation) ||
@@ -1865,6 +1936,7 @@ async function parseBulkWorkbook(
         email,
         mobileNumber,
         department,
+        team,
         city,
         state,
         designation,
@@ -1908,6 +1980,27 @@ async function validateBulkRow(row: any) {
     const companyDepartments = Array.isArray(existingCompany.departments) ? existingCompany.departments : [];
     if (!companyDepartments.includes(row.payload.department)) {
       errors.push(`Department "${row.payload.department}" does not exist for this company`);
+    }
+  }
+
+  if (row.payload.team && existingCompany) {
+    if (!row.payload.department) {
+      errors.push("Department is required when team is provided");
+    } else {
+      const department = await Department.findOne({
+        company: existingCompany._id,
+        departmentName: { $regex: new RegExp(`^${escapeRegex(row.payload.department)}$`, "i") },
+        deletedAt: null,
+      }).lean();
+      const hasTeam = (Array.isArray((department as any)?.teams) ? (department as any).teams : []).some(
+        (team: any) =>
+          team?.isActive !== false &&
+          normalizeText(team?.name).toLowerCase() === normalizeText(row.payload.team).toLowerCase()
+      );
+
+      if (!hasTeam) {
+        errors.push(`Team "${row.payload.team}" does not exist in ${row.payload.department}`);
+      }
     }
   }
 
@@ -2001,6 +2094,7 @@ async function buildBulkPreview(rows: any[]) {
       email: row.payload.email,
       code: row.payload.code,
       department: row.payload.department,
+      team: row.payload.team,
       city: row.payload.city,
       state: row.payload.state,
       role: row.payload.role,
@@ -2030,6 +2124,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const requestedRoleText = normalizeText(req.query.role);
     const requestedRole = requestedRoleText ? normalizeRole(requestedRoleText) : "";
     const departmentFilter = normalizeText(req.query.department);
+    const teamFilter = normalizeText(req.query.team);
     const officeLocationId = normalizeText(req.query.officeLocationId || req.query.locationId);
     const companyId =
       requester.role === "superadmin"
@@ -2160,6 +2255,12 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     if (departmentFilter) {
       matchClauses.push({
         department: { $regex: new RegExp(`^${escapeRegex(departmentFilter)}$`, "i") },
+      });
+    }
+
+    if (teamFilter) {
+      matchClauses.push({
+        team: { $regex: new RegExp(`^${escapeRegex(teamFilter)}$`, "i") },
       });
     }
 
