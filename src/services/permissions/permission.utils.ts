@@ -4,6 +4,7 @@ export const PERMISSION_KEYS = {
   VIEW_DASHBOARD: "view_dashboard",
   VIEW_USERS: "view_users",
   CREATE_USERS: "create_users",
+  CREATE_HR_USERS: "create_hr_users",
   CREATE_MANAGERS: "create_managers",
   CREATE_DEPARTMENT_HEADS: "create_department_heads",
   EDIT_USERS: "edit_users",
@@ -52,6 +53,12 @@ const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
     key: PERMISSION_KEYS.CREATE_USERS,
     label: "Create Users",
     description: "Create employee accounts.",
+    category: "Users",
+  },
+  {
+    key: PERMISSION_KEYS.CREATE_HR_USERS,
+    label: "Create HR Users",
+    description: "Create HR Admin and scoped HR accounts.",
     category: "Users",
   },
   {
@@ -174,7 +181,7 @@ const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
 export const PERMISSION_CATALOG = PERMISSION_DEFINITIONS.filter((permission) => !permission.systemOnly);
 export const ALL_PERMISSION_KEYS = Object.values(PERMISSION_KEYS);
 
-export const CONFIGURABLE_PERMISSION_ROLES = ["admin", "departmenthead"] as const;
+export const CONFIGURABLE_PERMISSION_ROLES = ["admin", "hradmin", "hr", "departmenthead"] as const;
 
 const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, PermissionDefinition>>(
   (acc, permission) => {
@@ -188,6 +195,7 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_DASHBOARD,
   PERMISSION_KEYS.VIEW_USERS,
   PERMISSION_KEYS.CREATE_USERS,
+  PERMISSION_KEYS.CREATE_HR_USERS,
   PERMISSION_KEYS.CREATE_MANAGERS,
   PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS,
   PERMISSION_KEYS.EDIT_USERS,
@@ -205,6 +213,35 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.MANAGE_BATCHES,
   PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
   PERMISSION_KEYS.COMPANY_SETTINGS,
+  PERMISSION_KEYS.VIEW_PROFILE,
+];
+
+const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_DASHBOARD,
+  PERMISSION_KEYS.VIEW_USERS,
+  PERMISSION_KEYS.CREATE_USERS,
+  PERMISSION_KEYS.CREATE_HR_USERS,
+  PERMISSION_KEYS.CREATE_MANAGERS,
+  PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS,
+  PERMISSION_KEYS.EDIT_USERS,
+  PERMISSION_KEYS.ASSIGN_MANAGERS,
+  PERMISSION_KEYS.VIEW_DEPARTMENTS,
+  PERMISSION_KEYS.VIEW_LOCATIONS,
+  PERMISSION_KEYS.VIEW_BATCHES,
+  PERMISSION_KEYS.MANAGE_BATCHES,
+  PERMISSION_KEYS.COMPANY_SETTINGS,
+  PERMISSION_KEYS.VIEW_PROFILE,
+];
+
+const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_DASHBOARD,
+  PERMISSION_KEYS.VIEW_USERS,
+  PERMISSION_KEYS.CREATE_USERS,
+  PERMISSION_KEYS.CREATE_MANAGERS,
+  PERMISSION_KEYS.EDIT_USERS,
+  PERMISSION_KEYS.ASSIGN_MANAGERS,
+  PERMISSION_KEYS.VIEW_DEPARTMENTS,
+  PERMISSION_KEYS.VIEW_LOCATIONS,
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
 
@@ -231,12 +268,15 @@ const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
   superadmin: ALL_PERMISSION_KEYS,
   admin: ADMIN_ALLOWED_PERMISSION_KEYS,
+  hradmin: HR_ADMIN_ALLOWED_PERMISSION_KEYS,
+  hr: HR_ALLOWED_PERMISSION_KEYS,
   departmenthead: DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS,
   default: [PERMISSION_KEYS.VIEW_PROFILE],
 };
 
 const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
   [PERMISSION_KEYS.CREATE_USERS]: [PERMISSION_KEYS.VIEW_USERS],
+  [PERMISSION_KEYS.CREATE_HR_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_MANAGERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.EDIT_USERS]: [PERMISSION_KEYS.VIEW_USERS],
@@ -265,7 +305,10 @@ function normalizeRole(value: unknown) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/^department[-\s]?head$/i, "departmenthead");
+    .replace(/^department[-\s]?head$/i, "departmenthead")
+    .replace(/^head[-\s]?hr$/i, "hradmin")
+    .replace(/^hr[-\s]?admin$/i, "hradmin")
+    .replace(/^hr[-\s]?executive$/i, "hr");
 }
 
 function buildEmptyPermissionRecord() {
@@ -286,6 +329,14 @@ function getRoleLabel(roleInput: unknown) {
   const role = normalizeRole(roleInput);
   if (role === "departmenthead") {
     return "Department Head";
+  }
+
+  if (role === "hradmin") {
+    return "HR Admin";
+  }
+
+  if (role === "hr") {
+    return "HR";
   }
 
   if (role === "superadmin") {
@@ -322,6 +373,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
       PERMISSION_KEYS.CREATE_USERS,
+      PERMISSION_KEYS.CREATE_HR_USERS,
       PERMISSION_KEYS.CREATE_MANAGERS,
       PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS,
       PERMISSION_KEYS.EDIT_USERS,
@@ -339,6 +391,39 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.MANAGE_BATCHES,
       PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
       PERMISSION_KEYS.COMPANY_SETTINGS,
+      PERMISSION_KEYS.VIEW_PROFILE,
+    ]);
+  }
+
+  if (role === "hradmin") {
+    return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_DASHBOARD,
+      PERMISSION_KEYS.VIEW_USERS,
+      PERMISSION_KEYS.CREATE_USERS,
+      PERMISSION_KEYS.CREATE_HR_USERS,
+      PERMISSION_KEYS.CREATE_MANAGERS,
+      PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS,
+      PERMISSION_KEYS.EDIT_USERS,
+      PERMISSION_KEYS.ASSIGN_MANAGERS,
+      PERMISSION_KEYS.VIEW_DEPARTMENTS,
+      PERMISSION_KEYS.VIEW_LOCATIONS,
+      PERMISSION_KEYS.VIEW_BATCHES,
+      PERMISSION_KEYS.MANAGE_BATCHES,
+      PERMISSION_KEYS.COMPANY_SETTINGS,
+      PERMISSION_KEYS.VIEW_PROFILE,
+    ]);
+  }
+
+  if (role === "hr") {
+    return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_DASHBOARD,
+      PERMISSION_KEYS.VIEW_USERS,
+      PERMISSION_KEYS.CREATE_USERS,
+      PERMISSION_KEYS.CREATE_MANAGERS,
+      PERMISSION_KEYS.EDIT_USERS,
+      PERMISSION_KEYS.ASSIGN_MANAGERS,
+      PERMISSION_KEYS.VIEW_DEPARTMENTS,
+      PERMISSION_KEYS.VIEW_LOCATIONS,
       PERMISSION_KEYS.VIEW_PROFILE,
     ]);
   }
@@ -446,9 +531,9 @@ export function validatePermissionRecordForRole(options: {
   const requestedPermissions = buildCompletePermissionRecord(options.permissions);
   const allowedKeys = new Set(getAllowedPermissionKeysForRole(role));
 
-  if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-    errors.push(`${getRoleLabel(role)} permissions cannot be configured here.`);
-  }
+    if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
+      errors.push(`${getRoleLabel(role)} permissions cannot be configured here.`);
+    }
 
   for (const permissionKey of ALL_PERMISSION_KEYS) {
     if (!requestedPermissions[permissionKey]) {
@@ -626,6 +711,8 @@ export function ensurePermission(user: any, permissionKey: string, message?: str
 export function getPermissionRoleOptions() {
   return [
     { value: "admin", label: "Admin" },
+    { value: "hradmin", label: "HR Admin" },
+    { value: "hr", label: "HR" },
     { value: "departmenthead", label: "Department Head" },
   ];
 }

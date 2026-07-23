@@ -41,7 +41,10 @@ const getRequesterRole = (req: any) =>
   )
     .trim()
     .toLowerCase()
-    .replace(/^department[-\s]?head$/i, "departmenthead");
+    .replace(/^department[-\s]?head$/i, "departmenthead")
+    .replace(/^head[-\s]?hr$/i, "hradmin")
+    .replace(/^hr[-\s]?admin$/i, "hradmin")
+    .replace(/^hr[-\s]?executive$/i, "hr");
 
 const ensureDepartmentMutationAllowed = (req: any) => {
   const role = getRequesterRole(req);
@@ -52,10 +55,17 @@ const ensureDepartmentMutationAllowed = (req: any) => {
 
 const normalizeText = (value: unknown) => String(value || "").trim();
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const normalizeRole = (value: unknown) =>
   normalizeText(value)
     .toLowerCase()
-    .replace(/^department[-\s]?head$/i, "departmenthead");
+    .replace(/^department[-\s]?head$/i, "departmenthead")
+    .replace(/^head[-\s]?hr$/i, "hradmin")
+    .replace(/^hr[-\s]?admin$/i, "hradmin")
+    .replace(/^hr[-\s]?executive$/i, "hr");
 
 const isManagerRole = (role: unknown) => /^l\d+[-\s]?manager$/i.test(normalizeRole(role));
 
@@ -176,6 +186,32 @@ const findDepartmentForMutation = async (req: any, id: string) => {
 
 const getDepartmentTeams = (department: any) =>
   Array.isArray(department?.teams) ? department.teams : [];
+
+const normalizeScopeList = (value: any) => {
+  const source = Array.isArray(value)
+    ? value
+    : value
+      ? [value]
+      : [];
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  source.forEach((item: any) => {
+    const normalized = normalizeText(item);
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    output.push(normalized);
+  });
+
+  return output;
+};
+
+const getHrScopeDepartments = (req: any) =>
+  normalizeScopeList((req.bodyData || req.user)?.hrScope?.departments);
 
 const findTeamById = (department: any, teamId: string) =>
   getDepartmentTeams(department).find((team: any) => String(team?._id || "") === String(teamId || ""));
@@ -682,6 +718,12 @@ export const getDepartmentsService = async (
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
 
+    ensurePermission(
+      req.bodyData || req.user,
+      PERMISSION_KEYS.VIEW_DEPARTMENTS,
+      "You do not have permission to view departments"
+    );
+
     if (!company) {
       return res.status(200).send({
         status: "success",
@@ -714,8 +756,8 @@ export const getDepartmentsService = async (
         company,
         deletedAt: null,
         $or: [
-          { departmentName: { $regex: `^${actorDepartment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } },
-          { code: { $regex: `^${actorDepartment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } },
+          { departmentName: { $regex: `^${escapeRegex(actorDepartment)}$`, $options: "i" } },
+          { code: { $regex: `^${escapeRegex(actorDepartment)}$`, $options: "i" } },
         ],
       })
         .populate("departmentHead", "name email username role userType department")
@@ -732,6 +774,52 @@ export const getDepartmentsService = async (
           page,
           limit,
           totalPages: enrichedData.length ? 1 : 0,
+        },
+      });
+    }
+
+    if (role === "hr") {
+      const scopedDepartments = getHrScopeDepartments(req);
+
+      if (scopedDepartments.length === 0) {
+        return res.status(200).send({
+          status: "success",
+          data: [],
+          pagination: {
+            total: 0,
+            page,
+            limit,
+            totalPages: 0,
+          },
+        });
+      }
+
+      const scopedDepartmentRegexes = scopedDepartments.map(
+        (department) => new RegExp(`^${escapeRegex(department)}$`, "i")
+      );
+      const match = {
+        company,
+        deletedAt: null,
+        departmentName: { $in: scopedDepartmentRegexes },
+      };
+      const [data, total] = await Promise.all([
+        Department.find(match)
+          .populate("departmentHead", "name email username role userType department")
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .sort({ createdAt: -1 }),
+        Department.countDocuments(match),
+      ]);
+      const enrichedData = await enrichDepartmentsWithStats(company, data);
+
+      return res.status(200).send({
+        status: "success",
+        data: enrichedData,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
         },
       });
     }

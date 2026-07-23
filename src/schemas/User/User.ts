@@ -51,6 +51,11 @@ export interface UserInterface extends Document {
   department?: string;
   team?: string;
   officeLocation?: Schema.Types.ObjectId;
+  hrScope?: {
+    departments?: string[];
+    teams?: string[];
+    officeLocations?: Schema.Types.ObjectId[];
+  };
 }
 
 const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
@@ -123,6 +128,20 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   },
   department: { type: String, trim: true },
   team: { type: String, trim: true },
+  hrScope: {
+    departments: {
+      type: [{ type: String, trim: true }],
+      default: [],
+    },
+    teams: {
+      type: [{ type: String, trim: true }],
+      default: [],
+    },
+    officeLocations: {
+      type: [{ type: Schema.Types.ObjectId, ref: "OfficeLocation" }],
+      default: [],
+    },
+  },
   officeLocation: {
     type: Schema.Types.ObjectId,
     ref: "OfficeLocation",

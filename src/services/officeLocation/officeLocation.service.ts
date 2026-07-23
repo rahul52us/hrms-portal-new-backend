@@ -26,9 +26,39 @@ const getRequesterRole = (req: any) =>
   )
     .trim()
     .toLowerCase()
-    .replace(/^department[-\s]?head$/i, "departmenthead");
+    .replace(/^department[-\s]?head$/i, "departmenthead")
+    .replace(/^head[-\s]?hr$/i, "hradmin")
+    .replace(/^hr[-\s]?admin$/i, "hradmin")
+    .replace(/^hr[-\s]?executive$/i, "hr");
 
 const getActor = (req: any) => req.bodyData || req.user;
+
+const normalizeObjectIdList = (value: any) => {
+  const source = Array.isArray(value)
+    ? value
+    : value
+      ? [value]
+      : [];
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  source.forEach((item: any) => {
+    const normalized = String(item?._id || item || "").trim();
+    if (!normalized || seen.has(normalized) || !mongoose.Types.ObjectId.isValid(normalized)) {
+      return;
+    }
+
+    seen.add(normalized);
+    output.push(normalized);
+  });
+
+  return output;
+};
+
+const getActorHrScopeLocations = (req: any) => {
+  const scope = (getActor(req) || {})?.hrScope || {};
+  return normalizeObjectIdList(scope.officeLocations || scope.officeLocationIds || scope.locations || scope.locationIds);
+};
 
 const getScopedCompanyId = (req: any) => {
   const role = getRequesterRole(req);
@@ -43,8 +73,8 @@ const getScopedCompanyId = (req: any) => {
 
 const ensureLocationViewAllowed = (req: any) => {
   const role = getRequesterRole(req);
-  if (!["superadmin", "admin", "departmenthead"].includes(role)) {
-    throw generateError("Only superadmin, admin, or department head can view locations", 403);
+  if (!["superadmin", "admin", "departmenthead", "hradmin", "hr"].includes(role)) {
+    throw generateError("Only superadmin, admin, department head, or HR can view locations", 403);
   }
 
   ensurePermission(getActor(req), PERMISSION_KEYS.VIEW_LOCATIONS, "You do not have permission to view locations");
@@ -300,6 +330,52 @@ export const getOfficeLocationsService = async (
       actionLabel: "view locations for this company",
       allowSuperadminWithoutCompany: false,
     });
+
+    if (getRequesterRole(req) === "hr") {
+      const scopedLocationIds = getActorHrScopeLocations(req);
+
+      if (scopedLocationIds.length > 0) {
+        const locationIds = scopedLocationIds.map((locationId) => new mongoose.Types.ObjectId(locationId));
+        const match: any = {
+          company: new mongoose.Types.ObjectId(company),
+          deletedAt: null,
+          _id: { $in: locationIds },
+        };
+
+        if (search) {
+          const searchRegex = new RegExp(escapeRegex(search), "i");
+          match.$or = [
+            { name: searchRegex },
+            { code: searchRegex },
+            { address: searchRegex },
+            { city: searchRegex },
+            { state: searchRegex },
+            { country: searchRegex },
+            { pinCode: searchRegex },
+          ];
+        }
+
+        const skip = (page - 1) * limit;
+        const [locations, total] = await Promise.all([
+          OfficeLocation.find(match)
+            .skip(skip)
+            .limit(limit)
+            .sort({ createdAt: -1 }),
+          OfficeLocation.countDocuments(match),
+        ]);
+
+        return res.status(200).send({
+          status: "success",
+          data: locations,
+          pagination: {
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+          },
+        });
+      }
+    }
 
     const data = await get_office_locations_repo(company, page, limit, search);
 

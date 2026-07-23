@@ -59,6 +59,14 @@ function normalizeRole(value: unknown) {
     return "departmenthead";
   }
 
+  if (/^head[-\s]?hr$/i.test(normalized) || /^hr[-\s]?admin$/i.test(normalized)) {
+    return "hradmin";
+  }
+
+  if (/^hr[-\s]?executive$/i.test(normalized)) {
+    return "hr";
+  }
+
   const managerMatch = normalized.match(/^l\s*(\d+)\s*[-\s]?\s*manager$/i);
   if (managerMatch) {
     return `l${managerMatch[1]}-manager`;
@@ -1083,6 +1091,219 @@ async function resolveTeamForDepartment({
   return normalizeText(team.name);
 }
 
+function normalizeStringArray(value: any) {
+  const source = Array.isArray(value)
+    ? value
+    : value === undefined || value === null || value === ""
+      ? []
+      : [value];
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  source.forEach((item: any) => {
+    const normalized = normalizeText(item);
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    output.push(normalized);
+  });
+
+  return output;
+}
+
+function normalizeObjectIdArray(value: any) {
+  const source = Array.isArray(value)
+    ? value
+    : value === undefined || value === null || value === ""
+      ? []
+      : [value];
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  source.forEach((item: any) => {
+    const normalized = normalizeObjectIdLike(item);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+
+    seen.add(normalized);
+    output.push(normalized);
+  });
+
+  return output;
+}
+
+function getHrScopePayload(value: any = {}) {
+  return {
+    departments: normalizeStringArray(value.departments || value.departmentNames || value.department),
+    teams: normalizeStringArray(value.teams || value.teamNames || value.team),
+    officeLocations: normalizeObjectIdArray(
+      value.officeLocations ||
+        value.officeLocationIds ||
+        value.locations ||
+        value.locationIds ||
+        value.officeLocation
+    ),
+  };
+}
+
+function serializeHrScope(value: any = {}) {
+  const officeLocations = normalizeObjectIdArray(value.officeLocations || value.officeLocationIds);
+  return {
+    departments: normalizeStringArray(value.departments),
+    teams: normalizeStringArray(value.teams),
+    officeLocations,
+    officeLocationIds: officeLocations,
+  };
+}
+
+async function resolveHrScopeForCompany(rawScope: any, company: any) {
+  const scope = getHrScopePayload(rawScope);
+  const companyId = String(company?._id || company || "");
+
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw generateError("Company is required for HR scope", 400);
+  }
+
+  const companyDepartments = Array.isArray(company?.departments) ? company.departments : [];
+  const departmentSet = new Map(
+    companyDepartments.map((department: any) => [
+      normalizeText(department).toLowerCase(),
+      normalizeText(department),
+    ])
+  );
+
+  for (const department of scope.departments) {
+    if (!departmentSet.has(department.toLowerCase())) {
+      throw generateError(`Department "${department}" does not exist for this company`, 400);
+    }
+  }
+
+  const resolvedDepartments = scope.departments.map(
+    (department) => departmentSet.get(department.toLowerCase()) || department
+  );
+
+  if (scope.officeLocations.length > 0) {
+    const invalidLocation = scope.officeLocations.find(
+      (locationId) => !mongoose.Types.ObjectId.isValid(locationId)
+    );
+    if (invalidLocation) {
+      throw generateError("Invalid HR scope office location id", 400);
+    }
+
+    const locationCount = await OfficeLocation.countDocuments({
+      _id: { $in: scope.officeLocations.map((locationId) => new mongoose.Types.ObjectId(locationId)) },
+      company: new mongoose.Types.ObjectId(companyId),
+      deletedAt: null,
+      is_active: { $ne: false },
+    });
+
+    if (locationCount !== scope.officeLocations.length) {
+      throw generateError("One or more HR scope office locations are invalid for this company", 400);
+    }
+  }
+
+  if (scope.teams.length > 0) {
+    const departmentQuery: any = {
+      company: new mongoose.Types.ObjectId(companyId),
+      deletedAt: null,
+    };
+
+    if (resolvedDepartments.length > 0) {
+      departmentQuery.departmentName = { $in: resolvedDepartments };
+    }
+
+    const departments = await Department.find(departmentQuery).lean();
+    const validTeams = new Set<string>();
+    departments.forEach((department: any) => {
+      (Array.isArray(department?.teams) ? department.teams : []).forEach((team: any) => {
+        if (team?.isActive !== false && normalizeText(team?.name)) {
+          validTeams.add(normalizeText(team.name).toLowerCase());
+        }
+      });
+    });
+
+    for (const team of scope.teams) {
+      if (!validTeams.has(team.toLowerCase())) {
+        throw generateError(`Team "${team}" does not exist in the selected HR scope departments`, 400);
+      }
+    }
+  }
+
+  return {
+    departments: resolvedDepartments,
+    teams: scope.teams,
+    officeLocations: scope.officeLocations.map((locationId) => new mongoose.Types.ObjectId(locationId)),
+  };
+}
+
+function exactScopeRegex(value: string) {
+  return new RegExp(`^${escapeRegex(value)}$`, "i");
+}
+
+function buildHrScopeClauses(actor: any) {
+  const scope = serializeHrScope(actor?.hrScope);
+  const clauses: any[] = [];
+
+  if (scope.departments.length === 0) {
+    clauses.push({ role: "__hr_scope_not_configured__" });
+    return clauses;
+  }
+
+  clauses.push({
+    department: { $in: scope.departments.map(exactScopeRegex) },
+  });
+
+  if (scope.teams.length > 0) {
+    clauses.push({
+      team: { $in: scope.teams.map(exactScopeRegex) },
+    });
+  }
+
+  if (scope.officeLocations.length > 0) {
+    clauses.push({
+      officeLocation: {
+        $in: scope.officeLocations.map((locationId) => new mongoose.Types.ObjectId(locationId)),
+      },
+    });
+  }
+
+  return clauses;
+}
+
+function assertWithinHrScope(actor: any, target: any, actionLabel: string) {
+  if (actor?.role !== "hr") {
+    return;
+  }
+
+  const scope = serializeHrScope(actor?.hrScope);
+  if (scope.departments.length === 0) {
+    throw generateError("HR department scope is not configured", 403);
+  }
+
+  const department = normalizeText(target?.department);
+  const team = normalizeText(target?.team);
+  const officeLocation = normalizeObjectIdLike(target?.officeLocation || target?.officeLocationId);
+
+  if (!department || !scope.departments.some((item) => item.toLowerCase() === department.toLowerCase())) {
+    throw generateError(`You can only ${actionLabel} users in your assigned HR departments`, 403);
+  }
+
+  if (
+    scope.teams.length > 0 &&
+    (!team || !scope.teams.some((item) => item.toLowerCase() === team.toLowerCase()))
+  ) {
+    throw generateError(`You can only ${actionLabel} users in your assigned HR teams`, 403);
+  }
+
+  if (scope.officeLocations.length > 0 && (!officeLocation || !scope.officeLocations.includes(officeLocation))) {
+    throw generateError(`You can only ${actionLabel} users in your assigned HR locations`, 403);
+  }
+}
+
 function serializeOfficeLocation(value: any) {
   if (!value || typeof value !== "object" || !("_id" in value)) {
     return null;
@@ -1191,6 +1412,7 @@ function serializeUser(user: any) {
     state: user?.state || "",
     department: user?.department || "",
     team: user?.team || "",
+    hrScope: serializeHrScope(user?.hrScope),
     officeLocationId: officeLocationId || "",
     officeLocation,
     officeLocationName: officeLocation?.name || "",
@@ -1261,6 +1483,7 @@ async function saveManagedUser({
     companyId?: string;
     userId?: string;
     department?: string;
+    hrScope?: any;
     permissions?: Record<string, boolean>;
     permissionOverrides?: Record<string, boolean>;
     effectivePermissions?: Record<string, boolean>;
@@ -1274,6 +1497,7 @@ async function saveManagedUser({
   const mobileNumber = normalizeText(payload?.mobileNumber || payload?.phoneNumber);
   const designation = normalizeText(payload?.designation);
   const role = normalizeRole(payload?.role);
+  const isHrAccountRole = role === "hradmin" || role === "hr";
   const password = normalizeText(payload?.password);
   const managersInput = parseManagersPayload(payload?.managers);
   const requestedManagerLevels = Math.max(
@@ -1351,9 +1575,23 @@ async function saveManagedUser({
   const roleLevel = parseManagerRoleLevel(role);
   if (
     actor.role === "departmenthead" &&
-    ["admin", "superadmin", "departmenthead"].includes(role)
+    ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(role)
   ) {
-    throw generateError("Department head can only manage users and managers", 403);
+    throw generateError("Department head can only manage employees and managers", 403);
+  }
+
+  if (
+    actor.role === "hr" &&
+    ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(role)
+  ) {
+    throw generateError("Scoped HR can only manage employees and managers", 403);
+  }
+
+  if (
+    actor.role === "hradmin" &&
+    ["admin", "superadmin", "hradmin"].includes(role)
+  ) {
+    throw generateError("HR Admin cannot create or update admin, superadmin, or another HR Admin role", 403);
   }
 
   if (roleLevel && roleLevel > companyManagerLevels) {
@@ -1366,6 +1604,23 @@ async function saveManagedUser({
 
   let user = existingUserId ? await User.findById(existingUserId) : null;
   const isCreate = !user;
+  const payloadIncludesHrScope = Object.prototype.hasOwnProperty.call(payload || {}, "hrScope");
+  const resolvedHrScope =
+    role === "hr"
+      ? await resolveHrScopeForCompany(
+          payloadIncludesHrScope ? payload?.hrScope : user?.hrScope || {},
+          company
+        )
+      : {
+          departments: [],
+          teams: [],
+          officeLocations: [],
+        };
+
+  if (role === "hr" && resolvedHrScope.departments.length === 0) {
+    throw generateError("At least one department is required for scoped HR", 400);
+  }
+
   if (isCreate && !password && !sendSetupEmail) {
     throw generateError("Enter a password or send a setup invite", 400);
   }
@@ -1384,19 +1639,25 @@ async function saveManagedUser({
     : user?.dateOfBirth;
   const normalizedGender = payloadIncludesGender ? normalizeGender(payload?.gender) : user?.gender;
   const resolvedDepartment =
-    actor.role === "departmenthead"
+    isHrAccountRole
+      ? ""
+      : actor.role === "departmenthead"
       ? normalizeText(actor.department)
       : payloadIncludesDepartment
         ? normalizeText(payload?.department)
         : normalizeText(user?.department);
   const previousDepartment = normalizeText(user?.department);
   const requestedTeam = payloadIncludesTeam
-    ? normalizeText(payload?.team)
+    ? isHrAccountRole
+      ? ""
+      : normalizeText(payload?.team)
     : resolvedDepartment === previousDepartment
       ? normalizeText(user?.team)
       : "";
   const resolvedOfficeLocation = payloadIncludesOfficeLocation
-    ? await resolveOfficeLocationForCompany(
+    ? isHrAccountRole
+      ? null
+      : await resolveOfficeLocationForCompany(
         payload?.officeLocationId ?? payload?.officeLocation,
         company._id
       )
@@ -1437,9 +1698,26 @@ async function saveManagedUser({
         teamName: requestedTeam,
       })
     : "";
+  const nextOfficeLocationId = payloadIncludesOfficeLocation
+    ? isHrAccountRole
+      ? undefined
+      : resolvedOfficeLocation?._id
+    : user?.officeLocation;
+
+  assertWithinHrScope(
+    actor,
+    {
+      department: resolvedDepartment,
+      team: resolvedTeam,
+      officeLocation: nextOfficeLocationId,
+    },
+    "manage"
+  );
 
   if (isCreate) {
-    if (role === "departmenthead") {
+    if (["hr", "hradmin"].includes(role)) {
+      ensurePermission(actor, PERMISSION_KEYS.CREATE_HR_USERS, "You do not have permission to create HR users");
+    } else if (role === "departmenthead") {
       ensurePermission(actor, PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS, "You do not have permission to create department heads");
     } else if (parseManagerRoleLevel(role)) {
       ensurePermission(actor, PERMISSION_KEYS.CREATE_MANAGERS, "You do not have permission to create managers");
@@ -1451,7 +1729,9 @@ async function saveManagedUser({
 
     const previousRole = normalizeRole(user?.role || user?.userType);
     if (role !== previousRole) {
-      if (role === "departmenthead") {
+      if (["hr", "hradmin"].includes(role)) {
+        ensurePermission(actor, PERMISSION_KEYS.CREATE_HR_USERS, "You do not have permission to assign HR roles");
+      } else if (role === "departmenthead") {
         ensurePermission(actor, PERMISSION_KEYS.CREATE_DEPARTMENT_HEADS, "You do not have permission to assign the department head role");
       } else if (parseManagerRoleLevel(role)) {
         ensurePermission(actor, PERMISSION_KEYS.CREATE_MANAGERS, "You do not have permission to assign manager roles");
@@ -1490,9 +1770,16 @@ async function saveManagedUser({
     user.gender = normalizedGender;
   }
   user.title = normalizeText(payload?.title || user.title);
-  user.department = resolvedDepartment;
-  user.team = resolvedTeam;
-  if (payloadIncludesOfficeLocation) {
+  user.department = isHrAccountRole ? "" : resolvedDepartment;
+  user.team = isHrAccountRole ? "" : resolvedTeam;
+  (user as any).hrScope = role === "hr" ? resolvedHrScope : {
+    departments: [],
+    teams: [],
+    officeLocations: [],
+  };
+  if (isHrAccountRole) {
+    user.officeLocation = undefined;
+  } else if (payloadIncludesOfficeLocation) {
     user.officeLocation = resolvedOfficeLocation?._id || undefined;
   }
   user.updatedAt = new Date();
@@ -1630,6 +1917,7 @@ function getRequesterContext(req: any) {
     userId: req?.userId ? String(req.userId) : undefined,
     companyId: req?.user?.company ? String(req.user.company) : undefined,
     department: normalizeText(req?.user?.department),
+    hrScope: serializeHrScope(req?.user?.hrScope || req?.bodyData?.hrScope || {}),
     permissions: req?.user?.permissions || req?.bodyData?.permissions || {},
     permissionOverrides: req?.user?.permissionOverrides || req?.bodyData?.permissionOverrides || {},
     effectivePermissions: req?.user?.effectivePermissions || req?.bodyData?.effectivePermissions || {},
@@ -1638,12 +1926,16 @@ function getRequesterContext(req: any) {
 
 function assertAdminAccess(req: any) {
   const requester = getRequesterContext(req);
-  if (!["admin", "superadmin", "departmenthead"].includes(requester.role)) {
-    throw generateError("Only admin, superadmin, or department head can manage users", 403);
+  if (!["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(requester.role)) {
+    throw generateError("Only admin, superadmin, department head, or HR can manage users", 403);
   }
 
   if (requester.role === "departmenthead" && !requester.department) {
     throw generateError("Department head is missing department access", 403);
+  }
+
+  if (requester.role === "hr" && requester.hrScope.departments.length === 0) {
+    throw generateError("HR department scope is missing", 403);
   }
 
   return requester;
@@ -1670,6 +1962,7 @@ export async function createCompanyAdminForCompanyCreation({
     userId?: string;
     companyId?: string;
     department?: string;
+    hrScope?: any;
     permissions?: Record<string, boolean>;
     permissionOverrides?: Record<string, boolean>;
     effectivePermissions?: Record<string, boolean>;
@@ -2203,8 +2496,11 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
 
     if (requester.role === "departmenthead" && requester.department) {
       baseClauses.push({ department: requester.department });
-      baseClauses.push({ role: { $nin: ["admin", "superadmin", "departmenthead"] } });
-    } else if (requester.role === "admin") {
+      baseClauses.push({ role: { $nin: ["admin", "superadmin", "departmenthead", "hradmin", "hr"] } });
+    } else if (requester.role === "hr") {
+      baseClauses.push({ role: { $nin: ["admin", "superadmin", "departmenthead", "hradmin", "hr"] } });
+      baseClauses.push(...buildHrScopeClauses(requester));
+    } else if (["admin", "hradmin"].includes(requester.role)) {
       baseClauses.push({ role: { $nin: ["admin", "superadmin"] } });
     }
 
@@ -2218,11 +2514,18 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     if (requester.role === "departmenthead" && requestedRole) {
       matchClauses.push({
         role:
-          ["admin", "superadmin", "departmenthead"].includes(requestedRole)
+          ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(requestedRole)
             ? "__no_matching_role__"
             : buildRoleMatch(requestedRole),
       });
-    } else if (requester.role === "admin" && requestedRole) {
+    } else if (requester.role === "hr" && requestedRole) {
+      matchClauses.push({
+        role:
+          ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(requestedRole)
+            ? "__no_matching_role__"
+            : buildRoleMatch(requestedRole),
+      });
+    } else if (["admin", "hradmin"].includes(requester.role) && requestedRole) {
       matchClauses.push({
         role:
           requestedRole !== "admin" && requestedRole !== "superadmin"
@@ -2337,7 +2640,7 @@ export async function downloadBulkUploadTemplateHandler(req: Request, res: Respo
     const requestedLevels = Math.max(1, Number(req.query.companyManagerLevels) || 0);
     const uploadRole = normalizeRole(req.query.uploadRole);
 
-    if (!uploadRole || ["admin", "superadmin", "departmenthead"].includes(uploadRole)) {
+    if (!uploadRole || ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(uploadRole)) {
       throw generateError("A valid upload role is required", 400);
     }
 
@@ -2482,6 +2785,23 @@ export async function updateManagedUserHandler(req: Request, res: Response) {
       throw generateError("You can only update users from your department", 403);
     }
 
+    const existingTargetRole = normalizeRole(existingUser.role || existingUser.userType);
+    if (
+      requester.role === "hr" &&
+      ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(existingTargetRole)
+    ) {
+      throw generateError("Scoped HR can only update employees and managers", 403);
+    }
+
+    if (
+      requester.role === "hradmin" &&
+      ["admin", "superadmin"].includes(existingTargetRole)
+    ) {
+      throw generateError("HR Admin cannot update admin or superadmin accounts", 403);
+    }
+
+    assertWithinHrScope(requester, existingUser, "update");
+
     await ensureCompanyManagementAccess({
       actor: requester,
       requestedCompanyId: String(existingUser.company || ""),
@@ -2544,6 +2864,20 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
       throw generateError("You can only delete users from your department scope", 403);
     }
 
+    if (
+      requester.role === "hr" &&
+      ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(targetRole)
+    ) {
+      throw generateError("Scoped HR can only delete employees and managers", 403);
+    }
+
+    if (
+      requester.role === "hradmin" &&
+      ["admin", "superadmin"].includes(targetRole)
+    ) {
+      throw generateError("HR Admin cannot delete admin or superadmin accounts", 403);
+    }
+
     const targetCompanyId = String(targetUser.company || "");
     if (
       requester.role !== "superadmin" &&
@@ -2559,6 +2893,8 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
     ) {
       throw generateError("You can only delete users from your department", 403);
     }
+
+    assertWithinHrScope(requester, targetUser, "delete");
 
     if (requester.role !== "superadmin") {
       await ensureCompanyManagementAccess({
@@ -2625,6 +2961,23 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
     ) {
       throw generateError("You can only update users from your department", 403);
     }
+
+    const targetRole = normalizeRole(targetUser.role || targetUser.userType);
+    if (
+      requester.role === "hr" &&
+      ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(targetRole)
+    ) {
+      throw generateError("Scoped HR can only update employee and manager status", 403);
+    }
+
+    if (
+      requester.role === "hradmin" &&
+      ["admin", "superadmin"].includes(targetRole)
+    ) {
+      throw generateError("HR Admin cannot update admin or superadmin status", 403);
+    }
+
+    assertWithinHrScope(requester, targetUser, "update");
 
     if (requester.role !== "superadmin") {
       await ensureCompanyManagementAccess({
@@ -2708,7 +3061,7 @@ export async function updateRolePermissionsHandler(req: Request, res: Response) 
     }
 
     if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-      throw generateError("Only admin and department head permissions can be configured", 400);
+      throw generateError("Only admin, HR Admin, HR, and department head permissions can be configured", 400);
     }
 
     const permissionValidation = validatePermissionRecordForRole({
