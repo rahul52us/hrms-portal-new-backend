@@ -1,6 +1,7 @@
 import express from "express";
 import authenticate from "../../modules/config/authenticate";
 import { getScopedDashboardSummaryService } from "../../services/dashboard/scopedDashboard.service";
+import { getHrDashboardSummaryService } from "../../services/dashboard/hrDashboard.service";
 import {
   getLearnerResultDetailService,
   getLearnerResultsService,
@@ -9,6 +10,7 @@ import {
 const dashboardRouting = express.Router();
 
 dashboardRouting.get("/summary", authenticate, getScopedDashboardSummaryService);
+dashboardRouting.get("/hr-summary", authenticate, getHrDashboardSummaryService);
 dashboardRouting.get("/learner-results", authenticate, getLearnerResultsService);
 dashboardRouting.get(
   "/learner-results/:enrollmentId",
