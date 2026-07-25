@@ -1,5 +1,7 @@
 import { v2 as cloudinary } from 'cloudinary';
 import dotenv from 'dotenv'
+import axios from "axios";
+import { v4 as uuidv4 } from "uuid";
 
 dotenv.config()
 cloudinary.config({
@@ -69,4 +71,68 @@ async function deleteFile(public_id: string): Promise<boolean> {
   }
 }
 
-export { uploadFile, deleteFile,uploadBase64 };
+type BunnyUploadInput = {
+  file?: string | Buffer;
+  filename?: string;
+  name?: string;
+  type?: string;
+  folder?: string;
+};
+
+function getBunnyConfig() {
+  const storageZone = process.env.BUNNY_STORAGE_ZONE;
+  const accessKey = process.env.BUNNY_STORAGE_ACCESS_KEY;
+  const baseUrl = process.env.BUNNY_STORAGE_BASE_URL || "https://storage.bunnycdn.com";
+
+  if (!storageZone || !accessKey) {
+    throw new Error("Bunny storage is not configured");
+  }
+
+  return { storageZone, accessKey, baseUrl };
+}
+
+function normalizeBase64Input(file: string | Buffer | undefined) {
+  if (!file) return null;
+  if (Buffer.isBuffer(file)) return file;
+  const input = String(file);
+  const base64 = input.includes("base64,") ? input.split("base64,").pop() || "" : input;
+  return Buffer.from(base64, "base64");
+}
+
+async function uploadToBunny(input: BunnyUploadInput): Promise<{ url: string; fileName: string; path: string }> {
+  const { storageZone, accessKey, baseUrl } = getBunnyConfig();
+  const buffer = normalizeBase64Input(input.file);
+
+  if (!buffer) {
+    throw new Error("No file data provided for Bunny upload");
+  }
+
+  const safeName = String(input.filename || input.name || `file-${uuidv4()}`)
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "");
+  const folder = String(input.folder || "employee-documents").replace(/^\/+|\/+$/g, "");
+  const filePath = `${folder}/${Date.now()}-${uuidv4()}-${safeName}`;
+  const uploadUrl = `${baseUrl.replace(/\/+$/, "")}/${storageZone}/${filePath}`;
+
+  await axios.put(uploadUrl, buffer, {
+    headers: {
+      AccessKey: accessKey,
+      "Content-Type": input.type || "application/octet-stream",
+    },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+  });
+
+  const publicBase = process.env.BUNNY_PUBLIC_BASE_URL;
+  const url = publicBase
+    ? `${publicBase.replace(/\/+$/, "")}/${filePath}`
+    : `https://${storageZone}.b-cdn.net/${filePath}`;
+
+  return {
+    url,
+    fileName: safeName,
+    path: filePath,
+  };
+}
+
+export { uploadFile, deleteFile,uploadBase64, uploadToBunny };

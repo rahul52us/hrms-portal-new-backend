@@ -10,6 +10,7 @@ import {
   updateFamilyDetails,
   updateWorkExperienceDetails,
   updateDocumentDetails,
+  getDocumentDetails,
   updateCompanyDetails,
   getManagerUsers,
   getManagerUsersCounts,
@@ -413,6 +414,30 @@ const updateDocumentService = async (
   }
 };
 
+const getDocumentService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = new mongoose.Types.ObjectId(req.params.id);
+    const { status, data } = await getDocumentDetails({ id });
+    if (status === "success") {
+      res.status(200).send({
+        status: "success",
+        data,
+      });
+    } else {
+      res.status(400).send({
+        status: "error",
+        data,
+      });
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
 const updateQualifcationService = async (
   req: any,
   res: Response,
@@ -738,6 +763,7 @@ export {
   updateBankDetialsService,
   updateWorkExperienceService,
   updateDocumentService,
+  getDocumentService,
   updatePermissionsService,
   updateCompanyDetailsService,
   updateQualifcationService,

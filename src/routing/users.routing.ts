@@ -20,6 +20,7 @@ import {
   getRoleCountOfCompanyService,
   getCompanyDetailsByIdService,
   updateQualifcationService,
+  getDocumentService,
   // UpdateSalaryStructureService,
   // getSalaryStructureService,
   getCompanyDetailsByUserIdService,
@@ -51,6 +52,7 @@ router.put('/familyDetails/:id',authenticate,updateFamilyDetailsService)
 router.put('/workExperience/:id',authenticate,updateWorkExperienceService)
 // router.put('/salaryStructure/:id',authenticate,UpdateSalaryStructureService)
 router.put('/updateDocuments/:id',authenticate,updateDocumentService)
+router.get('/updateDocuments/:id',authenticate,getDocumentService)
 router.put('/qualifications/:id',authenticate,updateQualifcationService)
 router.put('/permissions/:id',authenticate,updatePermissionsService)
 router.get('/users/roles',authenticate,getUserRoleUser)

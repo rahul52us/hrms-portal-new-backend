@@ -3,7 +3,7 @@ import BankDetails from "../../schemas/User/BankDetails";
 // import bcrypt from "bcrypt";
 import WorkExperience from "../../schemas/User/WorkExperience";
 import { generateError } from "../../config/Error/functions";
-import { deleteFile, uploadFile } from "../uploadDoc.repository";
+import { deleteFile, uploadFile, uploadToBunny } from "../uploadDoc.repository";
 import FamilyDetails from "../../schemas/User/FamilyDetails";
 import Documents from "../../schemas/User/Document";
 import { updateUserRoleService } from "../../services/auth/auth.service";
@@ -1096,67 +1096,108 @@ async function uploadDocument(originalDoc: any, data: any, fieldName: string) {
 
 async function updateDocumentDetails(data: any) {
   try {
-    const docum = await Documents.findOne({ user: data.id });
-    if (docum) {
-      const { documents } = data;
+    const { documents = [] } = data;
+    const docum =
+      (await Documents.findOne({ user: data.id })) ||
+      (await Documents.create({
+        user: data.id,
+        createdBy: data.createdBy || data.id,
+        documents: [],
+      }));
 
-      for (const file of data.deleteAttachments) {
-        await deleteFile(file);
+    const uploadedDocuments: any[] = [];
+
+    const extractUploadSource = (fileLike: any) => {
+      if (!fileLike) return null;
+      if (typeof fileLike === "string") {
+        return {
+          file: fileLike,
+          filename: "document",
+          type: "application/octet-stream",
+        };
       }
 
-      let attach_files: any = [];
-
-      for (const file of documents) {
-        try {
-          if (file.file && file.isAdd) {
-            let filename = `${data.id}_document_${file.file.filename}`;
-            const documentInfo = await uploadFile({ ...file.file, filename });
-            delete file.isAdd;
-            attach_files.push({
-              ...file,
-              file: {
-                url: documentInfo,
-                name: filename,
-                type: file.file.type,
-              },
-            });
-          } else {
-            if (file.file) {
-              delete file.isAdd;
-              attach_files.push({
-                ...file,
-              });
-            } else {
-              delete file.isAdd;
-              attach_files.push({
-                ...file,
-                file: {
-                  url: undefined,
-                  name: undefined,
-                  type: undefined,
-                },
-              });
-            }
-          }
-        } catch (err: any) {
-          console.error("Error uploading file:", err);
-        }
-      }
-
-      docum.documents = attach_files;
-      await docum.save();
       return {
-        statusCode: statusCode.success,
-        status: "success",
-        data: docum,
+        file:
+          fileLike.file ||
+          fileLike.buffer ||
+          fileLike.base64 ||
+          fileLike.data ||
+          null,
+        filename: fileLike.filename || fileLike.name || fileLike.originalName || "document",
+        type: fileLike.type || fileLike.mimetype || "application/octet-stream",
       };
-    } else {
+    };
+
+    for (const entry of documents) {
+      try {
+        const previousFile = entry?.file || {};
+        const uploadSource = extractUploadSource(previousFile);
+        let finalFile = previousFile;
+
+        if (entry?.isAdd && uploadSource?.file) {
+          const uploaded = await uploadToBunny({
+            file: uploadSource.file,
+            filename: uploadSource.filename || `${data.id}-document`,
+            type: uploadSource.type,
+            folder: `employee-documents/${data.id}`,
+          });
+
+          finalFile = {
+            name: uploaded.fileName,
+            url: uploaded.url,
+            type: uploadSource.type || "application/octet-stream",
+            path: uploaded.path,
+          };
+        }
+
+        uploadedDocuments.push({
+          ...entry,
+          file: finalFile?.url ? finalFile : previousFile?.url ? previousFile : undefined,
+          uploadedAt: entry?.uploadedAt || new Date(),
+        });
+      } catch (err: any) {
+        console.error("Error uploading employee document:", err?.message || err);
+      }
+    }
+
+    docum.documents = uploadedDocuments;
+    docum.updatedAt = new Date();
+    await docum.save();
+
+    return {
+      statusCode: statusCode.success,
+      status: "success",
+      data: docum,
+    };
+  } catch (err) {
+    return {
+      statusCode: statusCode.serverError,
+      status: "error",
+      data: err,
+    };
+  }
+}
+
+async function getDocumentDetails(data: any) {
+  try {
+    const docum = await Documents.findOne({ user: data.id });
+    if (!docum) {
       return {
         statusCode: statusCode.info,
-        status: "error",
-        data: "Documents do not exist",
+        status: "success",
+        data: {
+          user: data.id,
+          documents: [],
+        },
       };
     }
+
+    return {
+      statusCode: statusCode.success,
+      status: "success",
+      data: docum,
+    };
   } catch (err) {
     return {
       statusCode: statusCode.serverError,
@@ -2043,6 +2084,7 @@ export {
   updateQualificationDetails,
   updateWorkExperienceDetails,
   updateDocumentDetails,
+  getDocumentDetails,
   updateCompanyDetails,
   updatePermissions,
   getManagerUsersCounts,

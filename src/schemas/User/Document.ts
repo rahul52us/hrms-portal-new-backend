@@ -13,9 +13,9 @@ interface DocumentInfo {
 export interface DocumentInterface extends Document {
   user: mongoose.Schema.Types.ObjectId;
   createdBy: mongoose.Schema.Types.ObjectId;
-  documents: {
-    [key: string]: DocumentInfo;
-  };
+  documents: Array<{
+    [key: string]: any;
+  }>;
   deletedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
