@@ -22,11 +22,14 @@ import {
 import { baseURL } from "../../config/helper/urls";
 import {
   convertIdsToObjects,
-  createCatchError,
   hashBcrypt,
 } from "../../config/helper/function";
 import { statusCode } from "../../config/helper/statusCode";
 import { createToken } from "../../services/token/token.service";
+import {
+  ensurePermission,
+  PERMISSION_KEYS,
+} from "../../services/permissions/permission.utils";
 
 dotenv.config();
 const MeUser = async (req: any, res: Response): Promise<any> => {
@@ -366,11 +369,19 @@ const getUsersByCompany = async (
   next: NextFunction
 ) => {
   try {
-      const { searchValue, type, companyId, role } = req.query;
+      const {
+        searchValue,
+        type,
+        companyId,
+        role,
+        purpose,
+        excludeUserId,
+      } = req.query;
 
     try {
       const matchConditions: any = {};
       const requesterRole = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
+      const isReportingManagerSearch = String(purpose || "").toLowerCase() === "reporting-manager";
 
       if (searchValue) {
         matchConditions.$or = [
@@ -401,9 +412,97 @@ const getUsersByCompany = async (
 
       matchConditions.deletedAt = { $exists: false };
 
-      if (requesterRole === "admin" && !role) {
+      if (isReportingManagerSearch) {
+        ensurePermission(
+          req.bodyData,
+          PERMISSION_KEYS.ASSIGN_MANAGERS,
+          "You do not have permission to search reporting managers"
+        );
+
         matchConditions.role = { $nin: ["admin", "superadmin"] };
-      } else if (requesterRole === "admin" && ["admin", "superadmin"].includes(String(role).toLowerCase())) {
+        matchConditions.is_enabled = { $ne: false };
+
+        if (excludeUserId && mongoose.Types.ObjectId.isValid(String(excludeUserId))) {
+          const excludedUserObjectId = new mongoose.Types.ObjectId(String(excludeUserId));
+          const descendantIds =
+            effectiveCompanyId && mongoose.Types.ObjectId.isValid(effectiveCompanyId)
+              ? await User.distinct("_id", {
+                  company: new mongoose.Types.ObjectId(effectiveCompanyId),
+                  deletedAt: { $exists: false },
+                  $or: [
+                    { reportingManager: excludedUserObjectId },
+                    { "managerChain.manager": excludedUserObjectId },
+                    { assignedManagers: excludedUserObjectId },
+                  ],
+                })
+              : [];
+
+          matchConditions._id = {
+            $nin: [excludedUserObjectId, ...descendantIds],
+          };
+        }
+
+        if (requesterRole === "hr") {
+          const scope = req.bodyData?.hrScope || {};
+          const departments = Array.isArray(scope.departments)
+            ? scope.departments.map((item: any) => String(item || "").trim()).filter(Boolean)
+            : [];
+          const teams = Array.isArray(scope.teams)
+            ? scope.teams.map((item: any) => String(item || "").trim()).filter(Boolean)
+            : [];
+          const officeLocations = Array.isArray(scope.officeLocations)
+            ? scope.officeLocations
+                .map((item: any) => String(item?._id || item || "").trim())
+                .filter((item: string) => mongoose.Types.ObjectId.isValid(item))
+            : [];
+
+          if (departments.length === 0) {
+            throw generateError("HR department scope is not configured", 403);
+          }
+
+          matchConditions.department = {
+            $in: departments.map(
+              (department: string) =>
+                new RegExp(`^${department.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+            ),
+          };
+
+          if (teams.length > 0) {
+            matchConditions.team = {
+              $in: teams.map(
+                (team: string) =>
+                  new RegExp(`^${team.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+              ),
+            };
+          }
+
+          if (officeLocations.length > 0) {
+            matchConditions.officeLocation = {
+              $in: officeLocations.map(
+                (locationId: string) => new mongoose.Types.ObjectId(locationId)
+              ),
+            };
+          }
+        } else if (requesterRole === "departmenthead") {
+          const requesterDepartment = String(req.bodyData?.department || "").trim();
+          if (!requesterDepartment) {
+            throw generateError("Department head is missing department access", 403);
+          }
+
+          matchConditions.department = new RegExp(
+            `^${requesterDepartment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+            "i"
+          );
+        }
+      }
+
+      if (!isReportingManagerSearch && requesterRole === "admin" && !role) {
+        matchConditions.role = { $nin: ["admin", "superadmin"] };
+      } else if (
+        !isReportingManagerSearch &&
+        requesterRole === "admin" &&
+        ["admin", "superadmin"].includes(String(role).toLowerCase())
+      ) {
         matchConditions.role = { $nin: ["admin", "superadmin"] };
       }
 
@@ -447,6 +546,10 @@ const getUsersByCompany = async (
             role: 1,
             userType: 1,
             department: 1,
+            team: 1,
+            designation: 1,
+            is_active: 1,
+            is_enabled: 1,
             company: {
               _id: "$company._id",
               name: "$company.company_name",
@@ -468,7 +571,7 @@ const getUsersByCompany = async (
         status: "success",
       });
     } catch (err) {
-      return createCatchError(err);
+      throw err;
     }
   } catch (err) {
     next(err);

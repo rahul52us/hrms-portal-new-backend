@@ -301,7 +301,7 @@ export const getHrDashboardSummaryService = async (
 
     const [visibleUsers, departments, allLocations, scopedLocations] = await Promise.all([
       User.find(visibleMatch)
-        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth managers is_active is_enabled password setupToken createdAt")
+        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager managerChain managers is_active is_enabled password setupToken createdAt")
         .populate("officeLocation", "name code city state")
         .sort({ createdAt: -1 })
         .lean(),
@@ -330,7 +330,14 @@ export const getHrDashboardSummaryService = async (
         )
       : departments;
     const workforceUsers = visibleUsers.filter((user) => isWorkforceRole(getUserRole(user)));
-    const managerUsers = visibleUsers.filter((user) => isManagerRole(getUserRole(user)));
+    const reportingManagerIds = new Set(
+      workforceUsers
+        .map((user: any) => normalizeObjectId(user?.reportingManager))
+        .filter(Boolean)
+    );
+    const managerUsers = visibleUsers.filter((user) =>
+      reportingManagerIds.has(normalizeObjectId(user?._id)) || isManagerRole(getUserRole(user))
+    );
     const departmentHeadUsers = visibleUsers.filter((user) => getUserRole(user) === "departmenthead");
     const hrAdminUsers = visibleUsers.filter((user) => getUserRole(user) === "hradmin");
     const scopedHrUsers = visibleUsers.filter((user) => getUserRole(user) === "hr");
@@ -344,7 +351,9 @@ export const getHrDashboardSummaryService = async (
         return false;
       }
 
-      return !Array.isArray(user?.managers) || user.managers.length === 0;
+      return !normalizeObjectId(user?.reportingManager) &&
+        (!Array.isArray(user?.managerChain) || user.managerChain.length === 0) &&
+        (!Array.isArray(user?.managers) || user.managers.length === 0);
     });
     const missingLocationUsers = workforceUsers.filter((user) => !user?.officeLocation);
     const incompleteProfileUsers = workforceUsers.filter(
@@ -461,7 +470,9 @@ export const getHrDashboardSummaryService = async (
               : null;
             return location?.name || "Unassigned";
           }),
-          managerLevels: buildBreakdown(managerUsers, (user) => getUserRole(user).replace("-", " ")),
+          managerLevels: buildBreakdown(managerUsers, (user) =>
+            isManagerRole(getUserRole(user)) ? getUserRole(user).replace("-", " ") : "Direct manager"
+          ),
           statuses: buildBreakdown(workforceUsers, getStatus),
         },
         recentEmployees: workforceUsers.slice(0, 8).map(serializeUserLite),

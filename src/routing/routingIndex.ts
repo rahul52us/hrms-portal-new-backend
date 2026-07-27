@@ -18,6 +18,7 @@ import batchRouting from "./batch.routing";
 import departmentRouting from "./departments.routing";
 import officeLocationRouting from "./officeLocations.routing";
 import certificateRouting from "./certificate.routing";
+import organizationRouting from "./organization.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -26,6 +27,7 @@ const importRoutings = (app: any) => {
   app.use('/api/notifications',notificationRouting)
   app.use('/api/file',fileRouting)
   app.use("/api/admin/users", adminUsersRouting);
+  app.use("/api/admin/organization", organizationRouting);
   app.use('/api/dashboard',dashboardRouting)
   app.use("/api/company", companyOrganisation);
   app.use("/api/User", UserRouting);

@@ -48,14 +48,25 @@ function averageNullableNumbers(values: Array<number | null | undefined>) {
 
 async function getManagerUser(actorUserId: string) {
   const manager = await User.findById(actorUserId)
-    .select("_id name email username role assignedManagers managers")
+    .select("_id name email username role reportingManager managerChain assignedManagers managers")
     .lean();
 
   if (!manager) {
     throw generateError("Manager account not found", 404);
   }
 
-  if (!isManagerRole(manager.role)) {
+  const managedLearnerCount = await User.countDocuments({
+    _id: { $ne: manager._id },
+    deletedAt: { $exists: false },
+    $or: [
+      { reportingManager: manager._id },
+      { "managerChain.manager": manager._id },
+      { assignedManagers: manager._id },
+      { managers: { $elemMatch: { managerId: manager._id, status: "ASSIGNED" } } },
+    ],
+  });
+
+  if (!isManagerRole(manager.role) && managedLearnerCount === 0) {
     throw generateError("Only manager users can access this view", 403);
   }
 
@@ -70,6 +81,8 @@ async function getManagedLearners(manager: any) {
     _id: { $ne: managerObjectId },
     deletedAt: { $exists: false },
     $or: [
+      { reportingManager: managerObjectId },
+      { "managerChain.manager": managerObjectId },
       { assignedManagers: managerObjectId },
       { managers: { $elemMatch: { managerId: managerObjectId, status: "ASSIGNED" } } },
       managerEmail
@@ -79,7 +92,7 @@ async function getManagedLearners(manager: any) {
   };
 
   return User.find(query)
-    .select("_id name email username role department company managers assignedManagers")
+    .select("_id name email username role department company reportingManager managerChain managers assignedManagers")
     .sort({ name: 1, email: 1, username: 1 })
     .lean();
 }

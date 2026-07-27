@@ -27,6 +27,11 @@ export interface UserInterface extends Document {
   gender?: number;
   company: Schema.Types.ObjectId;
   createdBy?: Schema.Types.ObjectId;
+  reportingManager?: Schema.Types.ObjectId;
+  managerChain?: {
+    manager: Schema.Types.ObjectId;
+    level: number;
+  }[];
   assignedManagers?: Schema.Types.ObjectId[];
   managers?: {
     level: number;
@@ -92,6 +97,18 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   gender: { type: Number, enum: [1, 2, 3, 4] },
   company : {type : Schema.Types.ObjectId, ref:'Company'},
   createdBy: { type: Schema.Types.ObjectId, ref: "User", index: true },
+  reportingManager: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    index: true,
+  },
+  managerChain: {
+    type: [{
+      manager: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+      level: { type: Number, required: true },
+    }],
+    default: [],
+  },
   assignedManagers: {
     type: [{ type: Schema.Types.ObjectId, ref: "User" }],
     default: [],
