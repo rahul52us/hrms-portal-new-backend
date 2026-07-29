@@ -8,6 +8,7 @@ import {
   deleteManagedUserHandler,
   downloadBulkUploadTemplateHandler,
   getPermissionConfigHandler,
+  getManagedUserAssignmentHistoryHandler,
   listManagedUsersHandler,
   updateManagedUserStatusHandler,
   updateRolePermissionsHandler,
@@ -24,6 +25,7 @@ router.get("/permissions/config", authenticate, getPermissionConfigHandler);
 router.post("/company-admin", authenticate, createCompanyAdminHandler);
 router.post("/", authenticate, createManagedUserHandler);
 router.post("/bulk", authenticate, upload.single("file"), bulkManagedUsersHandler);
+router.get("/:id/assignment-history", authenticate, getManagedUserAssignmentHistoryHandler);
 router.delete("/:id", authenticate, deleteManagedUserHandler);
 router.put("/permissions/roles/:role", authenticate, updateRolePermissionsHandler);
 router.put("/:id/permissions", authenticate, updateUserPermissionsHandler);

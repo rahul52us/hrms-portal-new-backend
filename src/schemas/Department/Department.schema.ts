@@ -15,6 +15,8 @@ export interface DepartmentI extends Document {
     updatedAt?: Date;
   }[];
   deletedAt?: Date;
+  archivedBy?: mongoose.Schema.Types.ObjectId;
+  archiveReason?: string;
   createdAt?: Date;
 }
 
@@ -56,6 +58,14 @@ const DepartmentSchema: Schema<DepartmentI> = new Schema<DepartmentI>({
   },
   deletedAt: {
     type: Date,
+  },
+  archivedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+  archiveReason: {
+    type: String,
+    trim: true,
   },
   createdAt: {
     type: Date,

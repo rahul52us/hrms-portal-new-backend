@@ -44,6 +44,19 @@ export async function ensureCompanyManagementAccess(options: {
   const requestedCompanyId = normalizeId(options.requestedCompanyId);
   const companyId = requestedCompanyId || (role === "superadmin" ? "" : actorCompanyId);
 
+  if (role !== "superadmin") {
+    if (!actorCompanyId) {
+      throw generateError("Your account is missing company access", 403);
+    }
+
+    if (requestedCompanyId && requestedCompanyId !== actorCompanyId) {
+      throw generateError(
+        "You can only manage records from your company",
+        403
+      );
+    }
+  }
+
   if (!companyId) {
     if (role === "superadmin" && options.allowSuperadminWithoutCompany) {
       return null;

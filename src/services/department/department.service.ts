@@ -3,15 +3,21 @@ import { Response, NextFunction } from "express";
 import Company from "../../schemas/company/Company";
 import Department from "../../schemas/Department/Department.schema";
 import User from "../../schemas/User/User";
+import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import { generateError } from "../../config/Error/functions";
 import {
+  archive_department_repo,
   create_department_repo,
-  delete_department_repo,
   get_departments_repo,
   update_department_repo,
 } from "../../repository/department/department.respository";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
+import {
+  buildEmployeeAssignmentSnapshot,
+  ensureCurrentEmployeeAssignment,
+  recordEmployeeAssignmentChange,
+} from "../employeeAssignment/employeeAssignment.service";
 
 const getScopedCompanyId = (req: any) => {
   const role = String(
@@ -58,6 +64,9 @@ const normalizeText = (value: unknown) => String(value || "").trim();
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+const getRequesterId = (req: any) =>
+  normalizeText(req.userId || req.user?._id || req.bodyData?._id);
 
 const normalizeRole = (value: unknown) =>
   normalizeText(value)
@@ -266,6 +275,138 @@ const syncCompanyDepartmentNames = async (
   }
 };
 
+const getDepartmentArchiveImpact = async (department: any) => {
+  const departmentName = normalizeText(department?.departmentName);
+  const exactDepartmentName = new RegExp(`^${escapeRegex(departmentName)}$`, "i");
+
+  const [assignedEmployees, scopedHrUsers] = await Promise.all([
+    User.countDocuments({
+      company: department.company,
+      department: exactDepartmentName,
+      deletedAt: null,
+    }),
+    User.countDocuments({
+      company: department.company,
+      "hrScope.departments": exactDepartmentName,
+      deletedAt: null,
+    }),
+  ]);
+
+  const teams = getDepartmentTeams(department);
+  const activeTeams = teams.filter((team: any) => team?.isActive !== false).length;
+  const hasDepartmentHead = Boolean(department?.departmentHead);
+  const blockers = [
+    assignedEmployees > 0
+      ? {
+          key: "employees",
+          count: assignedEmployees,
+          label: "Assigned employees",
+          resolution: "Transfer every employee to another department.",
+        }
+      : null,
+    hasDepartmentHead
+      ? {
+          key: "departmentHead",
+          count: 1,
+          label: "Department head",
+          resolution: "Remove or reassign the department head.",
+        }
+      : null,
+    scopedHrUsers > 0
+      ? {
+          key: "hrScopes",
+          count: scopedHrUsers,
+          label: "HR scope assignments",
+          resolution: "Remove or replace this department in each HR scope.",
+        }
+      : null,
+  ].filter(Boolean);
+
+  return {
+    department: {
+      _id: department._id,
+      departmentName,
+      code: normalizeText(department?.code),
+    },
+    counts: {
+      assignedEmployees,
+      departmentHead: hasDepartmentHead ? 1 : 0,
+      teams: teams.length,
+      activeTeams,
+      hrScopes: scopedHrUsers,
+    },
+    blockers,
+    canArchive: blockers.length === 0,
+    effects: {
+      teamsArchivedWithDepartment: teams.length,
+      reportingManagersChanged: 0,
+      historicalRecordsPreserved: true,
+    },
+  };
+};
+
+const getDepartmentTransferPreview = async (department: any) => {
+  const departmentName = normalizeText(department?.departmentName);
+  const exactDepartmentName = new RegExp(
+    `^${escapeRegex(departmentName)}$`,
+    "i"
+  );
+
+  const [employees, destinations] = await Promise.all([
+    User.find({
+      company: department.company,
+      department: exactDepartmentName,
+      deletedAt: null,
+    })
+      .select(
+        "name email username code role userType team designation officeLocation reportingManager is_active is_enabled"
+      )
+      .populate("officeLocation", "name code city state")
+      .populate("reportingManager", "name email username")
+      .sort({ name: 1 })
+      .lean(),
+    Department.find({
+      company: department.company,
+      _id: { $ne: department._id },
+      deletedAt: null,
+    })
+      .sort({ departmentName: 1 })
+      .lean(),
+  ]);
+
+  return {
+    sourceDepartment: {
+      _id: department._id,
+      departmentName,
+      code: normalizeText(department?.code),
+      teams: serializeDepartmentTeams(getDepartmentTeams(department)),
+      departmentHeadId: normalizeText(department?.departmentHead),
+    },
+    employees: employees.map((employee: any) => ({
+      _id: employee._id,
+      name: employee.name || "",
+      email: employee.email || employee.username || "",
+      code: employee.code || "",
+      role: employee.role || employee.userType || "user",
+      team: employee.team || "",
+      designation: employee.designation || "",
+      officeLocation: employee.officeLocation || null,
+      reportingManager: employee.reportingManager || null,
+      isActive: Boolean(employee.is_active) && employee.is_enabled !== false,
+      isDepartmentHead:
+        String(employee._id) === String(department?.departmentHead || ""),
+    })),
+    destinations: destinations.map((destination: any) => ({
+      _id: destination._id,
+      departmentName: destination.departmentName || "",
+      code: destination.code || "",
+      teams: serializeDepartmentTeams(destination.teams).filter(
+        (team: any) => team.isActive !== false
+      ),
+    })),
+  };
+};
+
 // ================= CREATE =================
 export const createDepartmentService = async (
   req: any,
@@ -401,8 +542,8 @@ export const updateDepartmentService = async (
   }
 };
 
-// ================= DELETE =================
-export const deleteDepartmentService = async (
+// ================= ARCHIVE =================
+export const getDepartmentArchiveImpactService = async (
   req: any,
   res: Response,
   next: NextFunction,
@@ -410,44 +551,425 @@ export const deleteDepartmentService = async (
   try {
     ensureDepartmentMutationAllowed(req);
     const { id } = req.params;
-    const existingDepartment = await Department.findOne({
-      _id: id,
-      deletedAt: null,
-    });
+    const department = await findDepartmentForMutation(req, id);
+    const impact = await getDepartmentArchiveImpact(department);
 
-    if (!existingDepartment) {
-      return res.status(404).send({
+    return res.status(200).send({
+      status: "success",
+      data: impact,
+      message: impact.canArchive
+        ? "Department can be archived"
+        : "Resolve department dependencies before archiving",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const archiveDepartmentService = async (
+  req: any,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    const { id } = req.params;
+    const reason = normalizeText(req.body?.reason);
+    const requesterId = getRequesterId(req);
+
+    if (reason.length < 3) {
+      throw generateError("Archive reason must be at least 3 characters", 422);
+    }
+
+    if (!requesterId || !mongoose.Types.ObjectId.isValid(requesterId)) {
+      throw generateError("Unable to identify the user archiving this department", 401);
+    }
+
+    const department = await findDepartmentForMutation(req, id);
+    const impact = await getDepartmentArchiveImpact(department);
+
+    if (!impact.canArchive) {
+      return res.status(409).send({
         status: "error",
-        data: null,
-        message: "Department not found",
+        data: impact,
+        message: "Resolve department dependencies before archiving",
       });
     }
 
-    await ensureCompanyManagementAccess({
-      actor: req.bodyData || req.user,
-      requestedCompanyId: String(existingDepartment.company || ""),
-      actionLabel: "manage departments for this company",
-      allowSuperadminWithoutCompany: false,
+    const archivedAt = new Date();
+    const archived = await archive_department_repo(id, {
+      deletedAt: archivedAt,
+      archivedBy: requesterId,
+      archiveReason: reason,
     });
 
-    const assignedUsers = await User.countDocuments({
-      company: existingDepartment.company,
-      department: String(existingDepartment.departmentName || ""),
-      deletedAt: { $exists: false },
-    });
-
-    if (assignedUsers > 0) {
-      throw generateError("This department has assigned employees. Move employees before deleting it.", 400);
+    if (!archived) {
+      throw generateError("Department not found or already archived", 404);
     }
 
-    await delete_department_repo(id);
-    await syncCompanyDepartmentNames(String(existingDepartment.company), {
-      remove: String(existingDepartment.departmentName || ""),
+    await syncCompanyDepartmentNames(String(department.company), {
+      remove: String(department.departmentName || ""),
     });
 
     return res.status(200).send({
       status: "success",
-      message: "Deleted successfully",
+      data: {
+        _id: archived._id,
+        departmentName: archived.departmentName,
+        archivedAt: archived.deletedAt,
+        archivedBy: archived.archivedBy,
+        archiveReason: archived.archiveReason,
+      },
+      message: "Department archived successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getDepartmentTransferPreviewService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    ensurePermission(
+      req.bodyData || req.user,
+      PERMISSION_KEYS.VIEW_USERS,
+      "You do not have permission to view employees"
+    );
+
+    const department = await findDepartmentForMutation(req, req.params.id);
+    const preview = await getDepartmentTransferPreview(department);
+
+    return res.status(200).send({
+      status: "success",
+      data: preview,
+      message: "Department transfer preview retrieved successfully",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const transferDepartmentEmployeesService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    ensureDepartmentMutationAllowed(req);
+    ensurePermission(
+      req.bodyData || req.user,
+      PERMISSION_KEYS.EDIT_USERS,
+      "You do not have permission to transfer employees"
+    );
+
+    const department = await findDepartmentForMutation(req, req.params.id);
+    const reason = normalizeText(req.body?.reason);
+    const defaultTargetDepartmentId = normalizeText(
+      req.body?.targetDepartmentId
+    );
+    const teamMappings = Array.isArray(req.body?.teamMappings)
+      ? req.body.teamMappings
+      : [];
+    const employeeOverrides = Array.isArray(req.body?.employeeOverrides)
+      ? req.body.employeeOverrides
+      : [];
+
+    if (reason.length < 3) {
+      throw generateError("Transfer reason must be at least 3 characters", 422);
+    }
+
+    if (
+      !defaultTargetDepartmentId ||
+      !mongoose.Types.ObjectId.isValid(defaultTargetDepartmentId) ||
+      defaultTargetDepartmentId === String(department._id)
+    ) {
+      throw generateError("Select a valid destination department", 400);
+    }
+
+    const exactDepartmentName = new RegExp(
+      `^${escapeRegex(normalizeText(department.departmentName))}$`,
+      "i"
+    );
+    const employees = await User.find({
+      company: department.company,
+      department: exactDepartmentName,
+      deletedAt: null,
+    });
+
+    if (employees.length === 0) {
+      throw generateError("This department has no employees to transfer", 400);
+    }
+
+    const employeeById = new Map(
+      employees.map((employee: any) => [String(employee._id), employee])
+    );
+    const overrideByEmployeeId = new Map<string, any>();
+    const requestedDepartmentIds = new Set<string>([
+      defaultTargetDepartmentId,
+    ]);
+
+    for (const override of employeeOverrides) {
+      const employeeId = normalizeText(override?.employeeId);
+      if (!employeeById.has(employeeId)) {
+        throw generateError(
+          "One or more employee overrides are outside this department",
+          400
+        );
+      }
+
+      const targetDepartmentId = normalizeText(
+        override?.targetDepartmentId || defaultTargetDepartmentId
+      );
+      if (
+        !mongoose.Types.ObjectId.isValid(targetDepartmentId) ||
+        targetDepartmentId === String(department._id)
+      ) {
+        throw generateError(
+          "One or more employee destination departments are invalid",
+          400
+        );
+      }
+
+      requestedDepartmentIds.add(targetDepartmentId);
+      overrideByEmployeeId.set(employeeId, {
+        ...override,
+        targetDepartmentId,
+      });
+    }
+
+    const targetDepartments = await Department.find({
+      _id: {
+        $in: Array.from(requestedDepartmentIds).map(
+          (id) => new mongoose.Types.ObjectId(id)
+        ),
+      },
+      company: department.company,
+      deletedAt: null,
+    });
+
+    if (targetDepartments.length !== requestedDepartmentIds.size) {
+      throw generateError(
+        "One or more destination departments are unavailable",
+        400
+      );
+    }
+
+    const targetDepartmentById = new Map(
+      targetDepartments.map((target: any) => [String(target._id), target])
+    );
+    const sourceTeams = getDepartmentTeams(department);
+    const sourceTeamByName = new Map<string, any>(
+      sourceTeams.map((team: any) => [
+        normalizeText(team?.name).toLowerCase(),
+        team,
+      ])
+    );
+    const mappingBySourceTeamId = new Map<string, any>();
+    const mappingBySourceTeamName = new Map<string, any>();
+
+    teamMappings.forEach((mapping: any) => {
+      const sourceTeamId = normalizeText(mapping?.sourceTeamId);
+      const sourceTeamName = normalizeText(mapping?.sourceTeamName).toLowerCase();
+      if (sourceTeamId) mappingBySourceTeamId.set(sourceTeamId, mapping);
+      if (sourceTeamName) mappingBySourceTeamName.set(sourceTeamName, mapping);
+    });
+
+    const resolveTargetTeam = ({
+      targetDepartment,
+      targetTeamId,
+    }: {
+      targetDepartment: any;
+      targetTeamId: string;
+    }) => {
+      if (!targetTeamId) return null;
+      const team = getDepartmentTeams(targetDepartment).find(
+        (candidate: any) =>
+          String(candidate?._id || "") === targetTeamId &&
+          candidate?.isActive !== false
+      );
+      if (!team) {
+        throw generateError(
+          `Select a valid team in ${targetDepartment.departmentName}`,
+          400
+        );
+      }
+      return team;
+    };
+
+    const officeLocationIds = employees
+      .map((employee: any) => normalizeText(employee.officeLocation))
+      .filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+    const managerIds = employees
+      .map((employee: any) => normalizeText(employee.reportingManager))
+      .filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+
+    const [officeLocations, reportingManagers] = await Promise.all([
+      OfficeLocation.find({ _id: { $in: officeLocationIds } })
+        .select("name code")
+        .lean(),
+      User.find({ _id: { $in: managerIds } })
+        .select("name email username")
+        .lean(),
+    ]);
+
+    const officeLocationById = new Map(
+      officeLocations.map((location: any) => [String(location._id), location])
+    );
+    const reportingManagerById = new Map(
+      reportingManagers.map((manager: any) => [String(manager._id), manager])
+    );
+    const otherDepartmentHeadCount = department.departmentHead
+      ? await Department.countDocuments({
+          _id: { $ne: department._id },
+          company: department.company,
+          departmentHead: department.departmentHead,
+          deletedAt: null,
+        })
+      : 0;
+    const plans: any[] = [];
+
+    for (const employee of employees) {
+      const employeeId = String(employee._id);
+      const override = overrideByEmployeeId.get(employeeId);
+      const targetDepartmentId =
+        override?.targetDepartmentId || defaultTargetDepartmentId;
+      const targetDepartment = targetDepartmentById.get(targetDepartmentId);
+
+      if (!targetDepartment) {
+        throw generateError("Destination department not found", 400);
+      }
+
+      const sourceTeam = sourceTeamByName.get(
+        normalizeText(employee.team).toLowerCase()
+      );
+      const mapping =
+        (sourceTeam &&
+          mappingBySourceTeamId.get(String(sourceTeam?._id || ""))) ||
+        mappingBySourceTeamName.get(
+          normalizeText(employee.team).toLowerCase()
+        );
+      const hasOverrideTeam = override &&
+        Object.prototype.hasOwnProperty.call(override, "targetTeamId");
+      const targetTeamId = normalizeText(
+        hasOverrideTeam ? override?.targetTeamId : mapping?.targetTeamId
+      );
+      const targetTeam = resolveTargetTeam({
+        targetDepartment,
+        targetTeamId,
+      });
+      const previousUser = employee.toObject({ depopulate: true });
+      const isSourceDepartmentHead =
+        String(department.departmentHead || "") === employeeId;
+      const nextRole =
+        isSourceDepartmentHead &&
+        otherDepartmentHeadCount === 0 &&
+        normalizeRole(employee.role || employee.userType) === "departmenthead"
+          ? "user"
+          : normalizeRole(employee.role || employee.userType);
+      const nextUser = {
+        ...previousUser,
+        department: normalizeText(targetDepartment.departmentName),
+        team: normalizeText(targetTeam?.name),
+        role: nextRole,
+        userType: nextRole,
+      };
+      const snapshotContext = {
+        officeLocation:
+          officeLocationById.get(normalizeText(employee.officeLocation)) || null,
+        reportingManager:
+          reportingManagerById.get(normalizeText(employee.reportingManager)) ||
+          null,
+      };
+      const previousSnapshot = await buildEmployeeAssignmentSnapshot(
+        previousUser,
+        {
+          context: {
+            department,
+            team: sourceTeam || null,
+            ...snapshotContext,
+          },
+        }
+      );
+      const nextSnapshot = await buildEmployeeAssignmentSnapshot(nextUser, {
+        context: {
+          department: targetDepartment,
+          team: targetTeam,
+          ...snapshotContext,
+        },
+      });
+
+      plans.push({
+        employee,
+        nextRole,
+        targetDepartment,
+        targetTeam,
+        previousSnapshot,
+        nextSnapshot,
+      });
+    }
+
+    const effectiveAt = new Date();
+    const changeBatchId = new mongoose.Types.ObjectId().toString();
+    const requesterId = getRequesterId(req);
+
+    await mongoose.connection.transaction(async (session) => {
+      for (const plan of plans) {
+        await ensureCurrentEmployeeAssignment({
+          user: plan.employee,
+          changedBy: requesterId,
+          source: "department_closure_backfill",
+          session,
+        });
+
+        plan.employee.department = normalizeText(
+          plan.targetDepartment.departmentName
+        );
+        plan.employee.team = normalizeText(plan.targetTeam?.name);
+        plan.employee.role = plan.nextRole;
+        plan.employee.userType = plan.nextRole;
+        plan.employee.updatedAt = effectiveAt;
+        await plan.employee.save({ session });
+
+        await recordEmployeeAssignmentChange({
+          user: plan.employee,
+          previousSnapshot: plan.previousSnapshot,
+          nextSnapshot: plan.nextSnapshot,
+          changedBy: requesterId,
+          changeReason: reason,
+          changeType: "department_transfer",
+          changeBatchId,
+          source: "department_closure",
+          effectiveAt,
+          session,
+        });
+      }
+
+      if (department.departmentHead) {
+        department.departmentHead = undefined;
+        await department.save({ session });
+      }
+    });
+
+    const refreshedDepartment = await Department.findById(
+      department._id
+    ).populate(
+      "departmentHead",
+      "name email username role userType department"
+    );
+    const impact = await getDepartmentArchiveImpact(refreshedDepartment);
+
+    return res.status(200).send({
+      status: "success",
+      data: {
+        changeBatchId,
+        transferredEmployees: plans.length,
+        impact,
+      },
+      message: `${plans.length} employees transferred successfully`,
     });
   } catch (err) {
     next(err);
@@ -491,9 +1013,54 @@ export const assignDepartmentHeadService = async (
       allowSuperadminWithoutCompany: false,
     });
 
+    const previousDepartmentHeadId = normalizeText(
+      department.departmentHead
+    );
+    const requesterId = getRequesterId(req);
+
     if (!departmentHeadId) {
-      department.departmentHead = undefined;
-      await department.save();
+      await mongoose.connection.transaction(async (session) => {
+        if (previousDepartmentHeadId) {
+          const previousHead = await User.findById(
+            previousDepartmentHeadId
+          ).session(session);
+
+          if (previousHead) {
+            const previousUser = previousHead.toObject({ depopulate: true });
+            const otherHeadAssignments = await Department.countDocuments({
+              _id: { $ne: department._id },
+              company: department.company,
+              departmentHead: previousHead._id,
+              deletedAt: null,
+            }).session(session);
+
+            if (
+              otherHeadAssignments === 0 &&
+              normalizeRole(previousHead.role || previousHead.userType) ===
+                "departmenthead"
+            ) {
+              previousHead.role = "user";
+              previousHead.userType = "user";
+              previousHead.updatedAt = new Date();
+              await previousHead.save({ session });
+              await recordEmployeeAssignmentChange({
+                user: previousHead,
+                previousUser,
+                changedBy: requesterId,
+                changeType: "department_head_removed",
+                changeReason:
+                  normalizeText(req.body?.reason) ||
+                  `Removed as head of ${department.departmentName}`,
+                source: "department_head_assignment",
+                session,
+              });
+            }
+          }
+        }
+
+        department.departmentHead = undefined;
+        await department.save({ session });
+      });
       const updated = await Department.findById(id).populate("departmentHead", "name email username role userType department");
 
       return res.status(200).send({
@@ -522,14 +1089,69 @@ export const assignDepartmentHeadService = async (
       throw generateError("Choose an employee or manager, not an admin account", 400);
     }
 
-    user.department = normalizeText(department.departmentName);
-    user.role = "departmenthead";
-    user.userType = "departmenthead";
-    user.updatedAt = new Date();
-    await user.save();
+    const selectedUserBefore = user.toObject({ depopulate: true });
+    await mongoose.connection.transaction(async (session) => {
+      if (
+        previousDepartmentHeadId &&
+        previousDepartmentHeadId !== String(user._id)
+      ) {
+        const previousHead = await User.findById(
+          previousDepartmentHeadId
+        ).session(session);
 
-    department.departmentHead = user._id;
-    await department.save();
+        if (previousHead) {
+          const previousUser = previousHead.toObject({ depopulate: true });
+          const otherHeadAssignments = await Department.countDocuments({
+            _id: { $ne: department._id },
+            company: department.company,
+            departmentHead: previousHead._id,
+            deletedAt: null,
+          }).session(session);
+
+          if (
+            otherHeadAssignments === 0 &&
+            normalizeRole(previousHead.role || previousHead.userType) ===
+              "departmenthead"
+          ) {
+            previousHead.role = "user";
+            previousHead.userType = "user";
+            previousHead.updatedAt = new Date();
+            await previousHead.save({ session });
+            await recordEmployeeAssignmentChange({
+              user: previousHead,
+              previousUser,
+              changedBy: requesterId,
+              changeType: "department_head_replaced",
+              changeReason:
+                normalizeText(req.body?.reason) ||
+                `Replaced as head of ${department.departmentName}`,
+              source: "department_head_assignment",
+              session,
+            });
+          }
+        }
+      }
+
+      user.department = normalizeText(department.departmentName);
+      user.role = "departmenthead";
+      user.userType = "departmenthead";
+      user.updatedAt = new Date();
+      await user.save({ session });
+      await recordEmployeeAssignmentChange({
+        user,
+        previousUser: selectedUserBefore,
+        changedBy: requesterId,
+        changeType: "department_head_assigned",
+        changeReason:
+          normalizeText(req.body?.reason) ||
+          `Assigned as head of ${department.departmentName}`,
+        source: "department_head_assignment",
+        session,
+      });
+
+      department.departmentHead = user._id;
+      await department.save({ session });
+    });
 
     const updated = await Department.findById(id).populate("departmentHead", "name email username role userType department");
 

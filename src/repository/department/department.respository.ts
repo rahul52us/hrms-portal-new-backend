@@ -14,8 +14,21 @@ export const update_department_repo = async (id: string, data: any) => {
   ).populate("departmentHead", departmentHeadPopulate);
 };
 
-export const delete_department_repo = async (id: string) => {
-  return Department.findOneAndDelete({ _id: id, deletedAt: null });
+export const archive_department_repo = async (
+  id: string,
+  data: { deletedAt: Date; archivedBy: string; archiveReason: string }
+) => {
+  return Department.findOneAndUpdate(
+    { _id: id, deletedAt: null },
+    {
+      $set: {
+        deletedAt: data.deletedAt,
+        archivedBy: data.archivedBy,
+        archiveReason: data.archiveReason,
+      },
+    },
+    { new: true }
+  );
 };
 
 export const get_departments_repo = async (

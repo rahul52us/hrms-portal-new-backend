@@ -8,6 +8,7 @@
     "scorm:reenrich": "ts-node src/scripts/reEnrichScormTrackingAttempt.ts",
     "scorm:cleanup-questionbank": "ts-node src/scripts/cleanupScormQuestionBank.ts",
     "certificates:seed": "ts-node src/scripts/seedCertificateTemplates.ts",
+    "assignments:backfill": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

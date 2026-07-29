@@ -26,6 +26,12 @@ import {
   assertCompanyIsActiveForManagement,
   ensureCompanyManagementAccess,
 } from "../company/utils/activityGuards";
+import {
+  closeCurrentEmployeeAssignment,
+  ensureCurrentEmployeeAssignment,
+  getEmployeeAssignmentHistory,
+  recordEmployeeAssignmentChange,
+} from "../employeeAssignment/employeeAssignment.service";
 
 const ExcelJS = require("exceljs");
 
@@ -1849,6 +1855,9 @@ async function saveManagedUser({
 
   let user = existingUserId ? await User.findById(existingUserId) : null;
   const isCreate = !user;
+  const previousAssignmentUser = user
+    ? user.toObject({ depopulate: true })
+    : null;
   const payloadIncludesHrScope = Object.prototype.hasOwnProperty.call(payload || {}, "hrScope");
   const resolvedHrScope =
     role === "hr"
@@ -2087,7 +2096,22 @@ async function saveManagedUser({
   }
 
   user.is_active = calculateUserActiveState(user);
-  await user.save();
+  await mongoose.connection.transaction(async (session) => {
+    await user.save({ session });
+    await recordEmployeeAssignmentChange({
+      user,
+      previousUser: previousAssignmentUser,
+      changedBy: actor.userId,
+      changeReason: normalizeText(
+        payload?.assignmentChangeReason ||
+          payload?.changeReason ||
+          (isCreate ? "Initial employee assignment" : "Employee assignment updated")
+      ),
+      changeType: isCreate ? "initial_assignment" : undefined,
+      source: isCreate ? "managed_user_create" : "managed_user_update",
+      session,
+    });
+  });
 
   const profileDetails = await syncManagedUserProfileDetails(user, company);
   if (profileDetails && String(user.profile_details || "") !== String(profileDetails._id || "")) {
@@ -3100,6 +3124,83 @@ export async function updateManagedUserHandler(req: Request, res: Response) {
   }
 }
 
+export async function getManagedUserAssignmentHistoryHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const requester = assertAdminAccess(req);
+    ensurePermission(
+      requester,
+      PERMISSION_KEYS.VIEW_USERS,
+      "You do not have permission to view employee history"
+    );
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw generateError("Invalid user id", 400);
+    }
+
+    const targetUser = await User.findById(req.params.id);
+    if (!targetUser || targetUser.deletedAt) {
+      throw generateError("User not found", 404);
+    }
+
+    const targetCompanyId = String(targetUser.company || "");
+    if (
+      requester.role !== "superadmin" &&
+      (!requester.companyId || requester.companyId !== targetCompanyId)
+    ) {
+      throw generateError(
+        "You can only view employee history from your company",
+        403
+      );
+    }
+
+    if (
+      requester.role === "departmenthead" &&
+      normalizeText(targetUser.department) !== normalizeText(requester.department)
+    ) {
+      throw generateError(
+        "You can only view employee history from your department",
+        403
+      );
+    }
+
+    if (requester.role === "hr") {
+      assertWithinHrScope(requester, targetUser, "view history for");
+    }
+
+    await ensureCurrentEmployeeAssignment({
+      user: targetUser,
+      changedBy: requester.userId,
+      source: "history_read_backfill",
+    });
+
+    const history = await getEmployeeAssignmentHistory({
+      employeeId: String(targetUser._id),
+      companyId: targetCompanyId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee assignment history retrieved successfully",
+      data: {
+        employee: {
+          _id: targetUser._id,
+          name: targetUser.name || "",
+          code: targetUser.code || "",
+        },
+        history,
+      },
+    });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      error: error?.message || "Failed to retrieve employee assignment history",
+    });
+  }
+}
+
 export async function deleteManagedUserHandler(req: Request, res: Response) {
   try {
     const requester = assertAdminAccess(req);
@@ -3192,7 +3293,24 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
     targetUser.setupToken = undefined;
     targetUser.setupTokenExpiry = undefined;
     targetUser.updatedAt = new Date();
-    await targetUser.save();
+    await mongoose.connection.transaction(async (session) => {
+      await ensureCurrentEmployeeAssignment({
+        user: targetUser,
+        changedBy: requester.userId,
+        source: "managed_user_delete_backfill",
+        session,
+      });
+      await targetUser.save({ session });
+      await closeCurrentEmployeeAssignment({
+        employeeId: String(targetUser._id),
+        companyId: targetCompanyId,
+        changedBy: requester.userId,
+        endChangeType: "employment_ended",
+        endReason: normalizeText(req.body?.reason) || "Employee removed",
+        effectiveAt: targetUser.deletedAt,
+        session,
+      });
+    });
 
     await syncSubordinateManagerChains(targetUser._id);
     await syncDependentUsersForManagerEmail(targetUser.email || targetUser.username || "");
