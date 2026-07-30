@@ -59,6 +59,109 @@ function normalizePhoneNumber(value: unknown) {
   return normalizeText(value).replace(/\s+/g, "");
 }
 
+const MANAGED_USER_ISSUE_FILTERS = [
+  "missing_department",
+  "missing_manager",
+  "missing_location",
+  "pending_setup",
+  "incomplete_profiles",
+] as const;
+
+function buildManagedUserIssueMatch(issueInput: unknown) {
+  const issue = normalizeText(issueInput).toLowerCase();
+  if (!issue) return null;
+
+  if (!MANAGED_USER_ISSUE_FILTERS.includes(issue as any)) {
+    throw generateError("Invalid employee issue filter", 400);
+  }
+
+  const missingDepartment = {
+    $or: [
+      { department: { $exists: false } },
+      { department: null },
+      { department: { $regex: /^\s*$/ } },
+    ],
+  };
+  const missingLocation = {
+    $or: [
+      { officeLocation: { $exists: false } },
+      { officeLocation: null },
+    ],
+  };
+  const workforceRoleMatch = {
+    role: {
+      $in: [
+        "user",
+        "departmenthead",
+        "department head",
+        "department-head",
+        "manager",
+        /^l\d+[-\s]?manager$/i,
+      ],
+    },
+  };
+  let issueCondition: any;
+
+  if (issue === "missing_department") {
+    issueCondition = missingDepartment;
+  } else if (issue === "missing_manager") {
+    issueCondition = {
+      $and: [
+        {
+          role: {
+            $nin: ["departmenthead", "department head", "department-head"],
+          },
+        },
+        {
+          $or: [
+            { reportingManager: { $exists: false } },
+            { reportingManager: null },
+          ],
+        },
+        {
+          $or: [
+            { managerChain: { $exists: false } },
+            { managerChain: { $size: 0 } },
+          ],
+        },
+        {
+          $or: [
+            { managers: { $exists: false } },
+            { managers: { $size: 0 } },
+          ],
+        },
+      ],
+    };
+  } else if (issue === "missing_location") {
+    issueCondition = missingLocation;
+  } else if (issue === "pending_setup") {
+    issueCondition = {
+      $or: [
+        { password: { $exists: false } },
+        { password: null },
+        { password: "" },
+        { setupToken: { $exists: true, $nin: [null, ""] } },
+      ],
+    };
+  } else {
+    issueCondition = {
+      $or: [
+        { designation: { $exists: false } },
+        { designation: null },
+        { designation: { $regex: /^\s*$/ } },
+        { joiningDate: { $exists: false } },
+        { joiningDate: null },
+        ...missingDepartment.$or,
+        ...missingLocation.$or,
+      ],
+    };
+  }
+
+  return {
+    $and: [workforceRoleMatch, issueCondition],
+  };
+}
+
 function normalizeRole(value: unknown) {
   const normalized = normalizeText(value).toLowerCase();
   if (/^department[-\s]?head$/i.test(normalized)) {
@@ -2710,6 +2813,8 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const departmentFilter = normalizeText(req.query.department);
     const teamFilter = normalizeText(req.query.team);
     const officeLocationId = normalizeText(req.query.officeLocationId || req.query.locationId);
+    const issueFilter = normalizeText(req.query.issue);
+    const issueMatch = buildManagedUserIssueMatch(issueFilter);
     const companyId =
       requester.role === "superadmin"
         ? normalizeText(req.query.companyId)
@@ -2856,6 +2961,10 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       matchClauses.push({
         team: { $regex: new RegExp(`^${escapeRegex(teamFilter)}$`, "i") },
       });
+    }
+
+    if (issueMatch) {
+      matchClauses.push(issueMatch);
     }
 
     const match =
