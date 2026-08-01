@@ -19,6 +19,7 @@ import departmentRouting from "./departments.routing";
 import officeLocationRouting from "./officeLocations.routing";
 import certificateRouting from "./certificate.routing";
 import organizationRouting from "./organization.routing";
+import workforcePoliciesRouting from "./workforcePolicies.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -43,6 +44,7 @@ const importRoutings = (app: any) => {
   app.use('/api', batchRouting);
   app.use('/api/department', departmentRouting);
   app.use('/api/locations', officeLocationRouting);
+  app.use('/api/workforce-policies', workforcePoliciesRouting);
 };
 
 export default importRoutings;
