@@ -11,6 +11,8 @@
     "assignments:backfill": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts",
     "workforce:schedules:migrate": "ts-node src/scripts/migrateAttendanceSchedules.ts",
     "workforce:schedules:migrate:apply": "ts-node src/scripts/migrateAttendanceSchedules.ts --apply",
+    "users:reporting-manager:migrate": "ts-node src/scripts/migrateUserReportingManager.ts",
+    "users:reporting-manager:migrate:apply": "ts-node src/scripts/migrateUserReportingManager.ts --apply",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

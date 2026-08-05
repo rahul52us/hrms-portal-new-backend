@@ -35,14 +35,6 @@ import {
 
 const ExcelJS = require("exceljs");
 
-type ManagerInput = {
-  level: number;
-  managerEmail: string;
-  managerName?: string;
-  managerId?: mongoose.Types.ObjectId | string;
-  status?: "ASSIGNED" | "PENDING";
-};
-
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -116,18 +108,6 @@ function buildManagedUserIssueMatch(issueInput: unknown) {
           $or: [
             { reportingManager: { $exists: false } },
             { reportingManager: null },
-          ],
-        },
-        {
-          $or: [
-            { managerChain: { $exists: false } },
-            { managerChain: { $size: 0 } },
-          ],
-        },
-        {
-          $or: [
-            { managers: { $exists: false } },
-            { managers: { $size: 0 } },
           ],
         },
       ],
@@ -386,54 +366,6 @@ function getManagedUserSuccessMessage(action: "created" | "updated") {
   return `User ${action} successfully`;
 }
 
-function inferRoleFromManagers(managers: ManagerInput[], companyManagerLevels = 3) {
-  return "user";
-}
-
-function getExpectedManagerLevelsForRole(role: unknown, companyManagerLevels = 3): number[] {
-  return [];
-}
-
-function getManagerHeaderLabel(level: number) {
-  return `L${level} Manager Phone Number`;
-}
-
-function getManagerHeaderHintLabel(level: number) {
-  return `L${level} Manager Phone Number (Name)`;
-}
-
-function getBulkUploadTypeLabel(role: unknown, companyManagerLevels = 3) {
-  const normalizedRole = normalizeRole(role);
-  if (normalizedRole === "user") {
-    return "Employee upload";
-  }
-
-  return "Bulk upload";
-}
-
-function dedupeManagers(managers: ManagerInput[]) {
-  const uniqueManagers = new Map<string, ManagerInput>();
-
-  for (const manager of Array.isArray(managers) ? managers : []) {
-    const level = Number(manager?.level) || 0;
-    const managerEmail = normalizePhoneNumber(manager?.managerEmail);
-    if (!level || !managerEmail) {
-      continue;
-    }
-
-    const key = `${level}:${managerEmail}`;
-    if (!uniqueManagers.has(key)) {
-      uniqueManagers.set(key, {
-        level,
-        managerEmail,
-        managerName: normalizeText(manager?.managerName) || undefined,
-      });
-    }
-  }
-
-  return Array.from(uniqueManagers.values()).sort((a, b) => a.level - b.level);
-}
-
 function buildDuplicateUserErrors(options: {
   email?: string;
   mobileNumber?: string;
@@ -468,14 +400,14 @@ function buildDuplicateUserErrors(options: {
   return { errors, skipReason };
 }
 
-function buildTemplateHeaders(uploadRole: string, companyManagerLevels: number) {
+function buildTemplateHeaders(uploadRole: string, _companyManagerLevels: number) {
   const isUserUpload = normalizeRole(uploadRole) === "user";
   const headers = [
     "Sr. No.",
     "Employee Code",
     "Employee Name",
     "Phone Number",
-    "Email ID (Optional)",
+    "Email ID",
     isUserUpload ? "Branch (Optional)" : "Branch",
     "Team (Optional)",
     "City",
@@ -483,20 +415,14 @@ function buildTemplateHeaders(uploadRole: string, companyManagerLevels: number) 
   ];
 
   if (isUserUpload) {
-    headers.push("Designation", "Joining Date");
+    headers.push("Designation", "Joining Date", "Reporting Manager Email (Optional)");
   }
-
-  getExpectedManagerLevelsForRole(uploadRole, companyManagerLevels).forEach((level) => {
-    headers.push(getManagerHeaderHintLabel(level));
-  });
 
   return headers;
 }
 
-function buildTemplateRows(uploadRole: string, companyManagerLevels: number) {
+function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
   const normalizedRole = normalizeRole(uploadRole);
-  const managerLevel = parseManagerRoleLevel(normalizedRole);
-  const expectedManagerLevels = getExpectedManagerLevelsForRole(uploadRole, companyManagerLevels);
   const commonRows = [
     {
       branch: "Corporate",
@@ -518,98 +444,51 @@ function buildTemplateRows(uploadRole: string, companyManagerLevels: number) {
     },
   ];
 
-  const hierarchyExamples = [
+  const employeeExamples = [
     {
-      l1: { code: "L1-3001", name: "Aditya Rao", email: "", phone: "9876543230" },
-      l2: { code: "L2-2001", name: "Priya Sharma", email: "", phone: "9876543220" },
-      l3: { code: "L3-1001", name: "Arjun Mehta", email: "", phone: "9876543210" },
-      user: {
-        code: "EMP-4001",
-        name: "Aakash Nair",
-        email: "",
-        phone: "9876543240",
-        designation: "Software Engineer",
-        joiningDate: "2025-01-12",
-      },
+      code: "EMP-4001",
+      name: "Aakash Nair",
+      email: "aakash.nair@example.com",
+      phone: "9876543240",
+      designation: "Software Engineer",
+      joiningDate: "2025-01-12",
     },
     {
-      l1: { code: "L1-3002", name: "Sneha Iyer", email: "", phone: "9876543231" },
-      l2: { code: "L2-2002", name: "Kunal Desai", email: "", phone: "9876543221" },
-      l3: { code: "L3-1002", name: "Neha Kapoor", email: "", phone: "9876543211" },
-      user: {
-        code: "EMP-4002",
-        name: "Pooja Bansal",
-        email: "",
-        phone: "9876543241",
-        designation: "QA Engineer",
-        joiningDate: "2025-02-18",
-      },
+      code: "EMP-4002",
+      name: "Pooja Bansal",
+      email: "pooja.bansal@example.com",
+      phone: "9876543241",
+      designation: "QA Engineer",
+      joiningDate: "2025-02-18",
     },
     {
-      l1: { code: "L1-3003", name: "Varun Malhotra", email: "", phone: "9876543232" },
-      l2: { code: "L2-2003", name: "Simran Gill", email: "", phone: "9876543222" },
-      l3: { code: "L3-1003", name: "Rohan Verma", email: "", phone: "9876543212" },
-      user: {
-        code: "EMP-4003",
-        name: "Manish Yadav",
-        email: "",
-        phone: "9876543242",
-        designation: "Backend Developer",
-        joiningDate: "2025-03-25",
-      },
+      code: "EMP-4003",
+      name: "Manish Yadav",
+      email: "manish.yadav@example.com",
+      phone: "9876543242",
+      designation: "Backend Developer",
+      joiningDate: "2025-03-25",
     },
   ];
 
-  const getManagerProfile = (entry: any, level: number, index: number) => {
-    if (entry?.[`l${level}`]) {
-      return entry[`l${level}`];
-    }
-
-    const serial = String(index + 1).padStart(4, "0");
-    return {
-      code: `L${level}-${serial}`,
-      name: `Level ${level} Manager ${index + 1}`,
-      email: `l${level}.manager${index + 1}@novaedge.com`,
-      phone: `9876500${String(level)}${String(index + 1).padStart(2, "0")}`,
-    };
-  };
-
-  if (normalizedRole === "user") {
-    return hierarchyExamples.map((entry, index) => ([
-      index + 1,
-      entry.user.code,
-      entry.user.name,
-      entry.user.phone,
-      entry.user.email,
-      commonRows[index].branch,
-      commonRows[index].team,
-      commonRows[index].city,
-      commonRows[index].state,
-      entry.user.designation,
-      entry.user.joiningDate,
-      ...expectedManagerLevels.map((level) => getManagerProfile(entry, level, index).phone),
-    ]));
-  }
-
-  if (!managerLevel) {
+  if (normalizedRole !== "user") {
     return [];
   }
 
-  return hierarchyExamples.map((entry, index) => {
-    const currentManager = getManagerProfile(entry, managerLevel, index);
-    return [
+  return employeeExamples.map((entry, index) => ([
       index + 1,
-      currentManager.code,
-      currentManager.name,
-      currentManager.phone,
-      currentManager.email,
+      entry.code,
+      entry.name,
+      entry.phone,
+      entry.email,
       commonRows[index].branch,
       commonRows[index].team,
       commonRows[index].city,
       commonRows[index].state,
-      ...expectedManagerLevels.map((level) => getManagerProfile(entry, level, index).phone),
-    ];
-  });
+      entry.designation,
+      entry.joiningDate,
+      "",
+    ]));
 }
 
 function buildRoleMatch(role: string) {
@@ -630,32 +509,35 @@ function buildRoleMatch(role: string) {
   };
 }
 
-function getRolePriority(role: string) {
-  const normalizedRole = normalizeRole(role);
-  if (normalizedRole === "superadmin") {
-    return 1000;
-  }
-  if (normalizedRole === "admin") {
-    return 999;
-  }
-
-  const managerLevel = parseManagerRoleLevel(normalizedRole);
-  if (managerLevel) {
-    return managerLevel;
-  }
-
-  return 0;
-}
-
 function sortRowsByHierarchy(rows: any[]) {
-  return [...rows].sort((a, b) => {
-    const roleDiff = getRolePriority(b?.payload?.role) - getRolePriority(a?.payload?.role);
-    if (roleDiff !== 0) {
-      return roleDiff;
-    }
-
-    return Number(a?.rowNumber || 0) - Number(b?.rowNumber || 0);
+  const rowByIdentifier = new Map<string, any>();
+  rows.forEach((row) => {
+    [row?.payload?.email, row?.payload?.mobileNumber]
+      .map((value) => normalizeEmail(value) || normalizePhoneNumber(value))
+      .filter(Boolean)
+      .forEach((value) => rowByIdentifier.set(value, row));
   });
+  const sorted: any[] = [];
+  const state = new Map<any, "visiting" | "visited">();
+
+  const visit = (row: any) => {
+    if (state.get(row) === "visited") return;
+    if (state.get(row) === "visiting") {
+      throw generateError("Bulk file contains a circular reporting hierarchy", 400);
+    }
+    state.set(row, "visiting");
+    const managerIdentifier = normalizeEmail(row?.payload?.reportingManagerEmail) ||
+      normalizePhoneNumber(row?.payload?.reportingManagerEmail);
+    const managerRow = rowByIdentifier.get(managerIdentifier);
+    if (managerRow) visit(managerRow);
+    state.set(row, "visited");
+    sorted.push(row);
+  };
+
+  [...rows]
+    .sort((left, right) => Number(left?.rowNumber || 0) - Number(right?.rowNumber || 0))
+    .forEach(visit);
+  return sorted;
 }
 
 function slugify(value: string) {
@@ -665,18 +547,6 @@ function slugify(value: string) {
     .trim()
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
-}
-
-function deriveNameFromEmail(email: string) {
-  const normalizedEmail = normalizeEmail(email);
-  const localPart = normalizedEmail.split("@")[0] || normalizedEmail;
-  const words = localPart
-    .replace(/[._-]+/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
-
-  return words.join(" ") || normalizedEmail;
 }
 
 function hasPassword(user: any) {
@@ -715,8 +585,7 @@ async function tryUploadUserPicture(pic: any) {
 }
 
 export function calculateUserActiveState(user: any) {
-  const managers = Array.isArray(user?.managers) ? user.managers : [];
-  return managers.every((manager: any) => manager?.status === "ASSIGNED");
+  return true;
 }
 
 async function generateUniqueUserCode() {
@@ -1065,33 +934,6 @@ async function ensureCompanyReference({
   return company;
 }
 
-async function resolveManagers(
-  managers: ManagerInput[],
-  excludeUserId?: string,
-  companyId?: string | mongoose.Types.ObjectId
-) {
-  const normalizedManagers = (Array.isArray(managers) ? managers : [])
-    .map((manager, index) => ({
-      level: Number(manager?.level) || index + 1,
-      managerEmail: normalizePhoneNumber(manager?.managerEmail),
-    }))
-    .filter((manager) => manager.managerEmail)
-    .sort((a, b) => a.level - b.level);
-
-  const resolvedManagers: any[] = [];
-  for (const manager of normalizedManagers) {
-    const matchingManager = await findUserByPhone(manager.managerEmail, excludeUserId, companyId);
-    resolvedManagers.push({
-      level: manager.level,
-      managerEmail: manager.managerEmail,
-      managerId: matchingManager?._id,
-      status: matchingManager ? "ASSIGNED" : "PENDING",
-    });
-  }
-
-  return resolvedManagers;
-}
-
 function normalizeObjectIdLike(value: any) {
   if (value && typeof value === "object" && "_id" in value) {
     return normalizeText(value._id);
@@ -1104,17 +946,10 @@ function getReportingManagerPayload(payload: any = {}) {
   const directManager =
     payload?.reportingManager ||
     payload?.directManager ||
-    payload?.manager ||
     null;
-  const legacyManager = Array.isArray(payload?.managers)
-    ? [...payload.managers]
-        .filter((manager: any) => normalizePhoneNumber(manager?.managerEmail))
-        .sort((a: any, b: any) => Number(a?.level || 0) - Number(b?.level || 0))[0]
-    : null;
   const rawId =
     payload?.reportingManagerId ??
     payload?.directManagerId ??
-    payload?.managerId ??
     directManager?.value ??
     directManager;
   const normalizedId = normalizeObjectIdLike(rawId);
@@ -1122,15 +957,10 @@ function getReportingManagerPayload(payload: any = {}) {
   const directEmail =
     payload?.reportingManagerEmail ??
     payload?.directManagerEmail ??
-    payload?.managerEmail ??
     directManager?.email ??
     directManager?.username ??
-    directManager?.managerEmail ??
     "";
-  const email =
-    normalizeEmail(directEmail) ||
-    normalizeEmail(legacyManager?.managerEmail) ||
-    (normalizedId.startsWith("pending:") ? normalizeEmail(normalizedId.replace(/^pending:/i, "")) : "");
+  const email = normalizeEmail(directEmail);
 
   return { id, email };
 }
@@ -1143,103 +973,42 @@ function payloadIncludesReportingManager(payload: any = {}) {
     "directManager",
     "directManagerId",
     "directManagerEmail",
-    "manager",
-    "managerId",
-    "managerEmail",
-    "managers",
   ].some((key) => Object.prototype.hasOwnProperty.call(payload || {}, key));
 }
 
-function normalizeManagerChainEntries(managerChain: any[] = []) {
-  const seen = new Set<string>();
-  const entries: Array<{ manager: mongoose.Types.ObjectId; level: number }> = [];
+async function assertReportingHierarchyIsAcyclic(options: {
+  reportingManager: any;
+  employeeId?: string;
+  companyId: mongoose.Types.ObjectId;
+}) {
+  const employeeId = normalizeObjectIdLike(options.employeeId);
+  const seen = new Set<string>(employeeId ? [employeeId] : []);
+  let current = options.reportingManager;
 
-  for (const entry of Array.isArray(managerChain) ? managerChain : []) {
-    const managerId = normalizeObjectIdLike(entry?.manager);
-    if (!managerId || !mongoose.Types.ObjectId.isValid(managerId) || seen.has(managerId)) {
-      continue;
-    }
-
-    seen.add(managerId);
-    entries.push({
-      manager: new mongoose.Types.ObjectId(managerId),
-      level: entries.length + 1,
-    });
-  }
-
-  return entries;
-}
-
-function buildManagerChainFromManager(manager: any, excludeUserId?: string) {
-  const managerId = normalizeObjectIdLike(manager?._id || manager);
-  if (!managerId || !mongoose.Types.ObjectId.isValid(managerId)) {
-    return [];
-  }
-
-  const excludeId = normalizeObjectIdLike(excludeUserId);
-  const seen = new Set<string>(excludeId ? [excludeId] : []);
-  const rawIds = [
-    managerId,
-    ...(Array.isArray(manager?.managerChain)
-      ? manager.managerChain.map((entry: any) => normalizeObjectIdLike(entry?.manager))
-      : []),
-  ];
-  const chain: Array<{ manager: mongoose.Types.ObjectId; level: number }> = [];
-
-  for (const rawId of rawIds) {
-    if (!rawId || !mongoose.Types.ObjectId.isValid(rawId)) {
-      continue;
-    }
-
-    if (seen.has(rawId)) {
-      throw generateError("Circular reporting hierarchy is not allowed", 400);
-    }
-
-    if (chain.length >= 50) {
+  for (let depth = 0; current; depth += 1) {
+    if (depth >= 50) {
       throw generateError("Reporting hierarchy is too deep", 400);
     }
 
-    seen.add(rawId);
-    chain.push({
-      manager: new mongoose.Types.ObjectId(rawId),
-      level: chain.length + 1,
-    });
+    const currentId = normalizeObjectIdLike(current?._id || current);
+    if (!currentId || seen.has(currentId)) {
+      throw generateError("Circular reporting hierarchy is not allowed", 400);
+    }
+    seen.add(currentId);
+
+    const nextManagerId = normalizeObjectIdLike(current?.reportingManager);
+    if (!nextManagerId || !mongoose.Types.ObjectId.isValid(nextManagerId)) {
+      return;
+    }
+
+    current = await User.findOne({
+      _id: new mongoose.Types.ObjectId(nextManagerId),
+      company: options.companyId,
+      deletedAt: { $exists: false },
+    })
+      .select("_id reportingManager")
+      .lean();
   }
-
-  return chain;
-}
-
-async function hydrateManagerChain(managerChain: any[] = []) {
-  const entries = normalizeManagerChainEntries(managerChain);
-  const managerIds = entries.map((entry) => String(entry.manager));
-  const managerDocs = managerIds.length
-    ? await User.find({
-        _id: { $in: managerIds.map((managerId) => new mongoose.Types.ObjectId(managerId)) },
-        deletedAt: { $exists: false },
-      })
-        .select("_id name email username role designation")
-        .lean()
-    : [];
-  const managerById = new Map(managerDocs.map((manager: any) => [String(manager._id), manager]));
-
-  return entries.map((entry) => ({
-    ...entry,
-    managerDoc: managerById.get(String(entry.manager)) || null,
-  }));
-}
-
-async function buildLegacyManagersFromChain(managerChain: any[] = []) {
-  const hydratedChain = await hydrateManagerChain(managerChain);
-
-  return hydratedChain.map((entry) => {
-    const manager = entry.managerDoc;
-    return {
-      level: entry.level,
-      managerId: entry.manager,
-      managerEmail: normalizeEmail(manager?.email || manager?.username) || String(entry.manager),
-      status: manager ? "ASSIGNED" : "PENDING",
-    };
-  });
 }
 
 async function resolveReportingManagerForCompany({
@@ -1255,10 +1024,7 @@ async function resolveReportingManagerForCompany({
   const managerEmail = normalizeEmail(reportingManagerInput?.email);
 
   if (!managerId && !managerEmail) {
-    return {
-      reportingManager: null,
-      managerChain: [],
-    };
+    return { reportingManager: null };
   }
 
   const companyObjectId = new mongoose.Types.ObjectId(String(companyId));
@@ -1273,7 +1039,7 @@ async function resolveReportingManagerForCompany({
       _id: new mongoose.Types.ObjectId(managerId),
       company: companyObjectId,
       deletedAt: { $exists: false },
-    }).select("_id name email username role company managerChain is_enabled");
+    }).select("_id name email username role company reportingManager is_enabled");
   } else if (managerEmail) {
     reportingManager =
       (await findUserByEmail(managerEmail, excludeUserId, companyObjectId)) ||
@@ -1296,10 +1062,13 @@ async function resolveReportingManagerForCompany({
     throw generateError("Superadmin cannot be assigned as a company reporting manager", 400);
   }
 
-  return {
+  await assertReportingHierarchyIsAcyclic({
     reportingManager,
-    managerChain: buildManagerChainFromManager(reportingManager, excludeUserId),
-  };
+    employeeId: excludeUserId,
+    companyId: companyObjectId,
+  });
+
+  return { reportingManager };
 }
 
 async function resolveOfficeLocationForCompany(
@@ -1620,123 +1389,6 @@ function serializeManagerReference(value: any) {
   };
 }
 
-function serializeManagersForUser(user: any) {
-  const managerChain = Array.isArray(user?.managerChain)
-    ? [...user.managerChain].sort((a: any, b: any) => Number(a?.level || 0) - Number(b?.level || 0))
-    : [];
-
-  if (managerChain.length > 0) {
-    return managerChain.map((entry: any, index: number) => {
-      const manager = serializeManagerReference(entry?.manager);
-      const managerId = manager?._id || normalizeObjectIdLike(entry?.manager) || null;
-      return {
-        level: Number(entry?.level) || index + 1,
-        managerEmail: manager?.email || "",
-        managerName: manager?.name || "",
-        managerId,
-        manager,
-        status: managerId ? "ASSIGNED" : "PENDING",
-      };
-    });
-  }
-
-  return Array.isArray(user?.managers)
-    ? [...user.managers]
-        .sort((a: any, b: any) => Number(a?.level || 0) - Number(b?.level || 0))
-        .map((manager: any) => {
-          const managerRef = serializeManagerReference(manager?.managerId);
-          return {
-            level: manager?.level,
-            managerEmail: manager?.managerEmail,
-            managerName: manager?.managerName || managerRef?.name || "",
-            managerId: managerRef?._id || manager?.managerId || null,
-            manager: managerRef,
-            status: manager?.status || "PENDING",
-          };
-        })
-    : [];
-}
-
-export async function syncUserManagerStateById(userId: string | mongoose.Types.ObjectId) {
-  const user = await User.findById(userId);
-  if (!user) {
-    return null;
-  }
-
-  if (user.reportingManager) {
-    const reportingManager = await User.findOne({
-      _id: user.reportingManager,
-      company: user.company,
-      deletedAt: { $exists: false },
-    }).select("_id name email username role company managerChain is_enabled");
-
-    if (reportingManager && reportingManager.is_enabled !== false) {
-      const nextManagerChain = buildManagerChainFromManager(reportingManager, String(user._id));
-      user.managerChain = nextManagerChain as any;
-      user.assignedManagers = nextManagerChain.map((entry: any) => entry.manager) as any;
-      user.managers = await buildLegacyManagersFromChain(nextManagerChain) as any;
-    } else {
-      user.reportingManager = undefined;
-      user.managerChain = [] as any;
-      user.assignedManagers = [] as any;
-      user.managers = [] as any;
-    }
-  } else {
-    user.managers = await resolveManagers(
-      (user.managers || []) as ManagerInput[],
-      String(user._id),
-      String(user.company || "")
-    );
-    user.managerChain = normalizeManagerChainEntries(
-      (user.managers || [])
-        .filter((manager: any) => manager?.managerId && manager?.status === "ASSIGNED")
-        .map((manager: any) => ({ manager: manager.managerId }))
-    ) as any;
-    user.assignedManagers = (user.managerChain || []).map((entry: any) => entry.manager) as any;
-  }
-
-  user.is_active = calculateUserActiveState(user);
-  await user.save();
-  return user;
-}
-
-export async function syncSubordinateManagerChains(
-  managerId: string | mongoose.Types.ObjectId,
-  visited = new Set<string>()
-) {
-  const normalizedManagerId = normalizeObjectIdLike(managerId);
-  if (!normalizedManagerId || visited.has(normalizedManagerId)) {
-    return;
-  }
-
-  visited.add(normalizedManagerId);
-  const directReports = await User.find({
-    reportingManager: new mongoose.Types.ObjectId(normalizedManagerId),
-    deletedAt: { $exists: false },
-  }).select("_id");
-
-  for (const directReport of directReports) {
-    await syncUserManagerStateById(directReport._id);
-    await syncSubordinateManagerChains(directReport._id, visited);
-  }
-}
-
-export async function syncDependentUsersForManagerEmail(managerEmail: string) {
-  const normalizedManagerEmail = normalizePhoneNumber(managerEmail);
-  if (!normalizedManagerEmail) {
-    return;
-  }
-
-  const dependentUsers = await User.find({
-    "managers.managerEmail": normalizedManagerEmail,
-    deletedAt: { $exists: false },
-  });
-
-  for (const dependentUser of dependentUsers) {
-    await syncUserManagerStateById(dependentUser._id);
-  }
-}
-
 function serializeUser(user: any) {
   const userWithPermissions = attachEffectivePermissions({
     user,
@@ -1757,7 +1409,6 @@ function serializeUser(user: any) {
       ? user.createdBy
       : null;
   const reportingManager = serializeManagerReference(user?.reportingManager);
-  const managers = serializeManagersForUser(user);
   const lifecycleStatus = user?.is_enabled === false ? "INACTIVE" : user?.is_active ? "ACTIVE" : "PENDING";
 
   return {
@@ -1802,8 +1453,6 @@ function serializeUser(user: any) {
       : null,
     reportingManagerId: reportingManager?._id || normalizeObjectIdLike(user?.reportingManager) || "",
     reportingManager,
-    managerChain: managers,
-    managers,
     isActive: lifecycleStatus === "ACTIVE",
     is_active: Boolean(user?.is_active),
     isEnabled: user?.is_enabled !== false,
@@ -1825,15 +1474,6 @@ function serializeUser(user: any) {
     rolePermissionDefaults: userWithPermissions.rolePermissionDefaults || {},
     effectivePermissions: userWithPermissions.effectivePermissions || {},
   };
-}
-
-function parseManagersPayload(payloadManagers: any[]) {
-  return dedupeManagers((Array.isArray(payloadManagers) ? payloadManagers : [])
-    .map((manager, index) => ({
-      level: Number(manager?.level) || index + 1,
-      managerEmail: normalizePhoneNumber(manager?.managerEmail),
-    }))
-    .filter((manager) => manager.managerEmail));
 }
 
 async function saveManagedUser({
@@ -2092,10 +1732,7 @@ async function saveManagedUser({
     }
   }
 
-  const hasExistingReportingManager =
-    Boolean(user?.reportingManager) ||
-    (Array.isArray(user?.managerChain) && user.managerChain.length > 0) ||
-    (Array.isArray(user?.managers) && user.managers.length > 0);
+  const hasExistingReportingManager = Boolean(user?.reportingManager);
 
   if (
     shouldApplyReportingManager &&
@@ -2156,9 +1793,6 @@ async function saveManagedUser({
     }
 
     user.reportingManager = resolvedReportingManager.reportingManager?._id || undefined;
-    user.managerChain = resolvedReportingManager.managerChain as any;
-    user.assignedManagers = resolvedReportingManager.managerChain.map((entry) => entry.manager) as any;
-    user.managers = await buildLegacyManagersFromChain(resolvedReportingManager.managerChain) as any;
   }
   if (!user.profileId) {
     user.profileId = await generateUniqueProfileId(company.company_name || "USER");
@@ -2222,16 +1856,11 @@ async function saveManagedUser({
     await user.save();
   }
 
-  await syncSubordinateManagerChains(user._id);
-  await syncDependentUsersForManagerEmail(email || mobileNumber);
-
   const populatedUser = await User.findById(user._id)
       .populate("company", "company_name managerLevels")
       .populate("officeLocation", "name code address city state country pinCode is_active")
       .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation")
-      .populate("managerChain.manager", "name email username role designation")
-      .populate("managers.managerId", "name email username role");
+      .populate("reportingManager", "name email username role designation");
 
   if (setupInfo && populatedUser) {
     const emailResult = await sendSetupPasswordEmail(populatedUser);
@@ -2250,58 +1879,6 @@ async function saveManagedUser({
       normalizeText(effectiveCompanyName) &&
       normalizeText(effectiveCompanyName).toLowerCase() === company.company_name?.toLowerCase(),
   };
-}
-
-async function ensureManagerHierarchyUsers({
-  payload,
-  actor,
-}: {
-  payload: any;
-  actor: { role: string; companyId?: string; userId?: string; department?: string };
-}) {
-  const managersInput = parseManagersPayload(payload?.managers)
-    .filter((manager) => manager.managerEmail)
-    .sort((a, b) => b.level - a.level);
-
-  for (const manager of managersInput) {
-    const existingManager = await findUserByPhone(manager.managerEmail);
-    if (existingManager) {
-      continue;
-    }
-
-    const higherManagers = managersInput
-      .filter(
-        (candidate) =>
-          candidate.level > manager.level &&
-          candidate.managerEmail &&
-          candidate.managerEmail !== manager.managerEmail
-      )
-      .map((candidate) => ({
-        level: candidate.level,
-        managerEmail: candidate.managerEmail,
-      }));
-
-    await saveManagedUser({
-      payload: {
-        code: await generateUniqueUserCode(),
-        name: manager.managerName || deriveNameFromEmail(manager.managerEmail),
-        email: manager.managerEmail,
-        mobileNumber: manager.managerEmail,
-        role: `l${manager.level}-manager`,
-        companyId: payload?.companyId,
-        companyName: payload?.companyName,
-        companyManagerLevels: payload?.companyManagerLevels,
-        city: payload?.city,
-        state: payload?.state,
-        officeLocationId: payload?.officeLocationId || payload?.officeLocation,
-        department: actor.role === "departmenthead" ? actor.department : payload?.department,
-        team: payload?.team,
-        managers: higherManagers,
-      },
-      actor,
-      sendSetupEmail: true,
-    });
-  }
 }
 
 function getRequesterContext(req: any) {
@@ -2443,41 +2020,34 @@ async function parseBulkWorkbook(
   const roleColumn = resolveHeader("role");
   const companyColumn = resolveHeader("company");
   const passwordColumn = resolveHeader("password");
-  const managerColumnMap = new Map<number, { level: number; columnNumber: number }>();
-  headers.forEach((header: string, index: number) => {
-      const match = header.match(/^l\s*(\d+)\s*manager\s*phone\s*number(\s*\(name\))?$/i);
-      if (!match) {
-        return;
-      }
+  const reportingManagerColumn = resolveHeader(
+    "reporting manager email",
+    "reporting manager email (optional)",
+    "reporting manager",
+    "direct manager email"
+  );
+  const legacyManagerHeaders = headers.filter((header: string) =>
+    /^l\s*\d+\s*manager/i.test(header)
+  );
+  if (legacyManagerHeaders.length > 0) {
+    throw generateError(
+      "L1/L2 manager columns are no longer supported. Use Reporting Manager Email (Optional).",
+      400
+    );
+  }
 
-      const level = Number(match[1]);
-      if (!managerColumnMap.has(level)) {
-        managerColumnMap.set(level, {
-          level,
-          columnNumber: index + 1,
-        });
-      }
-    });
-  const managerColumns = Array.from(managerColumnMap.values()).sort((a, b) => a.level - b.level);
-
-  const fileManagerLevels =
-    managerColumns.reduce((max: number, managerColumn: any) => Math.max(max, managerColumn.level), 0) || 0;
   const explicitUploadRole = normalizeRole(options.uploadRole);
   const requestedUploadRole =
-    explicitUploadRole && !["admin", "superadmin", "departmenthead"].includes(explicitUploadRole)
-      ? explicitUploadRole
+    explicitUploadRole === "user"
+      ? "user"
       : "";
-  const companyManagerLevels = Math.max(1, Number(options.companyManagerLevels) || fileManagerLevels || 3);
-  const importHierarchyLevels = Math.max(1, fileManagerLevels || companyManagerLevels || 3);
-  const expectedManagerLevels = requestedUploadRole
-    ? getExpectedManagerLevelsForRole(requestedUploadRole, companyManagerLevels)
-    : [];
-  const expectedManagerLevelSet = new Set(expectedManagerLevels);
+  const companyManagerLevels = Math.max(1, Number(options.companyManagerLevels) || 3);
 
   const requiredHeaders = [
     { label: "Employee Code", column: employeeCodeColumn },
     { label: "Employee Name", column: nameColumn },
     { label: "Phone Number", column: mobileNumberColumn },
+    { label: "Email ID", column: emailColumn },
     { label: "Branch", column: departmentColumn },
   ];
 
@@ -2497,21 +2067,7 @@ async function parseBulkWorkbook(
   const seenCodes = new Set<string>();
 
   if (explicitUploadRole && !requestedUploadRole) {
-    throw generateError("Bulk upload only supports manager and employee/user roles", 400);
-  }
-
-  if (requestedUploadRole) {
-    const unexpectedManagerHeaders = managerColumns.filter(
-      (managerColumn: any) => !expectedManagerLevelSet.has(managerColumn.level)
-    );
-    if (unexpectedManagerHeaders.length > 0) {
-      throw generateError(
-        `Unexpected manager column(s) for ${getBulkUploadTypeLabel(requestedUploadRole, companyManagerLevels)}: ${unexpectedManagerHeaders
-          .map((managerColumn: any) => getManagerHeaderLabel(managerColumn.level))
-          .join(", ")}`,
-        400
-      );
-    }
+    throw generateError("Bulk upload currently supports employees only", 400);
   }
 
   for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
@@ -2532,18 +2088,13 @@ async function parseBulkWorkbook(
     const rawRole = normalizeText(readCell(roleColumn));
     const companyName = normalizeText(readCell(companyColumn)) || normalizeText(options.companyName);
     const password = normalizeText(readCell(passwordColumn));
+    const reportingManagerEmail = normalizeEmail(readCell(reportingManagerColumn));
 
-    const managers = dedupeManagers(
-      managerColumns.map((managerColumn: any) => ({
-        level: managerColumn.level,
-        managerEmail: normalizePhoneNumber(getCellValue(row.getCell(managerColumn.columnNumber))),
-      }))
-    );
     const role = requestedUploadRole
       ? requestedUploadRole
       : rawRole
         ? normalizeRole(rawRole)
-        : inferRoleFromManagers(managers, importHierarchyLevels);
+        : "user";
 
     const hasRowValues =
       Boolean(employeeCode) ||
@@ -2558,7 +2109,7 @@ async function parseBulkWorkbook(
       Boolean(joiningDate) ||
       Boolean(rawRole) ||
       Boolean(companyName) ||
-      managers.length > 0;
+      Boolean(reportingManagerEmail);
 
     if (!hasRowValues) {
       continue;
@@ -2577,7 +2128,9 @@ async function parseBulkWorkbook(
     if (mobileNumber && !isValidPhoneNumber(mobileNumber)) {
       errors.push("Phone number is invalid");
     }
-    if (email && !isValidEmail(email)) {
+    if (!email) {
+      errors.push("Email is required");
+    } else if (!isValidEmail(email)) {
       errors.push("Email is invalid");
     }
     if (!department && role !== "user" && role !== "admin" && role !== "superadmin") {
@@ -2598,14 +2151,14 @@ async function parseBulkWorkbook(
     if (employeeCode && seenCodes.has(employeeCode.toLowerCase())) {
       errors.push("Duplicate employee code in file");
     }
-    if (managers.some((manager: any) => normalizePhoneNumber(manager.managerEmail) === mobileNumber)) {
+    if (
+      reportingManagerEmail &&
+      [normalizeEmail(email), normalizePhoneNumber(mobileNumber)].includes(reportingManagerEmail)
+    ) {
       errors.push("A user cannot be their own manager");
     }
-    if (parseManagerRoleLevel(role) && Number(parseManagerRoleLevel(role)) > companyManagerLevels) {
+    if (parseManagerRoleLevel(role)) {
       errors.push("Manager-level roles are no longer supported");
-    }
-    if (managers.some((manager: any) => manager.level > companyManagerLevels)) {
-      errors.push("Legacy manager-level columns are no longer supported");
     }
 
     if (mobileNumber) {
@@ -2632,7 +2185,7 @@ async function parseBulkWorkbook(
         companyId: options.companyId,
         companyName,
         companyManagerLevels,
-        managers,
+        reportingManagerEmail,
         password,
         uploadRole: role,
       },
@@ -2659,9 +2212,8 @@ async function validateBulkRow(row: any) {
         })
       : null;
   const errors = [...row.errors];
-  const resolvedManagers = [];
-  const rowManagers = Array.isArray(row.payload.managers) ? row.payload.managers : [];
-  const assignedManagersByLevel = new Map<number, any>();
+  const reportingManagerEmail = normalizeEmail(row.payload.reportingManagerEmail);
+  let resolvedReportingManager: any = null;
 
   if (row.payload.department && existingCompany) {
     const companyDepartments = Array.isArray(existingCompany.departments) ? existingCompany.departments : [];
@@ -2701,59 +2253,26 @@ async function validateBulkRow(row: any) {
   });
   errors.push(...duplicateValidation.errors);
 
-  for (const managerInput of rowManagers) {
-    const managerEmail = normalizePhoneNumber(managerInput?.managerEmail);
-    const expectedRole = `l${Number(managerInput?.level)}-manager`;
-    const matchedManager = managerEmail ? await findUserByPhone(managerEmail) : null;
-    let managerStatus: string = "PENDING";
-
+  if (reportingManagerEmail) {
+    const matchedManager =
+      (await findUserByEmail(reportingManagerEmail)) ||
+      (await findUserByPhone(reportingManagerEmail));
     if (!matchedManager) {
-      managerStatus = "NOT_FOUND";
-      errors.push(`${getManagerHeaderLabel(Number(managerInput?.level))} not found: ${managerEmail}`);
+      errors.push(`Reporting manager not found: ${reportingManagerEmail}`);
     } else if (
       existingCompany &&
       String(matchedManager.company || "") !== String(existingCompany._id)
     ) {
-      managerStatus = "WRONG_COMPANY";
-      errors.push(`${getManagerHeaderLabel(Number(managerInput?.level))} not found in the selected company: ${managerEmail}`);
-    } else if (normalizeRole(matchedManager.role || matchedManager.userType) !== expectedRole) {
-      managerStatus = "INVALID_ROLE";
-      errors.push(`${managerEmail} is not an ${expectedRole.toUpperCase()} user`);
+      errors.push(`Reporting manager is not in the selected company: ${reportingManagerEmail}`);
+    } else if (["admin", "superadmin"].includes(normalizeRole(matchedManager.role || matchedManager.userType))) {
+      errors.push("Admin and superadmin accounts cannot be reporting managers");
     } else {
-      managerStatus = "ASSIGNED";
-      assignedManagersByLevel.set(Number(managerInput.level), matchedManager);
-    }
-
-    resolvedManagers.push({
-      level: Number(managerInput.level),
-      managerEmail,
-      status: managerStatus,
-    });
-  }
-
-  for (const managerInput of rowManagers) {
-    const managerLevel = Number(managerInput.level);
-    const currentManager = assignedManagersByLevel.get(managerLevel);
-    if (!currentManager) {
-      continue;
-    }
-
-    const configuredManagers = Array.isArray(currentManager.managers) ? currentManager.managers : [];
-    const higherManagers = rowManagers.filter((candidate: any) => Number(candidate.level) > managerLevel);
-    for (const higherManager of higherManagers) {
-      const hasMatchingHierarchy = configuredManagers.some(
-        (configuredManager: any) =>
-          Number(configuredManager?.level) === Number(higherManager.level) &&
-          normalizePhoneNumber(configuredManager?.managerEmail) === normalizePhoneNumber(higherManager.managerEmail)
-      );
-
-      if (!hasMatchingHierarchy) {
-        errors.push(
-          `${getManagerHeaderLabel(managerLevel)} ${normalizePhoneNumber(managerInput.managerEmail)} is not linked to ${getManagerHeaderLabel(
-            Number(higherManager.level)
-          )} ${normalizePhoneNumber(higherManager.managerEmail)}`
-        );
-      }
+      resolvedReportingManager = {
+        _id: matchedManager._id,
+        name: matchedManager.name || "",
+        email: matchedManager.email || matchedManager.username || reportingManagerEmail,
+        status: "ASSIGNED",
+      };
     }
   }
 
@@ -2762,7 +2281,7 @@ async function validateBulkRow(row: any) {
     existingPhoneUser,
     existingCodeUser,
     existingCompany,
-    resolvedManagers,
+    resolvedReportingManager,
     errors,
     skipReason: duplicateValidation.skipReason,
   };
@@ -2789,11 +2308,7 @@ async function buildBulkPreview(rows: any[]) {
       companyStatus: validation.existingCompany ? "EXISTS" : "WILL_CREATE",
       action: validation.existingEmailUser || validation.existingPhoneUser || validation.existingCodeUser ? "SKIP" : "CREATE",
       skipReason: validation.skipReason,
-      managers: validation.resolvedManagers.map((manager: any) => ({
-        level: manager.level,
-        managerEmail: manager.managerEmail,
-        status: manager.status,
-      })),
+      reportingManager: validation.resolvedReportingManager,
       errors: validation.errors,
     });
   }
@@ -2989,8 +2504,6 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
           .populate("officeLocation", "name code address city state country pinCode is_active")
           .populate("createdBy", "name email username role")
           .populate("reportingManager", "name email username role designation")
-          .populate("managerChain.manager", "name email username role designation")
-          .populate("managers.managerId", "name email username role")
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
@@ -3385,11 +2898,7 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
 
     const directReportCount = await User.countDocuments({
       deletedAt: { $exists: false },
-      $or: [
-        { reportingManager: targetUser._id },
-        { assignedManagers: targetUser._id },
-        { managers: { $elemMatch: { managerId: targetUser._id, status: "ASSIGNED" } } },
-      ],
+      reportingManager: targetUser._id,
     });
 
     if (directReportCount > 0) {
@@ -3421,9 +2930,6 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
       });
     });
 
-    await syncSubordinateManagerChains(targetUser._id);
-    await syncDependentUsersForManagerEmail(targetUser.email || targetUser.username || "");
-
     return res.status(200).json({
       success: true,
       message: "User deleted successfully",
@@ -3447,9 +2953,7 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
     const targetUser = await User.findById(req.params.id)
       .populate("company", "company_name managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation")
-      .populate("managerChain.manager", "name email username role designation")
-      .populate("managers.managerId", "name email username role");
+      .populate("reportingManager", "name email username role designation");
 
     if (!targetUser || targetUser.deletedAt) {
       throw generateError("User not found", 404);
@@ -3614,9 +3118,7 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
     const targetUser = await User.findById(req.params.id)
       .populate("company", "company_name managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation")
-      .populate("managerChain.manager", "name email username role designation")
-      .populate("managers.managerId", "name email username role");
+      .populate("reportingManager", "name email username role designation");
 
     if (!targetUser || targetUser.deletedAt) {
       throw generateError("User not found", 404);
@@ -3833,9 +3335,7 @@ export async function setPasswordFromSetupToken(token: string, password: string)
   const populatedUser = await User.findById(user._id)
       .populate("company", "company_name managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation")
-      .populate("managerChain.manager", "name email username role designation")
-      .populate("managers.managerId", "name email username role");
+      .populate("reportingManager", "name email username role designation");
 
   return serializeUser(populatedUser);
 }

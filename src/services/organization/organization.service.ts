@@ -87,26 +87,7 @@ function exactListIncludes(values: string[], value: unknown) {
 }
 
 function getDirectManagerId(user: any) {
-  const directManagerId = normalizeObjectId(user?.reportingManager);
-  if (directManagerId) {
-    return directManagerId;
-  }
-
-  const managerChain = Array.isArray(user?.managerChain)
-    ? [...user.managerChain].sort((left, right) => Number(left?.level || 0) - Number(right?.level || 0))
-    : [];
-  const firstChainManager = normalizeObjectId(managerChain[0]?.manager);
-  if (firstChainManager) {
-    return firstChainManager;
-  }
-
-  const legacyManagers = Array.isArray(user?.managers)
-    ? [...user.managers]
-        .filter((entry) => String(entry?.status || "").toUpperCase() === "ASSIGNED")
-        .sort((left, right) => Number(left?.level || 0) - Number(right?.level || 0))
-    : [];
-
-  return normalizeObjectId(legacyManagers[0]?.managerId);
+  return normalizeObjectId(user?.reportingManager);
 }
 
 function isWorkforceAccount(user: any) {
@@ -491,7 +472,7 @@ export const getOrganizationHierarchyService = async (
     })
       .select(
         "name email username code profileId pic role userType designation department team officeLocation " +
-          "reportingManager managerChain managers is_active is_enabled"
+          "reportingManager is_active is_enabled"
       )
       .populate("officeLocation", "name code city state")
       .lean();

@@ -341,15 +341,13 @@ async function buildUserSignals(users: any[]) {
 
 function serializeNotificationUser(user: any) {
   const lifecycleStatus = user?.is_enabled === false ? "inactive" : user?.is_active ? "active" : "pending";
-  const managers = Array.isArray(user?.managers)
-    ? user.managers.map((manager: any) => ({
-        level: manager?.level,
-        managerEmail: manager?.managerEmail,
-        managerName: manager?.managerId?.name || "",
-        managerId: manager?.managerId?._id || manager?.managerId || null,
-        status: manager?.status || "PENDING",
-      }))
-    : [];
+  const reportingManager = user?.reportingManager && typeof user.reportingManager === "object"
+    ? {
+        _id: user.reportingManager._id,
+        name: user.reportingManager.name || "",
+        email: user.reportingManager.email || user.reportingManager.username || "",
+      }
+    : null;
 
   return {
     _id: user._id,
@@ -360,7 +358,7 @@ function serializeNotificationUser(user: any) {
     designation: user.designation || "",
     isActive: lifecycleStatus === "active",
     status: lifecycleStatus,
-    managers,
+    reportingManager,
     notificationSignals: user.notificationSignals,
   };
 }
@@ -398,11 +396,11 @@ function applyNotificationFilters(users: any[], filters: any = {}) {
     }
 
     if (managers.length) {
-      const managerValues = (serialized.managers || []).flatMap((manager: any) => [
-        normalizeLower(manager.managerEmail),
-        normalizeLower(manager.managerName),
-        normalizeLower(manager.managerId),
-      ]);
+      const managerValues = [
+        normalizeLower(serialized.reportingManager?.email),
+        normalizeLower(serialized.reportingManager?.name),
+        normalizeLower(serialized.reportingManager?._id),
+      ];
       if (!managers.some((manager) => managerValues.includes(manager))) {
         return false;
       }
@@ -445,7 +443,7 @@ async function loadCompanyNotificationUsers(companyId: string) {
     company: new mongoose.Types.ObjectId(companyId),
     deletedAt: { $exists: false },
   })
-    .populate("managers.managerId", "name email username role")
+    .populate("reportingManager", "name email username role")
     .sort({ name: 1, email: 1 })
     .lean();
 
@@ -476,13 +474,13 @@ export async function listCompanyNotificationUsers(req: Request, res: Response) 
     const managers = Array.from(
       new Map(
         serializedUsers
-          .flatMap((user) => user.managers || [])
-          .filter((manager: any) => manager.managerEmail)
+          .map((user) => user.reportingManager)
+          .filter((manager: any) => manager?.email)
           .map((manager: any) => [
-            String(manager.managerEmail).toLowerCase(),
+            String(manager.email).toLowerCase(),
             {
-              label: manager.managerName || manager.managerEmail,
-              value: manager.managerEmail,
+              label: manager.name || manager.email,
+              value: manager.email,
             },
           ])
       ).values()

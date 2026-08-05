@@ -32,9 +32,44 @@ import {
 } from "../../services/permissions/permission.utils";
 
 dotenv.config();
+
+async function getReportingDescendantIds(
+  companyId: string,
+  managerId: mongoose.Types.ObjectId
+) {
+  const users = await User.find({
+    company: new mongoose.Types.ObjectId(companyId),
+    deletedAt: { $exists: false },
+  })
+    .select("_id reportingManager")
+    .lean();
+  const directReportsByManager = new Map<string, mongoose.Types.ObjectId[]>();
+  users.forEach((user: any) => {
+    const reportingManagerId = String(user?.reportingManager || "");
+    if (!reportingManagerId) return;
+    directReportsByManager.set(reportingManagerId, [
+      ...(directReportsByManager.get(reportingManagerId) || []),
+      user._id,
+    ]);
+  });
+
+  const descendants: mongoose.Types.ObjectId[] = [];
+  const queue = [...(directReportsByManager.get(String(managerId)) || [])];
+  const visited = new Set<string>();
+  while (queue.length > 0) {
+    const userId = queue.shift()!;
+    const normalizedId = String(userId);
+    if (visited.has(normalizedId)) continue;
+    visited.add(normalizedId);
+    descendants.push(userId);
+    queue.push(...(directReportsByManager.get(normalizedId) || []));
+  }
+  return descendants;
+}
+
 const MeUser = async (req: any, res: Response): Promise<any> => {
 
-  const [profile_details, companyDetails, linkedCompanyDocuments] = await Promise.all([
+  const [profile_details, companyDetails, linkedCompanyDocuments, reportingManager] = await Promise.all([
     ProfileDetails.findById(req.bodyData.profile_details),
     req.bodyData?.company ? Company.findById(req.bodyData.company) : null,
     Company.find({
@@ -45,6 +80,11 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
       .populate("companyOrg", "company_name companyCode primaryThemeColor sidebarColors is_active")
       .sort({ lastActiveAt: -1, createdAt: -1 })
       .lean(),
+    req.bodyData?.reportingManager
+      ? User.findById(req.bodyData.reportingManager)
+          .select("_id name email username role designation")
+          .lean()
+      : null,
   ]);
 
   const memberships = linkedCompanyDocuments.map((membership: any) => {
@@ -68,7 +108,12 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
     memberships[0] ||
     null;
   const activeCompany = activeMembership?.company || companyDetails || null;
-  const identity = { ...req.bodyData, profile_details, companyDetails };
+  const identity = {
+    ...req.bodyData,
+    profile_details,
+    companyDetails,
+    reportingManager: reportingManager || null,
+  };
 
   return res.status(200).send({
     message: `get successfully data`,
@@ -426,15 +471,7 @@ const getUsersByCompany = async (
           const excludedUserObjectId = new mongoose.Types.ObjectId(String(excludeUserId));
           const descendantIds =
             effectiveCompanyId && mongoose.Types.ObjectId.isValid(effectiveCompanyId)
-              ? await User.distinct("_id", {
-                  company: new mongoose.Types.ObjectId(effectiveCompanyId),
-                  deletedAt: { $exists: false },
-                  $or: [
-                    { reportingManager: excludedUserObjectId },
-                    { "managerChain.manager": excludedUserObjectId },
-                    { assignedManagers: excludedUserObjectId },
-                  ],
-                })
+              ? await getReportingDescendantIds(effectiveCompanyId, excludedUserObjectId)
               : [];
 
           matchConditions._id = {

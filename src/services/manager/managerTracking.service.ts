@@ -48,7 +48,7 @@ function averageNullableNumbers(values: Array<number | null | undefined>) {
 
 async function getManagerUser(actorUserId: string) {
   const manager = await User.findById(actorUserId)
-    .select("_id name email username role reportingManager managerChain assignedManagers managers")
+    .select("_id name email username role reportingManager")
     .lean();
 
   if (!manager) {
@@ -58,12 +58,7 @@ async function getManagerUser(actorUserId: string) {
   const managedLearnerCount = await User.countDocuments({
     _id: { $ne: manager._id },
     deletedAt: { $exists: false },
-    $or: [
-      { reportingManager: manager._id },
-      { "managerChain.manager": manager._id },
-      { assignedManagers: manager._id },
-      { managers: { $elemMatch: { managerId: manager._id, status: "ASSIGNED" } } },
-    ],
+    reportingManager: manager._id,
   });
 
   if (!isManagerRole(manager.role) && managedLearnerCount === 0) {
@@ -75,26 +70,32 @@ async function getManagerUser(actorUserId: string) {
 
 async function getManagedLearners(manager: any) {
   const managerObjectId = new mongoose.Types.ObjectId(String(manager._id));
-  const managerEmail = normalizeString(manager.email).toLowerCase();
+  const managedLearners: any[] = [];
+  const visited = new Set<string>([String(managerObjectId)]);
+  let managerIds = [managerObjectId];
 
-  const query: any = {
-    _id: { $ne: managerObjectId },
-    deletedAt: { $exists: false },
-    $or: [
-      { reportingManager: managerObjectId },
-      { "managerChain.manager": managerObjectId },
-      { assignedManagers: managerObjectId },
-      { managers: { $elemMatch: { managerId: managerObjectId, status: "ASSIGNED" } } },
-      managerEmail
-        ? { managers: { $elemMatch: { managerEmail, status: "ASSIGNED" } } }
-        : null,
-    ].filter(Boolean),
-  };
+  while (managerIds.length > 0) {
+    const directReports = await User.find({
+      reportingManager: { $in: managerIds },
+      deletedAt: { $exists: false },
+    })
+      .select("_id name email username role department company reportingManager")
+      .lean();
+    managerIds = [];
+    directReports.forEach((directReport: any) => {
+      const directReportId = String(directReport._id);
+      if (visited.has(directReportId)) return;
+      visited.add(directReportId);
+      managedLearners.push(directReport);
+      managerIds.push(directReport._id);
+    });
+  }
 
-  return User.find(query)
-    .select("_id name email username role department company reportingManager managerChain managers assignedManagers")
-    .sort({ name: 1, email: 1, username: 1 })
-    .lean();
+  return managedLearners.sort((left, right) =>
+    normalizeString(left.name || left.email || left.username).localeCompare(
+      normalizeString(right.name || right.email || right.username)
+    )
+  );
 }
 
 async function assertManagerLearnerAccess(actor: any, learnerIdValue: unknown) {

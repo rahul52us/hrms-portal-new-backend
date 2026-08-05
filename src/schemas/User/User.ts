@@ -28,17 +28,6 @@ export interface UserInterface extends Document {
   company: Schema.Types.ObjectId;
   createdBy?: Schema.Types.ObjectId;
   reportingManager?: Schema.Types.ObjectId;
-  managerChain?: {
-    manager: Schema.Types.ObjectId;
-    level: number;
-  }[];
-  assignedManagers?: Schema.Types.ObjectId[];
-  managers?: {
-    level: number;
-    managerId?: Schema.Types.ObjectId;
-    managerEmail: string;
-    status: "ASSIGNED" | "PENDING";
-  }[];
   profile_details: Schema.Types.ObjectId;
   is_active: boolean;
   is_enabled?: boolean;
@@ -101,27 +90,6 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     type: Schema.Types.ObjectId,
     ref: "User",
     index: true,
-  },
-  managerChain: {
-    type: [{
-      manager: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-      level: { type: Number, required: true },
-    }],
-    default: [],
-  },
-  assignedManagers: {
-    type: [{ type: Schema.Types.ObjectId, ref: "User" }],
-    default: [],
-    index: true,
-  },
-  managers: {
-    type: [{
-      level: { type: Number, required: true },
-      managerId: { type: Schema.Types.ObjectId, ref: "User" },
-      managerEmail: { type: String, required: true, trim: true, lowercase: true },
-      status: { type: String, enum: ["ASSIGNED", "PENDING"], default: "PENDING" },
-    }],
-    default: [],
   },
   userType:{type: String, required: true, index: true, trim: true},
   pic: {
