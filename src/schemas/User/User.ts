@@ -159,5 +159,8 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   },
 });
 
+UserSchema.index({ company: 1, reportingManager: 1, deletedAt: 1 });
+UserSchema.index({ company: 1, name: 1, _id: 1 });
+
 const UserModel = mongoose.model<UserInterface>("User", UserSchema);
 export default UserModel;
