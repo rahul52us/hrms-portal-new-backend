@@ -5,6 +5,7 @@ import Department from "../../schemas/Department/Department.schema";
 import EmployeeAssignmentHistory from "../../schemas/EmployeeAssignment/EmployeeAssignmentHistory.schema";
 import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import User from "../../schemas/User/User";
+import { ensureCurrentEmployeeAssignment } from "../employeeAssignment/employeeAssignment.service";
 import AttendancePolicy from "../../schemas/WorkforcePolicy/AttendancePolicy.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import HolidayCalendar from "../../schemas/WorkforcePolicy/HolidayCalendar.schema";
@@ -533,7 +534,9 @@ export async function resolveEmployeePolicyService(req: any, res: Response, next
     const employee = await User.findOne({
       _id: new mongoose.Types.ObjectId(employeeId),
     })
-      .select("_id company name email username role department team officeLocation")
+      .select(
+        "_id company name email username role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
+      )
       .lean();
     if (!employee || !employee.company) throw generateError("Employee not found", 404);
     const actorRole = normalizeRole(actor?.role || actor?.userType);
@@ -541,7 +544,7 @@ export async function resolveEmployeePolicyService(req: any, res: Response, next
     if (actorRole !== "superadmin" && actorCompanyId !== String(employee.company)) {
       throw generateError("You can only resolve policies from your company", 403);
     }
-    const assignmentHistory = await EmployeeAssignmentHistory.findOne({
+    let assignmentHistory = await EmployeeAssignmentHistory.findOne({
       company: employee.company,
       employee: employee._id,
       effectiveFrom: { $lte: at },
@@ -549,6 +552,27 @@ export async function resolveEmployeePolicyService(req: any, res: Response, next
     })
       .sort({ effectiveFrom: -1 })
       .lean();
+
+    if (!assignmentHistory) {
+      const anyAssignmentHistory = await EmployeeAssignmentHistory.exists({
+        company: employee.company,
+        employee: employee._id,
+      });
+      if (!anyAssignmentHistory && !employee.deletedAt) {
+        await ensureCurrentEmployeeAssignment({
+          user: employee,
+          source: "workforce_policy_resolution_backfill",
+        });
+        assignmentHistory = await EmployeeAssignmentHistory.findOne({
+          company: employee.company,
+          employee: employee._id,
+          effectiveFrom: { $lte: at },
+          $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }],
+        })
+          .sort({ effectiveFrom: -1 })
+          .lean();
+      }
+    }
     assertHistoricalEmployeeAccess(actor, employee, assignmentHistory);
 
     const departmentId = normalizeText(assignmentHistory?.department);

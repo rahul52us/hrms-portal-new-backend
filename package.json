@@ -9,6 +9,7 @@
     "scorm:cleanup-questionbank": "ts-node src/scripts/cleanupScormQuestionBank.ts",
     "certificates:seed": "ts-node src/scripts/seedCertificateTemplates.ts",
     "assignments:backfill": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts",
+    "assignments:backfill:apply": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts --apply",
     "workforce:schedules:migrate": "ts-node src/scripts/migrateAttendanceSchedules.ts",
     "workforce:schedules:migrate:apply": "ts-node src/scripts/migrateAttendanceSchedules.ts --apply",
     "users:reporting-manager:migrate": "ts-node src/scripts/migrateUserReportingManager.ts",

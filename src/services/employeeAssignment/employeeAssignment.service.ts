@@ -96,7 +96,9 @@ export async function buildEmployeeAssignmentSnapshot(
 
   if (!officeLocation && officeLocationId) {
     officeLocation = await withSession<any>(
-      OfficeLocation.findById(officeLocationId).select("name code").lean(),
+      OfficeLocation.findOne({ _id: officeLocationId, company })
+        .select("name code")
+        .lean(),
       options.session
     );
   }
@@ -109,7 +111,9 @@ export async function buildEmployeeAssignmentSnapshot(
 
   if (!reportingManager && reportingManagerId) {
     reportingManager = await withSession<any>(
-      User.findById(reportingManagerId).select("name email username").lean(),
+      User.findOne({ _id: reportingManagerId, company })
+        .select("name email username")
+        .lean(),
       options.session
     );
   }
@@ -348,16 +352,30 @@ export async function ensureCurrentEmployeeAssignment(options: {
   const existing = await existingQuery;
   if (existing) return existing;
 
-  return recordEmployeeAssignmentChange({
-    user: options.user,
-    changedBy: options.changedBy,
-    changeType: "initial_assignment",
-    changeReason: "Initial HRMS assignment history",
-    source: options.source || "history_backfill",
-    effectiveAt:
-      options.user?.joiningDate || options.user?.createdAt || new Date(),
-    session: options.session,
-  });
+  try {
+    return await recordEmployeeAssignmentChange({
+      user: options.user,
+      changedBy: options.changedBy,
+      changeType: "initial_assignment",
+      changeReason: "Initial HRMS assignment history",
+      source: options.source || "history_backfill",
+      effectiveAt:
+        options.user?.joiningDate || options.user?.createdAt || new Date(),
+      session: options.session,
+    });
+  } catch (error: any) {
+    if (error?.code !== 11000) throw error;
+
+    let concurrentQuery = EmployeeAssignmentHistory.findOne({
+      company: companyId,
+      employee: employeeId,
+      isCurrent: true,
+    });
+    if (options.session) concurrentQuery = concurrentQuery.session(options.session);
+    const concurrent = await concurrentQuery;
+    if (concurrent) return concurrent;
+    throw error;
+  }
 }
 
 export async function closeCurrentEmployeeAssignment(options: {
