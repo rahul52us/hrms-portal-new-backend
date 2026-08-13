@@ -514,8 +514,24 @@ export const getManagedCompanies = async (data: any) => {
                 _id: 1,
                 name: 1,
                 username: 1,
-                is_active: 1,
                 is_enabled: 1,
+                isEnabled: { $ne: ["$is_enabled", false] },
+                hasPassword: {
+                  $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0],
+                },
+                status: {
+                  $cond: [
+                    { $eq: ["$is_enabled", false] },
+                    "INACTIVE",
+                    {
+                      $cond: [
+                        { $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0] },
+                        "ACTIVE",
+                        "PENDING",
+                      ],
+                    },
+                  ],
+                },
                 createdAt: 1,
               },
             },
@@ -539,8 +555,10 @@ export const getManagedCompanies = async (data: any) => {
               $project: {
                 _id: 1,
                 role: 1,
-                is_active: 1,
                 is_enabled: 1,
+                hasPassword: {
+                  $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0],
+                },
               },
             },
           ],
@@ -596,8 +614,10 @@ export const getManagedCompanies = async (data: any) => {
               $project: {
                 _id: 1,
                 role: 1,
-                is_active: 1,
                 is_enabled: 1,
+                hasPassword: {
+                  $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0],
+                },
               },
             },
           ],
@@ -614,8 +634,8 @@ export const getManagedCompanies = async (data: any) => {
                 as: "admin",
                 cond: {
                   $and: [
-                    { $eq: ["$$admin.is_active", true] },
                     { $ne: ["$$admin.is_enabled", false] },
+                    { $eq: ["$$admin.hasPassword", true] },
                   ],
                 },
               },
@@ -643,8 +663,8 @@ export const getManagedCompanies = async (data: any) => {
                   as: "user",
                   cond: {
                     $and: [
-                      { $eq: ["$$user.is_active", true] },
                       { $ne: ["$$user.is_enabled", false] },
+                      { $eq: ["$$user.hasPassword", true] },
                     ],
                   },
                 },
@@ -661,8 +681,8 @@ export const getManagedCompanies = async (data: any) => {
                   as: "user",
                   cond: {
                     $and: [
-                      { $eq: ["$$user.is_active", true] },
                       { $ne: ["$$user.is_enabled", false] },
+                      { $eq: ["$$user.hasPassword", true] },
                     ],
                   },
                 },

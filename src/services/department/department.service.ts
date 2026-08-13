@@ -18,6 +18,7 @@ import {
   ensureCurrentEmployeeAssignment,
   recordEmployeeAssignmentChange,
 } from "../employeeAssignment/employeeAssignment.service";
+import { isUserAccountActive } from "../auth/utils/userAccountStatus";
 
 const getScopedCompanyId = (req: any) => {
   const role = String(
@@ -130,7 +131,7 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
     department: { $in: departmentNames },
     deletedAt: { $exists: false },
   })
-    .select("department role userType is_active is_enabled")
+    .select("department role userType is_enabled password")
     .lean();
 
   const statsByDepartment = users.reduce<Record<string, any>>((acc, user: any) => {
@@ -144,7 +145,7 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
     }
 
     acc[key].employeeCount += 1;
-    if (user.is_active && user.is_enabled !== false) {
+    if (isUserAccountActive(user)) {
       acc[key].activeEmployeeCount += 1;
     }
     if (isManagerRole(user.role || user.userType)) {
@@ -359,7 +360,7 @@ const getDepartmentTransferPreview = async (department: any) => {
       deletedAt: null,
     })
       .select(
-        "name email username code role userType team designation officeLocation reportingManager is_active is_enabled"
+        "name email username code role userType team designation officeLocation reportingManager is_enabled password"
       )
       .populate("officeLocation", "name code city state")
       .populate("reportingManager", "name email username")
@@ -392,7 +393,7 @@ const getDepartmentTransferPreview = async (department: any) => {
       designation: employee.designation || "",
       officeLocation: employee.officeLocation || null,
       reportingManager: employee.reportingManager || null,
-      isActive: Boolean(employee.is_active) && employee.is_enabled !== false,
+      isActive: isUserAccountActive(employee),
       isDepartmentHead:
         String(employee._id) === String(department?.departmentHead || ""),
     })),

@@ -21,7 +21,6 @@ const UserValidation = Joi.object({
   }),
   refrenceBy:Joi.any(),
   pic: Joi.string().allow("").optional(),
-  is_active: Joi.boolean().default(true),
   role: Joi.string().valid("user", "admin", "superadmin", "manager", "customer", "support").default("user"),
   company: Joi.string().when("role", {
     is: Joi.not("superadmin"),

@@ -29,6 +29,7 @@ import { serializeScormTrackingRecord } from "../scorm/scormAnswerReview.helpers
 import {
   getCourseQuizAnswerSectionsForUser,
 } from "../course/courseQuiz.service";
+import { isUserAccountActive } from "../auth/utils/userAccountStatus";
 
 const LEARNER_ROLES = new Set(["learner", "student", "patient", "user"]);
 const COMPLETED_STATUSES = new Set(["completed", "passed"]);
@@ -68,7 +69,7 @@ function isLearner(user: any) {
 }
 
 function isActive(user: any) {
-  return user?.is_active === true && user?.is_enabled !== false;
+  return isUserAccountActive(user);
 }
 
 function maxDate(values: any[]) {
@@ -433,7 +434,7 @@ function sortRows(rows: any[], query: any) {
 async function loadResultContext(actor: any, query: any) {
   const scope = await resolveActorScope(actor);
   let users = await User.find(buildUserMatch(scope, query))
-    .select("_id name email username mobileNumber role userType company department is_active is_enabled")
+    .select("_id name email username mobileNumber role userType company department is_enabled password")
     .lean();
   users = (await filterUsersByDepartment(users, scope, query)).filter(isLearner);
 
@@ -686,7 +687,7 @@ export const getLearnerResultDetailService = async (
       companyId: req.query.companyId,
       userId: stringifyId(enrollment.userId),
     }))
-      .select("_id name email username mobileNumber role userType company department is_active is_enabled")
+      .select("_id name email username mobileNumber role userType company department is_enabled password")
       .lean();
     users = (await filterUsersByDepartment(users, scope, {})).filter(isLearner);
     const learner = users.find((user) => stringifyId(user._id) === stringifyId(enrollment.userId));

@@ -21,6 +21,7 @@ import {
 import { getVisibleCourseScopeForUser } from "../course/courseScope.helpers";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
 import { buildSuperadminDashboardSummary } from "./superadminDashboard.service";
+import { isUserAccountActive } from "../auth/utils/userAccountStatus";
 
 type DashboardFilters = {
   from?: Date;
@@ -125,7 +126,7 @@ function isManager(user: any) {
 }
 
 function isUserActive(user: any) {
-  return user?.is_active === true && user?.is_enabled !== false;
+  return isUserAccountActive(user);
 }
 
 function buildChartEntries(map: Map<string, number>) {
@@ -346,7 +347,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
 
   const directScopedUsers = await User.find(userMatch)
     .select(
-      "_id name email username role userType department is_active is_enabled createdAt updatedAt"
+      "_id name email username role userType department is_enabled password createdAt updatedAt"
     )
     .sort({ createdAt: -1 })
     .lean();
@@ -383,7 +384,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
         deletedAt: { $exists: false },
       })
         .select(
-          "_id name email username role userType department is_active is_enabled createdAt updatedAt"
+          "_id name email username role userType department is_enabled password createdAt updatedAt"
         )
         .sort({ createdAt: -1 })
         .lean()

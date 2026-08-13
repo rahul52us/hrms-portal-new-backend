@@ -29,11 +29,10 @@ export interface UserInterface extends Document {
   createdBy?: Schema.Types.ObjectId;
   reportingManager?: Schema.Types.ObjectId;
   profile_details: Schema.Types.ObjectId;
-  is_active: boolean;
-  is_enabled?: boolean;
+  is_enabled: boolean;
   role: string;
   userType:string;
-  password: string;
+  password?: string;
   setupToken?: string;
   setupTokenExpiry?: Date;
   deletedAt?: Date;
@@ -105,8 +104,7 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   },
   bio: { type: String, trim: true },
   profile_details: { type: Schema.Types.ObjectId, ref: "ProfileDetails" },
-  is_active: { type: Boolean, default: false },
-  is_enabled: { type: Boolean, default: true },
+  is_enabled: { type: Boolean, default: true, required: true },
   role: {
     type: String,
     default: "user"

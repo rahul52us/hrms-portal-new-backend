@@ -6,6 +6,10 @@ import Company from "../../schemas/company/Company";
 import { generateError, handleErrorMessage } from "./function";
 import { attachEffectivePermissions } from "../../services/permissions/permission.utils";
 import { ensureUserAccountEnabled } from "../../services/company/utils/activityGuards";
+import {
+  canUserLogin,
+  getUserAccountStatus,
+} from "../../services/auth/utils/userAccountStatus";
 
 dotenv.config();
 
@@ -28,6 +32,9 @@ const authenticate = async (req: any, res: Response, next: NextFunction) => {
       throw generateError("Unauthorized User", 401);
     }
     ensureUserAccountEnabled(user);
+    if (!canUserLogin(user)) {
+      throw generateError("Account setup is incomplete. Set your password before signing in.", 403);
+    }
     const company =
       user.company
         ? await Company.findById(user.company)
@@ -38,7 +45,14 @@ const authenticate = async (req: any, res: Response, next: NextFunction) => {
       user,
       company,
     });
-    const { password, ...userData } = userWithPermissions;
+    const { password, is_active: _legacyIsActive, ...storedUserData } = userWithPermissions as any;
+    const userData = {
+      ...storedUserData,
+      status: getUserAccountStatus(user),
+      isEnabled: user.is_enabled !== false,
+      is_enabled: user.is_enabled !== false,
+      canLogin: canUserLogin(user),
+    };
 
     req.userId = decoded.userId;
     req.user = userData;

@@ -19,6 +19,7 @@ import Qualification from "../../schemas/User/Qualifications";
 // import SalaryStructure from "../../schemas/salaryStructure/SalaryStructure.schema";
 import companyDetails from "../../schemas/company/companyDetails";
 import Company from "../../schemas/company/Company";
+import { ACTIVE_USER_PASSWORD_MATCH } from "../../services/auth/utils/userAccountStatus";
 
 async function generateUniqueCode(this: any): Promise<string> {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_-";
@@ -128,7 +129,6 @@ const createAdminUser = async (data: any) => {
       userType: data.userType,
       password: hashedPassword,
       bio: data.bio,
-      is_active: true,
       is_enabled: true,
       role: data.role,
       title: data.title,
@@ -276,7 +276,6 @@ const createCompanyAdminUser = async (data: any) => {
       userType: userType,
       password: hashedPassword,
       bio: data.bio,
-      is_active: true,
       is_enabled: true,
       role: userRole,
       department: userDepartment,
@@ -354,7 +353,6 @@ const createUser = async (data: any) => {
       userType: data.userType || data.type || 'employee',
       password: hashedPassword,
       bio: data.bio,
-      is_active: true,
       is_enabled: true,
       title: data.title,
     });
@@ -409,7 +407,6 @@ const deleteUser = async (userId: any) => {
     }
 
     user.deletedAt = new Date();
-    user.is_active = false;
     user.is_enabled = false;
     user.setupToken = undefined;
     user.setupTokenExpiry = undefined;
@@ -613,7 +610,8 @@ const getUsers = async (data: {
     };
 
     if (!data.includeInactive) {
-      matchConditions.is_active = true;
+      matchConditions.is_enabled = { $ne: false };
+      matchConditions.password = ACTIVE_USER_PASSWORD_MATCH;
     }
 
     if (normalizedRole === "admin") {
@@ -1307,7 +1305,8 @@ async function updateCompanyDetails(data: any) {
 export const getManagerUsers = async (data: any) => {
   try {
     let matchConditions: any = {
-      is_active: true,
+      is_enabled: { $ne: false },
+      password: ACTIVE_USER_PASSWORD_MATCH,
       deletedAt: { $exists: false },
       company: data.company,
     };
@@ -1397,7 +1396,8 @@ export const getManagerUsers = async (data: any) => {
 const getManagerUsersCounts = async (data: any) => {
   try {
     let matchConditions: any = {
-      is_active: true,
+      is_enabled: { $ne: false },
+      password: ACTIVE_USER_PASSWORD_MATCH,
       deletedAt: { $exists: false },
       company: { $in: data.company },
     };

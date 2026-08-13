@@ -1,0 +1,31 @@
+E:\HRMS\backend\node_modules\ts-node\src\index.ts:859
+    return new TSError(diagnosticText, diagnosticCodes, diagnostics);
+           ^
+TSError: ⨯ Unable to compile TypeScript:
+src/services/workforcePolicy/policyAssignment.service.ts(830,74): error TS2339: Property 'officeLocationNameSnapshot' does not exist on type '(FlattenMaps<EmployeeAssignmentHistoryI> & { _id: ObjectId; }) | { departmentNameSnapshot: any; teamNameSnapshot: any; officeLocation: any; source: string; }'.
+  Property 'officeLocationNameSnapshot' does not exist on type '{ departmentNameSnapshot: any; teamNameSnapshot: any; officeLocation: any; source: string; }'.
+
+    at createTSError (E:\HRMS\backend\node_modules\ts-node\src\index.ts:859:12)
+    at reportTSError (E:\HRMS\backend\node_modules\ts-node\src\index.ts:863:19)
+    at getOutput (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1077:36)
+    at Object.compile (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1433:41)
+    at Module.m._compile (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1617:30)
+    at node:internal/modules/cjs/loader:1895:10
+    at Object.require.extensions.<computed> [as .ts] (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24)
+    at Module.require (node:internal/modules/cjs/loader:1487:12)
+    at require (node:internal/modules/helpers:135:16)
+    at Object.<anonymous> (E:\HRMS\backend\src\routing\workforcePolicies.routing.ts:32:1)
+    at Module._compile (node:internal/modules/cjs/loader:1730:14)
+    at Module.m._compile (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1618:23)
+    at node:internal/modules/cjs/loader:1895:10
+    at Object.require.extensions.<computed> [as .ts] (E:\HRMS\backend\node_modules\ts-node\src\index.ts:1621:12)
+    at Module.load (node:internal/modules/cjs/loader:1465:32)
+    at Function._load (node:internal/modules/cjs/loader:1282:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:235:24) {
+  diagnosticCodes: [ 2339 ]
+}

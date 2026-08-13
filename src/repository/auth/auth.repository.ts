@@ -3,6 +3,7 @@ import { generateError } from "../../config/Error/functions";
 import User from "../../schemas/User/User";
 import { compareBcrypt, hashBcrypt } from "../../config/helper/function";
 import { ensureUserAccountEnabled } from "../../services/company/utils/activityGuards";
+import { hasUserPassword } from "../../services/auth/utils/userAccountStatus";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import { randomBytes } from "crypto";
 import Company from "../../schemas/company/Company";
@@ -163,15 +164,14 @@ const loginUserWithPassword = async (data: any): Promise<any> => {
 
     ensureUserAccountEnabled(existUser);
 
-    if (!existUser.is_active) {
-      throw generateError("Account is inactive. Please contact your administrator.", 403);
+    if (!hasUserPassword(existUser)) {
+      throw generateError("Password setup is required before you can sign in.", 403);
     }
 
-    if (!existUser.password) {
-      throw generateError("Password login is not enabled for this account.", 403);
-    }
-
-    const passwordMatches = await compareBcrypt(String(data.password || ""), existUser.password);
+    const passwordMatches = await compareBcrypt(
+      String(data.password || ""),
+      String(existUser.password)
+    );
     if (!passwordMatches) {
       throw generateError("Invalid credentials.", 401);
     }
@@ -227,7 +227,6 @@ const bootstrapSuperadmin = async (data: any) => {
     role: "superadmin",
     userType: "superadmin",
     password: await hashBcrypt(data.password),
-    is_active: true,
     is_enabled: true,
   });
 
@@ -343,7 +342,6 @@ const registerLearner = async (data: any) => {
     code: await generateUniqueUserCode("LRN"),
     role: "user",
     userType: "learner",
-    is_active: true,
     is_enabled: true,
     ...buildUserLocationFields(location),
   });
@@ -399,7 +397,6 @@ const registerAdmin = async (data: any) => {
     code: await generateUniqueUserCode("ADM"),
     role: "admin",
     userType: "admin",
-    is_active: true,
     is_enabled: true,
     ...buildUserLocationFields(location),
   });
@@ -472,7 +469,10 @@ const changePassword = async (data: any) => {
   try {
     const user = await User.findById(data.user);
     if (user) {
-      let checkPassword = await compareBcrypt(data.oldPassword,user.password)
+      if (!hasUserPassword(user)) {
+        throw generateError("Password setup is required before changing the password.", 400);
+      }
+      let checkPassword = await compareBcrypt(data.oldPassword, String(user.password))
       if (!checkPassword) {
         throw generateError(
           `Current Password does not match to the Old Password`,

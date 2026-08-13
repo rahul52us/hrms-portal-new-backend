@@ -6,6 +6,10 @@ import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import User from "../../schemas/User/User";
 import { generateError } from "../../config/Error/functions";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
+import {
+  getUserAccountStatus,
+  isUserAccountActive,
+} from "../auth/utils/userAccountStatus";
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -101,19 +105,11 @@ function isWorkforceRole(role: string) {
 }
 
 function isAccountActive(user: any) {
-  return user?.is_active === true && user?.is_enabled !== false;
+  return isUserAccountActive(user);
 }
 
 function getStatus(user: any) {
-  if (user?.is_enabled === false) {
-    return "inactive";
-  }
-
-  if (isAccountActive(user)) {
-    return "active";
-  }
-
-  return "pending";
+  return getUserAccountStatus(user).toLowerCase();
 }
 
 function getMonthRange() {
@@ -301,7 +297,7 @@ export const getHrDashboardSummaryService = async (
 
     const [visibleUsers, departments, allLocations, scopedLocations] = await Promise.all([
       User.find(visibleMatch)
-        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager is_active is_enabled password setupToken createdAt")
+        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager is_enabled password setupToken createdAt")
         .populate("officeLocation", "name code city state")
         .sort({ createdAt: -1 })
         .lean(),

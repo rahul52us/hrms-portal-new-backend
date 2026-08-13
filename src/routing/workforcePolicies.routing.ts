@@ -32,6 +32,7 @@ import {
 import {
   createPolicyAssignmentService,
   endPolicyAssignmentService,
+  getPolicyCoverageService,
   listPolicyAssignmentsService,
   listPolicyAuditLogService,
   resolveEmployeePolicyService,
@@ -94,6 +95,7 @@ workforcePoliciesRouting.post(
 workforcePoliciesRouting.get("/assignments", listPolicyAssignmentsService);
 workforcePoliciesRouting.post("/assignments", createPolicyAssignmentService);
 workforcePoliciesRouting.post("/assignments/:assignmentId/end", endPolicyAssignmentService);
+workforcePoliciesRouting.get("/coverage", getPolicyCoverageService);
 workforcePoliciesRouting.get("/resolve/:employeeId", resolveEmployeePolicyService);
 workforcePoliciesRouting.get("/audit", listPolicyAuditLogService);
 

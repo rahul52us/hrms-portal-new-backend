@@ -166,7 +166,7 @@ const createUser = async (
         role: req.body.role,
         userType: req.body.role === "admin" ? "admin" : "user",
         refrenceBy:req.body.refrenceBy || undefined,
-        is_active: selectedCompany.verified_email_allowed ? false : true,
+        is_enabled: true,
       });
       const savedUser = await user.save();
       if (!savedUser) {
@@ -231,7 +231,6 @@ const createUser = async (
         code: `SADM-${Date.now().toString(36).toUpperCase()}`,
         role: req.body.role,
         userType: "superadmin",
-        is_active: false,
         is_enabled: true,
       });
       const createdUser = await user.save();
@@ -286,11 +285,7 @@ const VerifyEmailToken = async (
       token: req.params.token,
     });
     if (token && token?.type === REGISTER_NEW_USER_TOKEN_TYPE) {
-      const updatedData = await User.findByIdAndUpdate(
-        token.userId,
-        { $set: { is_active: true } },
-        { new: true }
-      );
+      const updatedData = await User.findById(token.userId).select("-password");
       if (updatedData) {
         if (updatedData.role !== "superadmin") {
           await token.deleteOne();
@@ -585,8 +580,27 @@ const getUsersByCompany = async (
             department: 1,
             team: 1,
             designation: 1,
-            is_active: 1,
             is_enabled: 1,
+            isEnabled: { $ne: ["$is_enabled", false] },
+            status: {
+              $cond: [
+                { $eq: ["$is_enabled", false] },
+                "INACTIVE",
+                {
+                  $cond: [
+                    { $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0] },
+                    "ACTIVE",
+                    "PENDING",
+                  ],
+                },
+              ],
+            },
+            canLogin: {
+              $and: [
+                { $ne: ["$is_enabled", false] },
+                { $gt: [{ $strLenCP: { $ifNull: ["$password", ""] } }, 0] },
+              ],
+            },
             company: {
               _id: "$company._id",
               name: "$company.company_name",

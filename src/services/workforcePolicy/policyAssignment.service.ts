@@ -21,6 +21,7 @@ import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.uti
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
+  escapeRegex,
   getPolicyActor,
   getPolicyActorId,
   isDateRangeOverlapping,
@@ -222,6 +223,7 @@ export async function listPolicyAssignmentsService(req: any, res: Response, next
       WorkforcePolicyAssignment.find(match)
         .populate("resource", "name code status")
         .populate("createdBy", "name email")
+        .populate("endedBy", "name email")
         .sort({ effectiveFrom: -1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -526,16 +528,205 @@ async function resolvePublishedVersion(options: {
   return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
 }
 
+async function resolveEmployeePolicyData(options: {
+  actor: any;
+  employee: any;
+  at: Date;
+  assertAccess?: boolean;
+  versionCache?: Map<string, Promise<any>>;
+}) {
+  const { actor, employee, at } = options;
+  let assignmentHistory = await EmployeeAssignmentHistory.findOne({
+    company: employee.company,
+    employee: employee._id,
+    effectiveFrom: { $lte: at },
+    $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }],
+  })
+    .sort({ effectiveFrom: -1 })
+    .lean();
+
+  if (!assignmentHistory) {
+    const anyAssignmentHistory = await EmployeeAssignmentHistory.exists({
+      company: employee.company,
+      employee: employee._id,
+    });
+    if (!anyAssignmentHistory && !employee.deletedAt) {
+      await ensureCurrentEmployeeAssignment({
+        user: employee,
+        source: "workforce_policy_resolution_backfill",
+      });
+      assignmentHistory = await EmployeeAssignmentHistory.findOne({
+        company: employee.company,
+        employee: employee._id,
+        effectiveFrom: { $lte: at },
+        $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }],
+      })
+        .sort({ effectiveFrom: -1 })
+        .lean();
+    }
+  }
+  if (options.assertAccess !== false) {
+    assertHistoricalEmployeeAccess(actor, employee, assignmentHistory);
+  }
+
+  const departmentId = normalizeText(assignmentHistory?.department);
+  const teamId = normalizeText(assignmentHistory?.teamId);
+  const locationId = normalizeText(assignmentHistory?.officeLocation || employee.officeLocation);
+  const scopeMatches: any[] = [
+    { scopeType: "company", scopeId: null },
+    { scopeType: "employee", scopeId: employee._id },
+  ];
+  if (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) {
+    scopeMatches.push({ scopeType: "department", scopeId: new mongoose.Types.ObjectId(departmentId) });
+  }
+  if (teamId && mongoose.Types.ObjectId.isValid(teamId)) {
+    scopeMatches.push({ scopeType: "team", scopeId: new mongoose.Types.ObjectId(teamId) });
+  }
+  if (locationId && mongoose.Types.ObjectId.isValid(locationId)) {
+    scopeMatches.push({ scopeType: "location", scopeId: new mongoose.Types.ObjectId(locationId) });
+  }
+  const assignments = await WorkforcePolicyAssignment.find({
+    company: employee.company,
+    effectiveFrom: { $lte: at },
+    $and: [{ $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }] }, { $or: scopeMatches }],
+  })
+    .populate("resource", "name code status")
+    .sort({ priority: -1, effectiveFrom: -1, createdAt: -1 })
+    .lean();
+  const selectedAssignments = new Map<string, any>();
+  assignments.forEach((assignment: any) => {
+    if (!selectedAssignments.has(assignment.resourceType)) {
+      selectedAssignments.set(assignment.resourceType, assignment);
+    }
+  });
+
+  const resolved: Record<string, any> = {};
+  for (const resourceType of POLICY_RESOURCE_TYPES) {
+    const assignment = selectedAssignments.get(resourceType);
+    if (!assignment) {
+      resolved[resourceType] = null;
+      continue;
+    }
+    const resourceId = assignment.resource?._id || assignment.resource;
+    const versionCacheKey = `${resourceType}:${resourceId}:${at.toISOString()}`;
+    let versionPromise = options.versionCache?.get(versionCacheKey);
+    if (!versionPromise) {
+      versionPromise = resolvePublishedVersion({
+        company: employee.company as unknown as mongoose.Types.ObjectId,
+        resourceType,
+        resourceId: resourceId as mongoose.Types.ObjectId,
+        at,
+      });
+      options.versionCache?.set(versionCacheKey, versionPromise);
+    }
+    const version = await versionPromise;
+    resolved[resourceType] = version ? { assignment, version } : null;
+  }
+
+  const warnings = [];
+  if (!resolved.attendance_policy) warnings.push("No attendance policy is effective for this employee and date");
+  if (!resolved.work_schedule) warnings.push("No work schedule is effective for this employee and date");
+  if (!resolved.holiday_calendar) warnings.push("No holiday calendar is effective for this employee and date");
+  return {
+    employee: {
+      _id: employee._id,
+      name: employee.name,
+      email: employee.email || employee.username,
+      code: employee.code || "",
+    },
+    at,
+    organizationAssignment: assignmentHistory || {
+      departmentNameSnapshot: employee.department || "",
+      teamNameSnapshot: employee.team || "",
+      officeLocation: employee.officeLocation || null,
+      officeLocationNameSnapshot: "",
+      source: "current_user_fallback",
+    },
+    attendancePolicy: resolved.attendance_policy,
+    workSchedule: resolved.work_schedule,
+    holidayCalendar: resolved.holiday_calendar,
+    warnings,
+  };
+}
+
+function applyCoverageActorScope(match: any, actor: any) {
+  const role = normalizeRole(actor?.role || actor?.userType);
+  if (["superadmin", "admin", "hradmin"].includes(role)) return;
+
+  if (role === "departmenthead") {
+    const department = normalizeText(actor?.department);
+    if (!department) throw generateError("Department scope is missing", 403);
+    match.department = { $regex: new RegExp(`^${escapeRegex(department)}$`, "i") };
+    return;
+  }
+
+  if (role === "hr") {
+    const scope = actor?.hrScope || {};
+    const departments = (Array.isArray(scope.departments) ? scope.departments : [])
+      .map((item: unknown) => normalizeText(item))
+      .filter(Boolean);
+    if (!departments.length) throw generateError("HR department scope is missing", 403);
+    match.$and = match.$and || [];
+    match.$and.push({
+      $or: departments.map((department: string) => ({
+        department: { $regex: new RegExp(`^${escapeRegex(department)}$`, "i") },
+      })),
+    });
+
+    const teams = (Array.isArray(scope.teams) ? scope.teams : [])
+      .map((item: unknown) => normalizeText(item))
+      .filter(Boolean);
+    if (teams.length) {
+      match.$and.push({
+        $or: teams.map((team: string) => ({
+          team: { $regex: new RegExp(`^${escapeRegex(team)}$`, "i") },
+        })),
+      });
+    }
+
+    const locationIds = normalizeObjectIdList(
+      scope.officeLocations || scope.officeLocationIds || scope.locations || scope.locationIds
+    );
+    if (locationIds.length) {
+      match.officeLocation = {
+        $in: locationIds.map((id) => new mongoose.Types.ObjectId(id)),
+      };
+    }
+    return;
+  }
+
+  throw generateError("You cannot view company policy coverage", 403);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const runners = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index]);
+      }
+    }
+  );
+  await Promise.all(runners);
+  return results;
+}
+
 export async function resolveEmployeePolicyService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = getPolicyActor(req);
     const employeeId = validateObjectId(req.params.employeeId, "employee id");
     const at = parseEffectiveDate(req.query.at || req.query.date || new Date().toISOString(), "resolution date") as Date;
-    const employee = await User.findOne({
-      _id: new mongoose.Types.ObjectId(employeeId),
-    })
+    const employee = await User.findOne({ _id: new mongoose.Types.ObjectId(employeeId) })
       .select(
-        "_id company name email username role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
+        "_id company name email username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
       )
       .lean();
     if (!employee || !employee.company) throw generateError("Employee not found", 404);
@@ -544,108 +735,125 @@ export async function resolveEmployeePolicyService(req: any, res: Response, next
     if (actorRole !== "superadmin" && actorCompanyId !== String(employee.company)) {
       throw generateError("You can only resolve policies from your company", 403);
     }
-    let assignmentHistory = await EmployeeAssignmentHistory.findOne({
-      company: employee.company,
-      employee: employee._id,
-      effectiveFrom: { $lte: at },
-      $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }],
-    })
-      .sort({ effectiveFrom: -1 })
-      .lean();
+    const data = await resolveEmployeePolicyData({ actor, employee, at });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+}
 
-    if (!assignmentHistory) {
-      const anyAssignmentHistory = await EmployeeAssignmentHistory.exists({
-        company: employee.company,
-        employee: employee._id,
+export async function getPolicyCoverageService(req: any, res: Response, next: NextFunction) {
+  try {
+    ensurePolicyViewer(req);
+    const actor = getPolicyActor(req);
+    const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    const at = parseEffectiveDate(
+      req.query.at || req.query.date || new Date().toISOString(),
+      "coverage date"
+    ) as Date;
+    const page = Math.max(1, Number(req.query.page || 1));
+    const limit = Math.max(1, Math.min(25, Number(req.query.limit || 20)));
+    const search = normalizeText(req.query.search);
+    const match: any = {
+      company: companyObjectId,
+      deletedAt: null,
+      role: { $regex: WORKFORCE_ROLE_PATTERN },
+    };
+    applyCoverageActorScope(match, actor);
+    if (search) {
+      const regex = new RegExp(escapeRegex(search), "i");
+      match.$and = match.$and || [];
+      match.$and.push({
+        $or: [
+          { name: regex },
+          { email: regex },
+          { username: regex },
+          { code: regex },
+          { department: regex },
+          { team: regex },
+        ],
       });
-      if (!anyAssignmentHistory && !employee.deletedAt) {
-        await ensureCurrentEmployeeAssignment({
-          user: employee,
-          source: "workforce_policy_resolution_backfill",
-        });
-        assignmentHistory = await EmployeeAssignmentHistory.findOne({
-          company: employee.company,
-          employee: employee._id,
-          effectiveFrom: { $lte: at },
-          $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }],
-        })
-          .sort({ effectiveFrom: -1 })
-          .lean();
-      }
     }
-    assertHistoricalEmployeeAccess(actor, employee, assignmentHistory);
 
-    const departmentId = normalizeText(assignmentHistory?.department);
-    const teamId = normalizeText(assignmentHistory?.teamId);
-    const locationId = normalizeText(assignmentHistory?.officeLocation || employee.officeLocation);
-    const scopeMatches: any[] = [
-      { scopeType: "company", scopeId: null },
-      { scopeType: "employee", scopeId: employee._id },
-    ];
-    if (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) {
-      scopeMatches.push({ scopeType: "department", scopeId: new mongoose.Types.ObjectId(departmentId) });
-    }
-    if (teamId && mongoose.Types.ObjectId.isValid(teamId)) {
-      scopeMatches.push({ scopeType: "team", scopeId: new mongoose.Types.ObjectId(teamId) });
-    }
-    if (locationId && mongoose.Types.ObjectId.isValid(locationId)) {
-      scopeMatches.push({ scopeType: "location", scopeId: new mongoose.Types.ObjectId(locationId) });
-    }
-    const assignments = await WorkforcePolicyAssignment.find({
-      company: employee.company,
-      effectiveFrom: { $lte: at },
-      $and: [{ $or: [{ effectiveTo: null }, { effectiveTo: { $gt: at } }] }, { $or: scopeMatches }],
-    })
-      .populate("resource", "name code status")
-      .sort({ priority: -1, effectiveFrom: -1, createdAt: -1 })
-      .lean();
-    const selectedAssignments = new Map<string, any>();
-    assignments.forEach((assignment: any) => {
-      if (!selectedAssignments.has(assignment.resourceType)) {
-        selectedAssignments.set(assignment.resourceType, assignment);
-      }
-    });
-
-    const resolved: Record<string, any> = {};
-    for (const resourceType of POLICY_RESOURCE_TYPES) {
-      const assignment = selectedAssignments.get(resourceType);
-      if (!assignment) {
-        resolved[resourceType] = null;
-        continue;
-      }
-      const resourceId = assignment.resource?._id || assignment.resource;
-      const version = await resolvePublishedVersion({
-        company: employee.company as unknown as mongoose.Types.ObjectId,
-        resourceType,
-        resourceId: resourceId as mongoose.Types.ObjectId,
+    const [employees, total] = await Promise.all([
+      User.find(match)
+        .select(
+          "_id company name email username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
+        )
+        .sort({ name: 1, _id: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(match),
+    ]);
+    const versionCache = new Map<string, Promise<any>>();
+    const items = await mapWithConcurrency(employees, 5, async (employee) => {
+      const resolution = await resolveEmployeePolicyData({
+        actor,
+        employee,
         at,
+        assertAccess: false,
+        versionCache,
       });
-      resolved[resourceType] = version ? { assignment, version } : null;
-    }
+      const missing = [
+        !resolution.attendancePolicy ? "attendance_policy" : "",
+        !resolution.workSchedule ? "work_schedule" : "",
+        !resolution.holidayCalendar ? "holiday_calendar" : "",
+      ].filter(Boolean);
+      const compactResource = (resolved: any) => {
+        if (!resolved) return null;
+        return {
+          assignment: {
+            _id: resolved.assignment._id,
+            resourceType: resolved.assignment.resourceType,
+            resource: resolved.assignment.resource,
+            scopeType: resolved.assignment.scopeType,
+            scopeId: resolved.assignment.scopeId,
+            scopeNameSnapshot: resolved.assignment.scopeNameSnapshot,
+            effectiveFrom: resolved.assignment.effectiveFrom,
+            effectiveTo: resolved.assignment.effectiveTo,
+            state: getAssignmentState(resolved.assignment, at),
+          },
+          version: {
+            _id: resolved.version._id,
+            versionNumber: resolved.version.versionNumber,
+            status: resolved.version.status,
+            effectiveFrom: resolved.version.effectiveFrom,
+            effectiveTo: resolved.version.effectiveTo,
+          },
+        };
+      };
+      return {
+        employee: resolution.employee,
+        at: resolution.at,
+        organizationAssignment: {
+          departmentNameSnapshot: resolution.organizationAssignment?.departmentNameSnapshot || "",
+          teamNameSnapshot: resolution.organizationAssignment?.teamNameSnapshot || "",
+          officeLocationNameSnapshot: resolution.organizationAssignment?.officeLocationNameSnapshot || "",
+        },
+        attendancePolicy: compactResource(resolution.attendancePolicy),
+        workSchedule: compactResource(resolution.workSchedule),
+        holidayCalendar: compactResource(resolution.holidayCalendar),
+        warnings: resolution.warnings,
+        complete: missing.length === 0,
+        missing,
+      };
+    });
+    const completeOnPage = items.filter((item) => item.complete).length;
 
-    const warnings = [];
-    if (!resolved.attendance_policy) warnings.push("No attendance policy is effective for this employee and date");
-    if (!resolved.work_schedule) warnings.push("No work schedule is effective for this employee and date");
-    if (!resolved.holiday_calendar) warnings.push("No holiday calendar is effective for this employee and date");
     return res.status(200).json({
       success: true,
-      data: {
-        employee: {
-          _id: employee._id,
-          name: employee.name,
-          email: employee.email || employee.username,
-        },
-        at,
-        organizationAssignment: assignmentHistory || {
-          departmentNameSnapshot: employee.department || "",
-          teamNameSnapshot: employee.team || "",
-          officeLocation: employee.officeLocation || null,
-          source: "current_user_fallback",
-        },
-        attendancePolicy: resolved.attendance_policy,
-        workSchedule: resolved.work_schedule,
-        holidayCalendar: resolved.holiday_calendar,
-        warnings,
+      data: items,
+      summary: {
+        employeesOnPage: items.length,
+        completeOnPage,
+        incompleteOnPage: items.length - completeOnPage,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     });
   } catch (error) {

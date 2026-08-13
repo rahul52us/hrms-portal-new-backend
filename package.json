@@ -14,6 +14,8 @@
     "workforce:schedules:migrate:apply": "ts-node src/scripts/migrateAttendanceSchedules.ts --apply",
     "users:reporting-manager:migrate": "ts-node src/scripts/migrateUserReportingManager.ts",
     "users:reporting-manager:migrate:apply": "ts-node src/scripts/migrateUserReportingManager.ts --apply",
+    "users:status:migrate": "ts-node src/scripts/migrateUserEnabledStatus.ts",
+    "users:status:migrate:apply": "ts-node src/scripts/migrateUserEnabledStatus.ts --apply",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

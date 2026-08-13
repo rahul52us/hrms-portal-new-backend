@@ -9,6 +9,10 @@ import CourseQuizAttempt from "../../schemas/course/CourseQuizAttempt";
 import UserCourseProgress from "../../schemas/course/UserCourseProgress";
 import ScormTracking from "../../schemas/course/ScormTracking";
 import { normalizeRole } from "../courseAccess/utils/accessControl";
+import {
+  ACTIVE_USER_PASSWORD_MATCH,
+  isUserAccountActive,
+} from "../auth/utils/userAccountStatus";
 
 type DashboardFilters = {
   from?: Date;
@@ -125,7 +129,7 @@ function normalizeUserRole(user: any) {
 }
 
 function isUserActive(user: any) {
-  return user?.is_active === true && user?.is_enabled !== false;
+  return isUserAccountActive(user);
 }
 
 function getCompanyName(companyById: Map<string, any>, companyId: any) {
@@ -183,21 +187,23 @@ export async function buildSuperadminDashboardSummary(query: any) {
   }
 
   if (filters.activityStatus === "active") {
-    userMatch.is_active = true;
     userMatch.is_enabled = { $ne: false };
+    userMatch.password = ACTIVE_USER_PASSWORD_MATCH;
   } else if (filters.activityStatus === "inactive") {
     userMatch.$and = [
       {
         $or: [
-          { is_active: { $ne: true } },
           { is_enabled: false },
+          { password: { $exists: false } },
+          { password: null },
+          { password: "" },
         ],
       },
     ];
   }
 
   const users = await User.find(userMatch)
-    .select("_id name email username role userType company department is_active is_enabled createdAt")
+    .select("_id name email username role userType company department is_enabled password createdAt")
     .sort({ createdAt: -1 })
     .lean();
   const userIds = users.map((user: any) => user._id);

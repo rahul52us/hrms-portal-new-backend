@@ -5,6 +5,7 @@ import UserModel from "../../schemas/User/User";
 import appointmentsSchema from "../../schemas/appointments/appointments.schema";
 import recallAppointmentSchema from "../../schemas/recall-appointment/recallAppointment.schema";
 import mongoose from "mongoose";
+import { getUserAccountStatus } from "../../services/auth/utils/userAccountStatus";
 
 
 export async function downloadReport(data: any) {
@@ -69,7 +70,7 @@ export async function downloadReport(data: any) {
           { header: "Age", key: "age", width: 10 },
           { header: "Address", key: "residentialAddress", width: 40 },
           { header: "Languages", key: "languages", width: 25 },
-          { header: "Active", key: "is_active", width: 10 },
+          { header: "Account Status", key: "accountStatus", width: 16 },
           { header: "Registered On", key: "registeredOn", width: 20 },
         ];
 
@@ -90,7 +91,8 @@ export async function downloadReport(data: any) {
               code: 1,
               name: 1,
               mobileNumber: 1,
-              is_active: 1,
+              is_enabled: 1,
+              password: 1,
               createdAt: 1,
               profile: "$profile_details_data.personalInfo",
             },
@@ -128,7 +130,7 @@ export async function downloadReport(data: any) {
             age,
             residentialAddress: profile.addresses?.residential || "-",
             languages: profile.languages?.join(", ") || "-",
-            is_active: user.is_active ? "Yes" : "No",
+            accountStatus: getUserAccountStatus(user),
             registeredOn: user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-",
           };
         });
@@ -164,7 +166,7 @@ export async function downloadReport(data: any) {
           { header: "Specialty", key: "designation", width: 35 },
           { header: "Languages", key: "languages", width: 25 },
           { header: "Office Address", key: "officeAddress", width: 40 },
-          { header: "Active", key: "is_active", width: 10 },
+          { header: "Account Status", key: "accountStatus", width: 16 },
           { header: "Registered On", key: "registeredOn", width: 20 },
         ];
 
@@ -185,7 +187,8 @@ export async function downloadReport(data: any) {
               code: 1,
               name: 1,
               mobileNumber: 1,
-              is_active: 1,
+              is_enabled: 1,
+              password: 1,
               createdAt: 1,
               designation: 1,
               profile: "$profile_details_data.personalInfo",
@@ -213,7 +216,7 @@ export async function downloadReport(data: any) {
             designation: user.designation?.join(", ") || "-",
             languages: profile.languages?.join(", ") || "-",
             officeAddress: profile.addresses?.office || "-",
-            is_active: user.is_active ? "Yes" : "No",
+            accountStatus: getUserAccountStatus(user),
             registeredOn: user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-",
           };
         });
@@ -437,7 +440,7 @@ export async function downloadReport(data: any) {
           { header: "Username", key: "username", width: 20 },
           { header: "Role", key: "role", width: 15 },
           { header: "Designation", key: "designation", width: 30 },
-          { header: "Active", key: "is_active", width: 10 },
+          { header: "Account Status", key: "accountStatus", width: 16 },
           { header: "Joined On", key: "joinedOn", width: 20 },
         ];
 
@@ -452,7 +455,8 @@ export async function downloadReport(data: any) {
               username: 1,
               role: 1,
               designation: 1,
-              is_active: 1,
+              is_enabled: 1,
+              password: 1,
               createdAt: 1,
             },
           },
@@ -465,7 +469,7 @@ export async function downloadReport(data: any) {
           username: user.username || "-",
           role: user.role || "-",
           designation: user.designation?.join(", ") || "-",
-          is_active: user.is_active ? "Yes" : "No",
+          accountStatus: getUserAccountStatus(user),
           joinedOn: user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-",
         }));
         break;

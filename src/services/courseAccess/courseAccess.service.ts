@@ -839,7 +839,7 @@ export const enrollInPublicCourseService = async (req: any, res: Response, next:
       throw generateError("Course company must be assigned before enrollment", 422);
     }
 
-    const user = await User.findById(actor.userId).select("_id role userType is_active is_enabled").lean();
+    const user = await User.findById(actor.userId).select("_id role userType").lean();
     if (!user) {
       throw generateError("Learner account not found", 404);
     }

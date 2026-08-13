@@ -32,6 +32,10 @@ import {
   getEmployeeAssignmentHistory,
   recordEmployeeAssignmentChange,
 } from "../employeeAssignment/employeeAssignment.service";
+import {
+  canUserLogin,
+  getUserAccountStatus,
+} from "../auth/utils/userAccountStatus";
 
 const ExcelJS = require("exceljs");
 
@@ -582,10 +586,6 @@ async function tryUploadUserPicture(pic: any) {
     console.warn("Profile picture upload failed during managed user save:", error?.message || error);
     return null;
   }
-}
-
-export function calculateUserActiveState(user: any) {
-  return true;
 }
 
 async function generateUniqueUserCode() {
@@ -1409,7 +1409,7 @@ function serializeUser(user: any) {
       ? user.createdBy
       : null;
   const reportingManager = serializeManagerReference(user?.reportingManager);
-  const lifecycleStatus = user?.is_enabled === false ? "INACTIVE" : user?.is_active ? "ACTIVE" : "PENDING";
+  const lifecycleStatus = getUserAccountStatus(user);
 
   return {
     _id: user?._id,
@@ -1453,11 +1453,9 @@ function serializeUser(user: any) {
       : null,
     reportingManagerId: reportingManager?._id || normalizeObjectIdLike(user?.reportingManager) || "",
     reportingManager,
-    isActive: lifecycleStatus === "ACTIVE",
-    is_active: Boolean(user?.is_active),
     isEnabled: user?.is_enabled !== false,
     is_enabled: user?.is_enabled !== false,
-    canLogin: Boolean(user?.is_active) && user?.is_enabled !== false,
+    canLogin: canUserLogin(user),
     status: lifecycleStatus,
     passwordStatus: hasPassword(user) ? "SET" : "NOT_SET",
     authMethod: hasPassword(user)
@@ -1832,7 +1830,6 @@ async function saveManagedUser({
     user.pic = uploadedPic;
   }
 
-  user.is_active = calculateUserActiveState(user);
   await mongoose.connection.transaction(async (session) => {
     await user.save({ session });
     await recordEmployeeAssignmentChange({
@@ -2906,7 +2903,6 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
     }
 
     targetUser.deletedAt = new Date();
-    targetUser.is_active = false;
     targetUser.is_enabled = false;
     targetUser.setupToken = undefined;
     targetUser.setupTokenExpiry = undefined;
@@ -3011,10 +3007,15 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
     targetUser.is_enabled = nextStatus;
     targetUser.updatedAt = new Date();
     await targetUser.save();
+    const updatedStatus = getUserAccountStatus(targetUser);
 
     return res.status(200).json({
       success: true,
-      message: nextStatus ? "User activated successfully" : "User deactivated successfully",
+      message: nextStatus
+        ? updatedStatus === "ACTIVE"
+          ? "User activated successfully"
+          : "User enabled. Password setup is still required"
+        : "User deactivated successfully",
       data: {
         user: serializeUser(targetUser),
       },
@@ -3329,7 +3330,6 @@ export async function setPasswordFromSetupToken(token: string, password: string)
   user.password = await hashBcrypt(password);
   user.setupToken = undefined;
   user.setupTokenExpiry = undefined;
-  user.is_active = calculateUserActiveState(user);
   await user.save();
 
   const populatedUser = await User.findById(user._id)

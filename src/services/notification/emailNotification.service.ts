@@ -7,6 +7,7 @@ import Company from "../../schemas/company/Company";
 import BatchEnrollment from "../../schemas/course/BatchEnrollment";
 import CourseEnrollment from "../../schemas/course/CourseEnrollment";
 import CourseQuizAttempt from "../../schemas/course/CourseQuizAttempt";
+import { getUserAccountStatus } from "../auth/utils/userAccountStatus";
 
 type RecipientMode = "all" | "selected";
 
@@ -340,7 +341,7 @@ async function buildUserSignals(users: any[]) {
 }
 
 function serializeNotificationUser(user: any) {
-  const lifecycleStatus = user?.is_enabled === false ? "inactive" : user?.is_active ? "active" : "pending";
+  const lifecycleStatus = getUserAccountStatus(user).toLowerCase();
   const reportingManager = user?.reportingManager && typeof user.reportingManager === "object"
     ? {
         _id: user.reportingManager._id,

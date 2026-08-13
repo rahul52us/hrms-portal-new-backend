@@ -9,13 +9,17 @@ import {
   PERMISSION_KEYS,
   resolvePermissionCompany,
 } from "../permissions/permission.utils";
+import {
+  getUserAccountStatus,
+  isUserAccountActive,
+} from "../auth/utils/userAccountStatus";
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_HIERARCHY_DEPTH = 50;
 const USER_SELECT =
   "name email username code profileId pic role userType designation department team officeLocation " +
-  "reportingManager is_active is_enabled";
+  "reportingManager is_enabled password";
 
 type OrganizationScope = {
   mode: "company" | "hr-scope" | "department";
@@ -119,11 +123,7 @@ function getDirectManagerId(user: any) {
 }
 
 function getAccountStatus(user: any) {
-  if (user?.is_enabled === false) {
-    return "inactive";
-  }
-
-  return user?.is_active === true ? "active" : "pending";
+  return getUserAccountStatus(user).toLowerCase();
 }
 
 function serializeLocation(location: any) {
@@ -491,7 +491,7 @@ async function hydrateOrganizationNodes(users: any[], context: OrganizationConte
       officeLocation: contextOnly ? null : serializeLocation(user?.officeLocation),
       pic: user?.pic?.url ? { url: user.pic.url } : null,
       status: getAccountStatus(user),
-      isActive: user?.is_active === true,
+      isActive: isUserAccountActive(user),
       isEnabled: user?.is_enabled !== false,
       reportingManagerId: managerId || "",
       reportingManager: serializePersonReference(

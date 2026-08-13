@@ -30,7 +30,7 @@ const createStudent = async (req: any, res: Response, next: NextFunction) => {
       pic: value.pic,
       password: value.password,
       bio:value.bio,
-      is_active: true,
+      is_enabled: true,
     });
 
     const savedUser = await createdUser.save();
