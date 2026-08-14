@@ -80,7 +80,12 @@ const companySchema = new mongoose.Schema<CompanyI>({
   },
   companyCode: {
     type: String,
-    required: true
+    required: true,
+    trim: true,
+    uppercase: true,
+    immutable: true,
+    unique: true,
+    index: true,
   },
   companyType: {
     type: String,

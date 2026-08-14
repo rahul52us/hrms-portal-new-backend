@@ -510,19 +510,15 @@ const deleteUser = async (userId: any) => {
 
 const updateUserProfileDetails = async (data: any) => {
   try {
-    const { pic, _id, userId, ...rest } = data;
-
-    const existCode = await User.exists({
-      code: data.code,
-      _id: { $ne: data.userId },
-    });
-
-    if (existCode) {
-      return {
-        status: "error",
-        data: `${data.code} code is already registered`,
-      };
-    }
+    const {
+      pic,
+      _id,
+      userId,
+      code: _code,
+      employeeNumber: _employeeNumber,
+      company: _company,
+      ...rest
+    } = data;
 
     const users: any = await User.findByIdAndUpdate(data.userId, {
       $set: { ...rest, updatedAt: new Date() },

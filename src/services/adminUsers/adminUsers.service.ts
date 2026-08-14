@@ -36,6 +36,10 @@ import {
   canUserLogin,
   getUserAccountStatus,
 } from "../auth/utils/userAccountStatus";
+import {
+  buildEmployeeIdentifier,
+  MAX_EMPLOYEE_NUMBER_LENGTH,
+} from "../employeeCode/employeeCode.utils";
 
 const ExcelJS = require("exceljs");
 
@@ -408,7 +412,7 @@ function buildTemplateHeaders(uploadRole: string, _companyManagerLevels: number)
   const isUserUpload = normalizeRole(uploadRole) === "user";
   const headers = [
     "Sr. No.",
-    "Employee Code",
+    "Employee Number",
     "Employee Name",
     "Phone Number",
     "Email ID",
@@ -450,7 +454,7 @@ function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
 
   const employeeExamples = [
     {
-      code: "EMP-4001",
+      employeeNumber: "4001",
       name: "Aakash Nair",
       email: "aakash.nair@example.com",
       phone: "9876543240",
@@ -458,7 +462,7 @@ function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
       joiningDate: "2025-01-12",
     },
     {
-      code: "EMP-4002",
+      employeeNumber: "4002",
       name: "Pooja Bansal",
       email: "pooja.bansal@example.com",
       phone: "9876543241",
@@ -466,7 +470,7 @@ function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
       joiningDate: "2025-02-18",
     },
     {
-      code: "EMP-4003",
+      employeeNumber: "4003",
       name: "Manish Yadav",
       email: "manish.yadav@example.com",
       phone: "9876543242",
@@ -481,7 +485,7 @@ function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
 
   return employeeExamples.map((entry, index) => ([
       index + 1,
-      entry.code,
+      entry.employeeNumber,
       entry.name,
       entry.phone,
       entry.email,
@@ -588,17 +592,24 @@ async function tryUploadUserPicture(pic: any) {
   }
 }
 
-async function generateUniqueUserCode() {
+async function generateUniqueEmployeeNumber(companyId: string) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
   while (true) {
-    const code = Array.from({ length: 6 }, () =>
+    const employeeNumber = Array.from({ length: 6 }, () =>
       chars.charAt(Math.floor(Math.random() * chars.length))
     ).join("");
 
-    const existingUser = await User.findOne({ code });
+    const existingUser = await User.findOne({
+      company: new mongoose.Types.ObjectId(companyId),
+      $or: [
+        { employeeNumber },
+        { code: employeeNumber },
+        { code: { $regex: new RegExp(`-${employeeNumber}$`, "i") } },
+      ],
+    });
     if (!existingUser) {
-      return code;
+      return employeeNumber;
     }
   }
 }
@@ -856,15 +867,35 @@ async function findUserByPhone(
   return User.findOne(query);
 }
 
-async function findUserByCode(code: string, excludeUserId?: string) {
-  const normalizedCode = normalizeText(code);
-  if (!normalizedCode) {
+async function findUserByEmployeeIdentifier({
+  companyId,
+  employeeNumber,
+  code,
+  excludeUserId,
+}: {
+  companyId: string;
+  employeeNumber: string;
+  code: string;
+  excludeUserId?: string;
+}) {
+  if (
+    !mongoose.Types.ObjectId.isValid(companyId) ||
+    !normalizeText(employeeNumber) ||
+    !normalizeText(code)
+  ) {
     return null;
   }
 
   const query: any = {
-    code: { $regex: new RegExp(`^${escapeRegex(normalizedCode)}$`, "i") },
-    deletedAt: { $exists: false },
+    $or: [
+      { code: { $regex: new RegExp(`^${escapeRegex(code)}$`, "i") } },
+      {
+        company: new mongoose.Types.ObjectId(companyId),
+        employeeNumber: {
+          $regex: new RegExp(`^${escapeRegex(employeeNumber)}$`, "i"),
+        },
+      },
+    ],
   };
 
   if (excludeUserId) {
@@ -1419,6 +1450,7 @@ function serializeUser(user: any) {
     role: user?.role || user?.userType || "user",
     userType: user?.userType || user?.role || "user",
     code: user?.code,
+    employeeNumber: user?.employeeNumber || "",
     profileId: user?.profileId || "",
     mobileNumber: user?.mobileNumber || "",
     city: user?.city || "",
@@ -1439,6 +1471,7 @@ function serializeUser(user: any) {
           _id: company._id,
           name: company.company_name,
           company_name: company.company_name,
+          companyCode: company.companyCode || "",
           managerLevels: company.managerLevels || 3,
         }
       : null,
@@ -1494,7 +1527,9 @@ async function saveManagedUser({
   existingUserId?: string;
   sendSetupEmail?: boolean;
 }) {
-  const code = normalizeText(payload?.code);
+  let employeeNumberInput = normalizeText(
+    payload?.employeeNumber ?? payload?.code
+  );
   const name = normalizeText(payload?.name);
   const email = normalizeEmail(payload?.email || payload?.username);
   const mobileNumber = normalizeText(payload?.mobileNumber || payload?.phoneNumber);
@@ -1513,10 +1548,6 @@ async function saveManagedUser({
 
   if (!name) {
     throw generateError("Name is required", 400);
-  }
-
-  if (!code) {
-    throw generateError("Employee code is required", 400);
   }
 
   if (email && !isValidEmail(email)) {
@@ -1557,11 +1588,6 @@ async function saveManagedUser({
     throw generateError(`${mobileNumber} is already registered`, 400);
   }
 
-  const existingCodeUser = await findUserByCode(code, existingUserId);
-  if (existingCodeUser) {
-    throw generateError(`${code} is already assigned to another user`, 400);
-  }
-
   const effectiveCompanyId = actor.role === "superadmin" ? payload?.companyId || payload?.company : actor.companyId;
   const effectiveCompanyName = actor.role === "superadmin" ? payload?.companyName || payload?.companyNameInput : undefined;
 
@@ -1572,6 +1598,35 @@ async function saveManagedUser({
     actorId: actor.userId,
     actionLabel: "add users to this company",
   });
+  if (!employeeNumberInput && role === "admin") {
+    employeeNumberInput = await generateUniqueEmployeeNumber(String(company._id));
+  }
+  if (!employeeNumberInput) {
+    throw generateError("Employee number is required", 400);
+  }
+  const employeeIdentifier = buildEmployeeIdentifier(
+    company.companyCode,
+    employeeNumberInput
+  );
+  if (!employeeIdentifier) {
+    throw generateError(
+      `Employee number can contain only letters, numbers, and single hyphens and cannot exceed ${MAX_EMPLOYEE_NUMBER_LENGTH} characters`,
+      400
+    );
+  }
+  const { code, employeeNumber } = employeeIdentifier;
+  const existingCodeUser = await findUserByEmployeeIdentifier({
+    companyId: String(company._id),
+    employeeNumber,
+    code,
+    excludeUserId: existingUserId,
+  });
+  if (existingCodeUser) {
+    throw generateError(
+      `Employee number ${employeeNumber} is already assigned in ${company.company_name}`,
+      400
+    );
+  }
 
   if (
     actor.role === "departmenthead" &&
@@ -1742,12 +1797,14 @@ async function saveManagedUser({
   if (!user) {
     user = new User({
       code,
+      employeeNumber,
       createdAt: new Date(),
       createdBy: actor.userId ? new mongoose.Types.ObjectId(actor.userId) : undefined,
     });
   }
 
   user.code = code;
+  user.employeeNumber = employeeNumber;
   user.name = name;
   user.email = email || undefined;
   user.username = email || mobileNumber;
@@ -1854,7 +1911,7 @@ async function saveManagedUser({
   }
 
   const populatedUser = await User.findById(user._id)
-      .populate("company", "company_name managerLevels")
+      .populate("company", "company_name companyCode managerLevels")
       .populate("officeLocation", "name code address city state country pinCode is_active")
       .populate("createdBy", "name email username role")
       .populate("reportingManager", "name email username role designation");
@@ -1941,7 +1998,9 @@ export async function createCompanyAdminForCompanyCreation({
       ...admin,
       companyId,
       role: "admin",
-      code: normalizeText(admin?.code) || await generateUniqueUserCode(),
+      employeeNumber:
+        normalizeText(admin?.employeeNumber || admin?.code) ||
+        await generateUniqueEmployeeNumber(companyId),
       designation: normalizeText(admin?.designation) || "Company Admin",
     },
     actor,
@@ -1993,7 +2052,13 @@ async function parseBulkWorkbook(
     return 0;
   };
 
-  const employeeCodeColumn = resolveHeader("employee code", "code");
+  const employeeNumberColumn = resolveHeader(
+    "employee number",
+    "employee no",
+    "employee id",
+    "employee code",
+    "code"
+  );
   const nameColumn = resolveHeader("employee name", "name");
   const emailColumn = resolveHeader("email id", "email", "email id (optional)");
   const mobileNumberColumn = resolveHeader(
@@ -2041,7 +2106,7 @@ async function parseBulkWorkbook(
   const companyManagerLevels = Math.max(1, Number(options.companyManagerLevels) || 3);
 
   const requiredHeaders = [
-    { label: "Employee Code", column: employeeCodeColumn },
+    { label: "Employee Number", column: employeeNumberColumn },
     { label: "Employee Name", column: nameColumn },
     { label: "Phone Number", column: mobileNumberColumn },
     { label: "Email ID", column: emailColumn },
@@ -2061,7 +2126,7 @@ async function parseBulkWorkbook(
 
   const rows: any[] = [];
   const seenPhones = new Set<string>();
-  const seenCodes = new Set<string>();
+  const seenEmployeeNumbers = new Set<string>();
 
   if (explicitUploadRole && !requestedUploadRole) {
     throw generateError("Bulk upload currently supports employees only", 400);
@@ -2072,7 +2137,7 @@ async function parseBulkWorkbook(
     const readCell = (columnNumber: number) =>
       columnNumber ? getCellValue(row.getCell(columnNumber)) : "";
 
-    const employeeCode = normalizeText(readCell(employeeCodeColumn));
+    const employeeNumber = normalizeText(readCell(employeeNumberColumn));
     const name = normalizeText(readCell(nameColumn));
     const email = normalizeEmail(readCell(emailColumn));
     const mobileNumber = normalizeText(readCell(mobileNumberColumn));
@@ -2094,7 +2159,7 @@ async function parseBulkWorkbook(
         : "user";
 
     const hasRowValues =
-      Boolean(employeeCode) ||
+      Boolean(employeeNumber) ||
       Boolean(name) ||
       Boolean(email) ||
       Boolean(mobileNumber) ||
@@ -2116,8 +2181,8 @@ async function parseBulkWorkbook(
     if (!name) {
       errors.push("Name is required");
     }
-    if (!employeeCode) {
-      errors.push("Employee code is required");
+    if (!employeeNumber) {
+      errors.push("Employee number is required");
     }
     if (!mobileNumber) {
       errors.push("Phone number is required");
@@ -2145,8 +2210,8 @@ async function parseBulkWorkbook(
     if (mobileNumber && seenPhones.has(mobileNumber)) {
       errors.push("Duplicate phone number in file");
     }
-    if (employeeCode && seenCodes.has(employeeCode.toLowerCase())) {
-      errors.push("Duplicate employee code in file");
+    if (employeeNumber && seenEmployeeNumbers.has(employeeNumber.toLowerCase())) {
+      errors.push("Duplicate employee number in file");
     }
     if (
       reportingManagerEmail &&
@@ -2161,14 +2226,14 @@ async function parseBulkWorkbook(
     if (mobileNumber) {
       seenPhones.add(mobileNumber);
     }
-    if (employeeCode) {
-      seenCodes.add(employeeCode.toLowerCase());
+    if (employeeNumber) {
+      seenEmployeeNumbers.add(employeeNumber.toLowerCase());
     }
 
     rows.push({
       rowNumber,
       payload: {
-        code: employeeCode,
+        employeeNumber,
         name,
         email,
         mobileNumber,
@@ -2196,7 +2261,6 @@ async function parseBulkWorkbook(
 async function validateBulkRow(row: any) {
   const existingEmailUser = row.payload.email ? await findUserByEmail(row.payload.email) : null;
   const existingPhoneUser = row.payload.mobileNumber ? await findUserByPhone(row.payload.mobileNumber) : null;
-  const existingCodeUser = row.payload.code ? await findUserByCode(row.payload.code) : null;
   const existingCompany = row.payload.companyId && mongoose.Types.ObjectId.isValid(row.payload.companyId)
     ? await Company.findOne({
         _id: new mongoose.Types.ObjectId(row.payload.companyId),
@@ -2211,6 +2275,27 @@ async function validateBulkRow(row: any) {
   const errors = [...row.errors];
   const reportingManagerEmail = normalizeEmail(row.payload.reportingManagerEmail);
   let resolvedReportingManager: any = null;
+  let existingCodeUser: any = null;
+
+  if (existingCompany && row.payload.employeeNumber) {
+    const employeeIdentifier = buildEmployeeIdentifier(
+      existingCompany.companyCode,
+      row.payload.employeeNumber
+    );
+    if (!employeeIdentifier) {
+      errors.push(
+        `Employee number can contain only letters, numbers, and single hyphens and cannot exceed ${MAX_EMPLOYEE_NUMBER_LENGTH} characters`
+      );
+    } else {
+      row.payload.employeeNumber = employeeIdentifier.employeeNumber;
+      row.payload.code = employeeIdentifier.code;
+      existingCodeUser = await findUserByEmployeeIdentifier({
+        companyId: String(existingCompany._id),
+        employeeNumber: employeeIdentifier.employeeNumber,
+        code: employeeIdentifier.code,
+      });
+    }
+  }
 
   if (row.payload.department && existingCompany) {
     const companyDepartments = Array.isArray(existingCompany.departments) ? existingCompany.departments : [];
@@ -2243,7 +2328,7 @@ async function validateBulkRow(row: any) {
   const duplicateValidation = buildDuplicateUserErrors({
     email: row.payload.email,
     mobileNumber: row.payload.mobileNumber,
-    code: row.payload.code,
+    code: row.payload.code || row.payload.employeeNumber,
     existingEmailUser,
     existingPhoneUser,
     existingCodeUser,
@@ -2286,15 +2371,26 @@ async function validateBulkRow(row: any) {
 
 async function buildBulkPreview(rows: any[]) {
   const previewRows = [];
+  const seenIdentifiers = new Set<string>();
 
   for (const row of rows) {
     const validation = await validateBulkRow(row);
+    const identifierKey = row.payload.code
+      ? String(row.payload.code).toUpperCase()
+      : "";
+    if (identifierKey && seenIdentifiers.has(identifierKey)) {
+      validation.errors.push("Duplicate employee number in file");
+    }
+    if (identifierKey) {
+      seenIdentifiers.add(identifierKey);
+    }
 
     previewRows.push({
       rowNumber: row.rowNumber,
       name: row.payload.name,
       mobileNumber: row.payload.mobileNumber,
       email: row.payload.email,
+      employeeNumber: row.payload.employeeNumber,
       code: row.payload.code,
       department: row.payload.department,
       team: row.payload.team,
@@ -2354,7 +2450,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     }
 
     const accessibleCompanies = await Company.find(accessibleCompanyMatch)
-      .select("_id company_name managerLevels rolePermissions")
+      .select("_id company_name companyCode managerLevels rolePermissions")
       .lean();
     const accessibleCompanyIds = accessibleCompanies.map((company: any) => company._id);
 
@@ -2452,6 +2548,8 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
           { mobileNumber: { $regex: searchRegex } },
           { email: { $regex: searchRegex } },
           { username: { $regex: searchRegex } },
+          { code: { $regex: searchRegex } },
+          { employeeNumber: { $regex: searchRegex } },
           { role: { $regex: searchRegex } },
         ],
       });
@@ -2497,7 +2595,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       : 0;
     const users = total
       ? await User.find(match)
-          .populate("company", "company_name managerLevels rolePermissions")
+          .populate("company", "company_name companyCode managerLevels rolePermissions")
           .populate("officeLocation", "name code address city state country pinCode is_active")
           .populate("createdBy", "name email username role")
           .populate("reportingManager", "name email username role designation")
@@ -2650,7 +2748,9 @@ export async function createCompanyAdminHandler(req: Request, res: Response) {
         ...req.body,
         companyId,
         role: "admin",
-        code: normalizeText(req.body?.code) || await generateUniqueUserCode(),
+        employeeNumber:
+          normalizeText(req.body?.employeeNumber || req.body?.code) ||
+          await generateUniqueEmployeeNumber(companyId),
         designation: normalizeText(req.body?.designation) || "Company Admin",
       },
       actor: requester,
@@ -2947,7 +3047,7 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
     const requester = assertAdminAccess(req);
     ensurePermission(requester, PERMISSION_KEYS.EDIT_USERS, "You do not have permission to update user status");
     const targetUser = await User.findById(req.params.id)
-      .populate("company", "company_name managerLevels rolePermissions")
+      .populate("company", "company_name companyCode managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
       .populate("reportingManager", "name email username role designation");
 
@@ -3117,7 +3217,7 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
   try {
     const requester = assertSuperAdminRequester(req);
     const targetUser = await User.findById(req.params.id)
-      .populate("company", "company_name managerLevels rolePermissions")
+      .populate("company", "company_name companyCode managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
       .populate("reportingManager", "name email username role designation");
 
@@ -3333,7 +3433,7 @@ export async function setPasswordFromSetupToken(token: string, password: string)
   await user.save();
 
   const populatedUser = await User.findById(user._id)
-      .populate("company", "company_name managerLevels rolePermissions")
+      .populate("company", "company_name companyCode managerLevels rolePermissions")
       .populate("createdBy", "name email username role")
       .populate("reportingManager", "name email username role designation");
 

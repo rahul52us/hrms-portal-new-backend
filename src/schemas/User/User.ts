@@ -1,4 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
+import Company from "../company/Company";
+import { buildEmployeeIdentifier } from "../../services/employeeCode/employeeCode.utils";
 
 export interface UserInterface extends Document {
   title: String;
@@ -7,6 +9,7 @@ export interface UserInterface extends Document {
   email?: string;
   username: string;
   code: string;
+  employeeNumber?: string;
   profileId?: string;
   address?: string;
   city?: string;
@@ -59,7 +62,19 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   email: { type: String, trim: true, lowercase: true, index: true },
   username: { type: String },
   mobileNumber:{type : String, index : true},
-  code : {type : String, index : true, unique : true, required:true},
+  code: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    index: true,
+    unique: true,
+    required: true,
+  },
+  employeeNumber: {
+    type: String,
+    trim: true,
+    uppercase: true,
+  },
   profileId: {
     type: String,
     trim: true,
@@ -157,8 +172,41 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   },
 });
 
+UserSchema.pre("validate", async function enforceCompanyEmployeeIdentifier() {
+  if (!this.company || String(this.role || this.userType).toLowerCase() === "superadmin") {
+    return;
+  }
+
+  const companyId = (this.company as any)?._id || this.company;
+  const company = await Company.findById(companyId).select("companyCode").lean();
+  if (!company) {
+    throw new Error("A valid company is required for an employee identifier");
+  }
+
+  const identifier = buildEmployeeIdentifier(
+    company.companyCode,
+    this.employeeNumber || this.code
+  );
+  if (!identifier) {
+    throw new Error("A valid employee number is required for company users");
+  }
+
+  this.employeeNumber = identifier.employeeNumber;
+  this.code = identifier.code;
+});
+
 UserSchema.index({ company: 1, reportingManager: 1, deletedAt: 1 });
 UserSchema.index({ company: 1, name: 1, _id: 1 });
+UserSchema.index(
+  { company: 1, employeeNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      company: { $type: "objectId" },
+      employeeNumber: { $type: "string" },
+    },
+  }
+);
 
 const UserModel = mongoose.model<UserInterface>("User", UserSchema);
 export default UserModel;
