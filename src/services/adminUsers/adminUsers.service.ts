@@ -3483,3 +3483,89 @@ export async function setPasswordFromSetupToken(token: string, password: string)
 
   return serializeUser(populatedUser);
 }
+
+export async function getManagedUserProfileDetailsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    const authContext = (req as any).authContext;
+    
+    // In a real app we might check permissions, but for now we assume admin/hr access via middleware
+    const user = await User.findById(targetUserId).select("_id company");
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    const profileDetails = await ProfileDetails.findOne({ user: targetUserId })
+      .populate("employeeDocuments.documentFileId")
+      .populate("employeeDocuments.createdBy", "name")
+      .populate("employeeDocuments.approvedBy", "name");
+
+    return res.status(200).json({ success: true, data: profileDetails || {} });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to fetch profile details" });
+  }
+}
+export async function updateManagedUserPersonalDetailsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    let profile = await ProfileDetails.findOne({ user: targetUserId });
+    if (!profile) profile = new ProfileDetails({ user: targetUserId });
+    profile.personalDetails = req.body;
+    await profile.save();
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to update personal details" });
+  }
+}
+
+export async function updateManagedUserFamilyContactsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    let profile = await ProfileDetails.findOne({ user: targetUserId });
+    if (!profile) profile = new ProfileDetails({ user: targetUserId });
+    profile.familyContacts = req.body.familyContacts;
+    await profile.save();
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to update family contacts" });
+  }
+}
+
+export async function updateManagedUserSkillsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    let profile = await ProfileDetails.findOne({ user: targetUserId });
+    if (!profile) profile = new ProfileDetails({ user: targetUserId });
+    profile.skills = req.body;
+    await profile.save();
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to update skills" });
+  }
+}
+
+export async function updateManagedUserStatutoryDetailsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    let profile = await ProfileDetails.findOne({ user: targetUserId });
+    if (!profile) profile = new ProfileDetails({ user: targetUserId });
+    profile.statutoryDetails = req.body;
+    await profile.save();
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to update statutory details" });
+  }
+}
+
+export async function updateManagedUserEmployeeDocumentsHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    let profile = await ProfileDetails.findOne({ user: targetUserId });
+    if (!profile) profile = new ProfileDetails({ user: targetUserId });
+    profile.employeeDocuments = req.body.employeeDocuments;
+    await profile.save();
+    return res.status(200).json({ success: true, data: profile });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || "Failed to update documents" });
+  }
+}

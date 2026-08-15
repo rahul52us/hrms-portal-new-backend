@@ -14,8 +14,8 @@ interface IFamilyContact {
 }
 
 interface ISkill {
-  coreDomainArea?: string;
-  additionalDomainAreas?: string[];
+  coreDomainAreas?: string[];
+  skills?: string[];
   totalYearsOfExperience?: number;
 }
 
@@ -76,8 +76,8 @@ const FamilyContactSchema = new Schema<IFamilyContact>({
 }, { _id: true });
 
 const SkillSchema = new Schema<ISkill>({
-  coreDomainArea: { type: String },
-  additionalDomainAreas: [{ type: String }],
+  coreDomainAreas: [{ type: String }],
+  skills: [{ type: String }],
   totalYearsOfExperience: { type: Number },
 }, { _id: false });
 

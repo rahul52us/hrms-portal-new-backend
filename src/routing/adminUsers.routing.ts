@@ -14,6 +14,12 @@ import {
   updateRolePermissionsHandler,
   updateManagedUserHandler,
   updateUserPermissionsHandler,
+  getManagedUserProfileDetailsHandler,
+  updateManagedUserPersonalDetailsHandler,
+  updateManagedUserFamilyContactsHandler,
+  updateManagedUserSkillsHandler,
+  updateManagedUserStatutoryDetailsHandler,
+  updateManagedUserEmployeeDocumentsHandler
 } from "../services/adminUsers/adminUsers.service";
 
 const router = express.Router();
@@ -30,6 +36,12 @@ router.delete("/:id", authenticate, deleteManagedUserHandler);
 router.put("/permissions/roles/:role", authenticate, updateRolePermissionsHandler);
 router.put("/:id/permissions", authenticate, updateUserPermissionsHandler);
 router.put("/:id/status", authenticate, updateManagedUserStatusHandler);
+router.get("/:id/profile-details", authenticate, getManagedUserProfileDetailsHandler);
+router.put("/:id/profile/personal", authenticate, updateManagedUserPersonalDetailsHandler);
+router.put("/:id/profile/family", authenticate, updateManagedUserFamilyContactsHandler);
+router.put("/:id/profile/skills", authenticate, updateManagedUserSkillsHandler);
+router.put("/:id/profile/statutory", authenticate, updateManagedUserStatutoryDetailsHandler);
+router.put("/:id/profile/documents", authenticate, updateManagedUserEmployeeDocumentsHandler);
 router.put("/:id", authenticate, updateManagedUserHandler);
 
 export default router;
