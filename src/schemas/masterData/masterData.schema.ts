@@ -1,9 +1,15 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 const MasterDataSchema = new Schema<any>({
-  masters : {
-    type : mongoose.Schema.Types.Mixed
-  },
+  documentTypes: [{ type: String }],
+  employmentTypes: [{ type: String }],
+  tdsSections: [{ type: String }],
+  coreDomains: [{ type: String }],
+  skills: [{ type: String }],
+  domainSkills: [{
+    domain: { type: String, required: true },
+    skills: [{ type: String }]
+  }],
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

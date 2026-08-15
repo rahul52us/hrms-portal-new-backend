@@ -5,6 +5,7 @@ import { statusCode } from "../../config/helper/statusCode";
 import mongoose from "mongoose";
 import { createCatchError } from "../../config/helper/function";
 import companyDetails from "../../schemas/company/companyDetails";
+import MasterData from "../../schemas/masterData/masterData.schema";
 import { uploadFile } from "../uploadDoc.repository";
 import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
 
@@ -437,12 +438,22 @@ export const createManagedCompany = async (data: any) => {
           faq: [],
           homeFaq: [],
         }).save(),
+        new MasterData({
+          company: savedCompany._id,
+          createdBy,
+          documentTypes: ["Aadhar", "PAN", "Passport", "Driving License", "10th Marksheet", "12th Marksheet", "Graduation Degree", "Relieving Letter", "Experience Certificate", "Payslip"],
+          employmentTypes: ["Full Time", "Part Time", "Contract", "Intern", "Consultant"],
+          skills: ["React JS", "Node JS", "Figma", "MongoDB", "Express", "Python", "Java", "C++", "AWS"],
+          coreDomains: ["MERN Stack", "Data Science", "Marketing", "HR", "Sales", "Design"],
+          tdsSections: ["80C", "80D", "HRA", "Home Loan Interest"]
+        }).save(),
       ]);
     } catch (setupError) {
       await Promise.allSettled([
         Company.deleteOne({ _id: savedCompany._id }),
         CompanyPolicy.deleteMany({ company: savedCompany._id }),
         companyDetails.deleteMany({ company: savedCompany._id }),
+        MasterData.deleteMany({ company: savedCompany._id }),
       ]);
       throw setupError;
     }

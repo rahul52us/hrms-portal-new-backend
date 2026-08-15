@@ -7,6 +7,7 @@ import { generateFileName, hashBcrypt } from "../../config/helper/function";
 import { deleteFile, uploadFile } from "../../repository/uploadDoc.repository";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import User from "../../schemas/User/User";
+import TdsDeclaration from "../../schemas/User/tdsDeclaration.schema";
 import Company from "../../schemas/company/Company";
 import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import Department from "../../schemas/Department/Department.schema";
@@ -331,7 +332,33 @@ async function generateUniqueProfileId(companyName: string) {
   }
 }
 
-async function syncManagedUserProfileDetails(user: any, company: any) {
+function getCurrentFinancialYear(): string {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = date.getMonth(); // 0-11
+  if (month >= 3) {
+    return `${year}-${year + 1}`;
+  } else {
+    return `${year - 1}-${year}`;
+  }
+}
+
+async function syncManagedUserTdsDeclaration(user: any) {
+  const currentFY = getCurrentFinancialYear();
+  const existingTds = await TdsDeclaration.findOne({
+    user: user._id,
+    financialYear: currentFY,
+  });
+
+  if (!existingTds) {
+    await new TdsDeclaration({
+      user: user._id,
+      financialYear: currentFY,
+    }).save();
+  }
+}
+
+async function syncManagedUserProfileDetails(user: any, company: any, payload: any = {}) {
   const existingProfile = user?.profile_details
     ? await ProfileDetails.findById(user.profile_details)
     : null;
@@ -360,6 +387,15 @@ async function syncManagedUserProfileDetails(user: any, company: any) {
 
   if (existingProfile) {
     existingProfile.personalInfo = personalInfo as any;
+
+    // Save new structured fields from payload if they exist
+    if (payload.personalDetails) existingProfile.personalDetails = payload.personalDetails;
+    if (payload.employmentDetails) existingProfile.employmentDetails = payload.employmentDetails;
+    if (payload.statutoryDetails) existingProfile.statutoryDetails = payload.statutoryDetails;
+    if (payload.skills) existingProfile.skills = payload.skills;
+    if (payload.familyContacts) existingProfile.familyContacts = payload.familyContacts;
+    if (payload.employeeDocuments) existingProfile.employeeDocuments = payload.employeeDocuments;
+
     await existingProfile.save();
     return existingProfile;
   }
@@ -367,6 +403,12 @@ async function syncManagedUserProfileDetails(user: any, company: any) {
   return new ProfileDetails({
     user: user._id,
     personalInfo,
+    personalDetails: payload.personalDetails || undefined,
+    employmentDetails: payload.employmentDetails || undefined,
+    statutoryDetails: payload.statutoryDetails || undefined,
+    skills: payload.skills || undefined,
+    familyContacts: payload.familyContacts || [],
+    employeeDocuments: payload.employeeDocuments || [],
   }).save();
 }
 
@@ -1904,14 +1946,16 @@ async function saveManagedUser({
     });
   });
 
-  const profileDetails = await syncManagedUserProfileDetails(user, company);
+  await syncManagedUserTdsDeclaration(user);
+
+  const profileDetails = await syncManagedUserProfileDetails(user, company, payload);
   if (profileDetails && String(user.profile_details || "") !== String(profileDetails._id || "")) {
     user.profile_details = profileDetails._id;
     await user.save();
   }
 
   const populatedUser = await User.findById(user._id)
-      .populate("company", "company_name companyCode managerLevels")
+      .populate("company", "company_name companyCode")
       .populate("officeLocation", "name code address city state country pinCode is_active")
       .populate("createdBy", "name email username role")
       .populate("reportingManager", "name email username role designation");

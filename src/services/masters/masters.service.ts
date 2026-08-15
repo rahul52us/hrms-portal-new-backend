@@ -26,7 +26,7 @@ export const createOrUpdateMasterData = async (
 
     if (masterData) {
       // Update existing
-      masterData.masters = masters;
+      Object.assign(masterData, masters);
       masterData.createdBy = new mongoose.Types.ObjectId(createdBy);
       await masterData.save();
       return res.status(200).send({
@@ -37,7 +37,7 @@ export const createOrUpdateMasterData = async (
     } else {
       // Create new
       const newMasterData = new MasterData({
-        masters,
+        ...masters,
         company: new mongoose.Types.ObjectId(company),
         createdBy: new mongoose.Types.ObjectId(createdBy),
       });
@@ -48,6 +48,63 @@ export const createOrUpdateMasterData = async (
         data: savedData,
       });
     }
+  } catch (err: any) {
+    next(err);
+  }
+};
+
+export const updateMasterCategory = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const category = req.params.category;
+    const { items, company } = req.body;
+    const createdBy = req.userId;
+
+    if (!category || !items || !company) {
+      return res.status(400).send({
+        status: "error",
+        message: "category, items, and company are required",
+      });
+    }
+
+    const validCategories = ["documentTypes", "employmentTypes", "skills", "tdsSections", "coreDomains", "domainSkills"];
+    if (!validCategories.includes(category)) {
+      return res.status(400).send({
+        status: "error",
+        message: "Invalid master data category",
+      });
+    }
+
+    let masterData = await MasterData.findOne({
+      company: new mongoose.Types.ObjectId(company),
+      isActive: true,
+    });
+
+    if (!masterData) {
+      masterData = new MasterData({
+        company: new mongoose.Types.ObjectId(company),
+        createdBy: new mongoose.Types.ObjectId(createdBy),
+        documentTypes: [],
+        employmentTypes: [],
+        coreDomains: [],
+        skills: [],
+        tdsSections: []
+      });
+    }
+
+    masterData[category] = items;
+    masterData.createdBy = new mongoose.Types.ObjectId(createdBy);
+    
+    await masterData.save();
+
+    return res.status(200).send({
+      status: "success",
+      message: `${category} updated successfully`,
+      data: masterData,
+    });
   } catch (err: any) {
     next(err);
   }
