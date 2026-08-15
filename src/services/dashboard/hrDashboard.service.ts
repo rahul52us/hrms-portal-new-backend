@@ -175,6 +175,7 @@ function serializeUserLite(user: any) {
     designation: user?.designation || "",
     officeLocationName: location?.name || "",
     status: getStatus(user),
+    pic: user?.pic || null,
     createdAt: user?.createdAt || null,
     joiningDate: user?.joiningDate || null,
     dateOfBirth: user?.dateOfBirth || null,
@@ -297,7 +298,7 @@ export const getHrDashboardSummaryService = async (
 
     const [visibleUsers, departments, allLocations, scopedLocations] = await Promise.all([
       User.find(visibleMatch)
-        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager is_enabled password setupToken createdAt")
+        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager is_enabled password setupToken createdAt pic")
         .populate("officeLocation", "name code city state")
         .sort({ createdAt: -1 })
         .lean(),

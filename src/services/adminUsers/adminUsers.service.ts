@@ -1494,7 +1494,7 @@ async function saveManagedUser({
   existingUserId?: string;
   sendSetupEmail?: boolean;
 }) {
-  const code = normalizeText(payload?.code);
+  const code = normalizeText(payload?.code || payload?.employeeNumber || payload?.employeeCode);
   const name = normalizeText(payload?.name);
   const email = normalizeEmail(payload?.email || payload?.username);
   const mobileNumber = normalizeText(payload?.mobileNumber || payload?.phoneNumber);
