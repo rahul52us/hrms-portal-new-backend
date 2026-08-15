@@ -17,6 +17,7 @@ import { statusCode } from "../../config/helper/statusCode";
 import mongoose from "mongoose";
 import companyDetails from "../../schemas/company/companyDetails";
 import { createManagedCompanyValidation } from "../../services/company/utils/validations";
+import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
 
@@ -410,7 +411,14 @@ const updateOrganisationCompany = async (
     });
     if (comp) {
       const companyName = value.company_name.trim();
-      const companyCode = value.companyCode.trim().toUpperCase();
+      const companyCode = normalizeCompanyCode(value.companyCode);
+      const storedCompanyCode = normalizeCompanyCode(comp.companyCode);
+      if (companyCode !== storedCompanyCode) {
+        throw generateError(
+          "Company code is permanent because it prefixes employee codes and cannot be changed.",
+          409
+        );
+      }
       const tenantSlug = normalizeTenantSlug(value.tenantSlug || companyName);
       const customDomain = normalizeDomain(value.customDomain);
       const primaryThemeColor = normalizeThemeColor(value.primaryThemeColor);
@@ -507,7 +515,7 @@ const updateOrganisationCompany = async (
       });
     }
   } catch (err: any) {
-    return res.status(statusCode.serverError).send({
+    return res.status(err?.statusCode || statusCode.serverError).send({
       status: "error",
       message: err?.message,
       data: err?.message,

@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import { createCatchError } from "../../config/helper/function";
 import companyDetails from "../../schemas/company/companyDetails";
 import { uploadFile } from "../uploadDoc.repository";
+import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
 
@@ -320,7 +321,7 @@ export const createManagedCompany = async (data: any) => {
     }
 
     const companyName = data.company_name.trim();
-    const companyCode = data.companyCode.trim().toUpperCase();
+    const companyCode = normalizeCompanyCode(data.companyCode);
     const customDomain = normalizeDomain(data.customDomain);
     const primaryThemeColor = normalizeThemeColor(data.primaryThemeColor);
 

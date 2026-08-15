@@ -1,4 +1,8 @@
 import Joi from "joi";
+import {
+  COMPANY_CODE_PATTERN,
+  MAX_COMPANY_CODE_LENGTH,
+} from "../../employeeCode/employeeCode.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
 const HEX_COLOR_PATTERN = /^#(?:[0-9A-Fa-f]{3}){1,2}$/;
@@ -40,9 +44,19 @@ export const createManagedCompanyValidation = Joi.object({
     "any.required": "Company name is required",
     "string.empty": "Company name is required",
   }),
-  companyCode: Joi.string().trim().required().messages({
+  companyCode: Joi.string()
+    .trim()
+    .uppercase()
+    .min(2)
+    .max(MAX_COMPANY_CODE_LENGTH)
+    .pattern(COMPANY_CODE_PATTERN)
+    .required()
+    .messages({
     "any.required": "Company code is required",
     "string.empty": "Company code is required",
+    "string.min": "Company code must contain at least 2 characters",
+    "string.max": `Company code cannot exceed ${MAX_COMPANY_CODE_LENGTH} characters`,
+    "string.pattern.base": "Company code can contain only letters, numbers, and single hyphens",
   }),
   companyType: Joi.string().trim().default("company"),
   tenantSlug: Joi.string().trim().allow("", null).default(""),

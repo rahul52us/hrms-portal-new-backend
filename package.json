@@ -16,6 +16,8 @@
     "users:reporting-manager:migrate:apply": "ts-node src/scripts/migrateUserReportingManager.ts --apply",
     "users:status:migrate": "ts-node src/scripts/migrateUserEnabledStatus.ts",
     "users:status:migrate:apply": "ts-node src/scripts/migrateUserEnabledStatus.ts --apply",
+    "users:employee-codes:migrate": "ts-node src/scripts/migrateEmployeeCodes.ts",
+    "users:employee-codes:migrate:apply": "ts-node src/scripts/migrateEmployeeCodes.ts --apply",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

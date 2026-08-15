@@ -1,4 +1,8 @@
 import Joi from "joi";
+import {
+  COMPANY_CODE_PATTERN,
+  MAX_COMPANY_CODE_LENGTH,
+} from "../../../services/employeeCode/employeeCode.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
 const HEX_COLOR_PATTERN = /^#(?:[0-9A-Fa-f]{3}){1,2}$/;
@@ -46,9 +50,17 @@ const companyDetailsSchema = Joi.object({
       "string.empty": "Mobile number field cannot be empty",
       "string.pattern.base": "Mobile number must be between 10 and 15 digits",
     }),
-  companyCode: Joi.string().required().messages({
+  companyCode: Joi.string()
+    .trim()
+    .uppercase()
+    .min(2)
+    .max(MAX_COMPANY_CODE_LENGTH)
+    .pattern(COMPANY_CODE_PATTERN)
+    .required()
+    .messages({
       "any.required": "Company Code field is required",
       "string.empty": "Company Code field cannot be empty",
+      "string.pattern.base": "Company code can contain only letters, numbers, and single hyphens",
     }),
   workNo: Joi.string().pattern(/^\d{10,15}$/),
   remember_me: Joi.boolean(),
