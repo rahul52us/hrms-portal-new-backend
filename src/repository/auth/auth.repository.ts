@@ -50,21 +50,20 @@ async function generateUniqueTenantSlug(companyName: string) {
   }
 }
 
-async function findExistingIdentity(phone: string, email?: string) {
+async function findExistingIdentity(phone: string, username?: string) {
   const identityQueries: any[] = [
     { mobileNumber: phone },
-    { username: phone },
   ];
 
-  if (email) {
-    identityQueries.push({ email }, { username: email });
+  if (username) {
+    identityQueries.push({ username });
   }
 
   return User.findOne({
     $or: identityQueries,
     deletedAt: { $exists: false },
   })
-    .select("mobileNumber email username")
+    .select("mobileNumber username")
     .lean();
 }
 
@@ -80,16 +79,16 @@ function buildIdentityConflictError(existingUser: any, phone: string) {
   );
 }
 
-function normalizeLoginEmail(value: unknown) {
-  return String(value || "").trim();
+function normalizeUsername(value: unknown) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function buildAuthResponseUser(user: any) {
   return {
     authorization_token: generateToken({ userId: user._id }),
     userId: user._id,
+    username: user.username,
     role: user.role,
-    userType: user.userType,
     company: user.company || null,
   };
 }
@@ -108,29 +107,26 @@ function requireValidSuperadminSetupKey(setupKey?: string) {
   }
 }
 
-async function findUserByLoginEmail(email: string) {
-  const normalizedEmail = normalizeLoginEmail(email);
-  if (!normalizedEmail) {
+async function findUserByLoginUsername(username: string) {
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) {
     return null;
   }
 
-  const emailRegex = new RegExp(`^${escapeRegex(normalizedEmail)}$`, "i");
+  const usernameRegex = new RegExp(`^${escapeRegex(normalizedUsername)}$`, "i");
 
   return User.findOne({
-    $or: [
-      { username: emailRegex },
-      { email: emailRegex },
-    ],
+    username: usernameRegex,
     deletedAt: { $exists: false },
   });
 }
 
 const findUserByUserName = async (data: any) => {
   try {
-    const normalizedEmail = String(data.username || "").trim().toLowerCase();
-    const emailRegex = new RegExp(`^${escapeRegex(normalizedEmail)}$`, "i");
+    const normalizedUsername = normalizeUsername(data.username);
+    const usernameRegex = new RegExp(`^${escapeRegex(normalizedUsername)}$`, "i");
     const user = await User.findOne({
-      $or: [{ email: emailRegex }, { username: emailRegex }],
+      username: usernameRegex,
       deletedAt: { $exists: false },
     });
     if (user) {
@@ -156,8 +152,8 @@ const findUserById = async (id: any) => {
 
 const loginUserWithPassword = async (data: any): Promise<any> => {
   try {
-    const email = normalizeLoginEmail(data.email);
-    const existUser = await findUserByLoginEmail(email);
+    const username = normalizeUsername(data.username);
+    const existUser = await findUserByLoginUsername(username);
     if (!existUser) {
       throw generateError("Invalid credentials.", 401);
     }
@@ -192,17 +188,16 @@ const bootstrapSuperadmin = async (data: any) => {
   const existingSuperadmin = await User.findOne({
     role: "superadmin",
     deletedAt: { $exists: false },
-  }).select("_id username email");
+  }).select("_id username");
 
   if (existingSuperadmin) {
     throw generateError("A superadmin account already exists.", 409);
   }
 
-  const email = String(data.email || "").trim().toLowerCase();
+  const username = normalizeUsername(data.username);
   const phone = String(data.phone || "").trim();
   const identityQueries: any[] = [
-    { email: new RegExp(`^${escapeRegex(email)}$`, "i") },
-    { username: new RegExp(`^${escapeRegex(email)}$`, "i") },
+    { username: new RegExp(`^${escapeRegex(username)}$`, "i") },
   ];
 
   if (phone) {
@@ -212,7 +207,7 @@ const bootstrapSuperadmin = async (data: any) => {
   const existingIdentity = await User.findOne({
     $or: identityQueries,
     deletedAt: { $exists: false },
-  }).select("_id username email mobileNumber");
+  }).select("_id username mobileNumber");
 
   if (existingIdentity) {
     throw generateError("An account already exists with this email or phone.", 409);
@@ -220,12 +215,10 @@ const bootstrapSuperadmin = async (data: any) => {
 
   const user = new User({
     name: String(data.name || "").trim(),
-    email,
-    username: email,
+    username,
     ...(phone ? { mobileNumber: phone } : {}),
     code: await generateUniqueUserCode("SADM"),
     role: "superadmin",
-    userType: "superadmin",
     password: await hashBcrypt(data.password),
     is_enabled: true,
   });
@@ -237,7 +230,6 @@ const bootstrapSuperadmin = async (data: any) => {
       user: savedUser._id,
       personalInfo: {
         name: savedUser.name,
-        email: savedUser.email,
         username: savedUser.username,
         code: savedUser.code,
       },
@@ -304,31 +296,11 @@ function buildUserLocationFields(location: ReturnType<typeof normalizeRegistrati
   };
 }
 
-function buildCompanyAddressInfo(location: ReturnType<typeof normalizeRegistrationLocation>) {
-  if (!location) {
-    return [];
-  }
-
-  return [
-    {
-      address: location.address,
-      country: location.country,
-      state: location.state,
-      city: location.city,
-      pinCode: location.postalCode,
-      formattedAddress: location.formattedAddress,
-      ...(location.placeId ? { placeId: location.placeId } : {}),
-      ...(location.lat !== null ? { lat: location.lat } : {}),
-      ...(location.lng !== null ? { lng: location.lng } : {}),
-    },
-  ];
-}
-
 const registerLearner = async (data: any) => {
   const phone = String(data.phone || "").trim();
-  const email = String(data.email || "").trim().toLowerCase();
+  const username = normalizeUsername(data.username);
   const location = normalizeRegistrationLocation(data.location);
-  const existingUser = await findExistingIdentity(phone, email);
+  const existingUser = await findExistingIdentity(phone, username);
 
   if (existingUser) {
     throw buildIdentityConflictError(existingUser, phone);
@@ -337,11 +309,9 @@ const registerLearner = async (data: any) => {
   const user = new User({
     name: String(data.name || "").trim(),
     mobileNumber: phone,
-    username: phone,
-    ...(email ? { email } : {}),
+    username,
     code: await generateUniqueUserCode("LRN"),
     role: "user",
-    userType: "learner",
     is_enabled: true,
     ...buildUserLocationFields(location),
   });
@@ -359,7 +329,6 @@ const registerLearner = async (data: any) => {
 
   return {
     authorization_token: generateToken({ userId: user._id }),
-    userType: user.userType,
     role: user.role,
   };
 };
@@ -367,12 +336,12 @@ const registerLearner = async (data: any) => {
 const registerAdmin = async (data: any) => {
   const name = String(data.name || "").trim();
   const phone = String(data.phone || "").trim();
-  const email = String(data.email || "").trim().toLowerCase();
+  const username = normalizeUsername(data.username);
   const companyName = String(data.companyName || "").trim();
-  const companyEmail = String(data.companyEmail || "").trim().toLowerCase() || email;
+  const companyEmail = String(data.companyEmail || "").trim().toLowerCase() || username;
   const location = normalizeRegistrationLocation(data.location);
 
-  const existingUser = await findExistingIdentity(phone, email);
+  const existingUser = await findExistingIdentity(phone, username);
   if (existingUser) {
     throw buildIdentityConflictError(existingUser, phone);
   }
@@ -391,12 +360,10 @@ const registerAdmin = async (data: any) => {
 
   const user = new User({
     name,
-    ...(email ? { email } : {}),
     mobileNumber: phone,
-    username: phone,
+    username,
     code: await generateUniqueUserCode("ADM"),
     role: "admin",
-    userType: "admin",
     is_enabled: true,
     ...buildUserLocationFields(location),
   });
@@ -415,8 +382,6 @@ const registerAdmin = async (data: any) => {
       companyEmail,
       mobileNo: phone,
       bio: `${companyName} learning workspace`,
-      addressInfo: buildCompanyAddressInfo(location),
-      managerLevels: 3,
       verified_email_allowed: false,
       createdBy: savedUser._id,
       activeUser: savedUser._id,
@@ -444,7 +409,6 @@ const registerAdmin = async (data: any) => {
 
     return {
       authorization_token: generateToken({ userId: savedUser._id }),
-      userType: savedUser.userType,
       role: savedUser.role,
     };
   } catch (error) {

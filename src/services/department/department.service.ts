@@ -23,9 +23,7 @@ import { isUserAccountActive } from "../auth/utils/userAccountStatus";
 const getScopedCompanyId = (req: any) => {
   const role = String(
     req.bodyData?.role ||
-      req.bodyData?.userType ||
       req.user?.role ||
-      req.user?.userType ||
       ""
   ).toLowerCase();
 
@@ -41,9 +39,7 @@ const getScopedCompanyId = (req: any) => {
 const getRequesterRole = (req: any) =>
   String(
     req.bodyData?.role ||
-      req.bodyData?.userType ||
       req.user?.role ||
-      req.user?.userType ||
       ""
   )
     .trim()
@@ -90,9 +86,8 @@ const serializeDepartmentHead = (head: any) => {
   return {
     _id: head._id,
     name: head.name || "",
-    email: head.email || head.username || "",
-    username: head.username || head.email || "",
-    role: head.role || head.userType || "",
+    username: head.username || "",
+    role: head.role || "",
     department: head.department || "",
   };
 };
@@ -131,7 +126,7 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
     department: { $in: departmentNames },
     deletedAt: { $exists: false },
   })
-    .select("department role userType is_enabled password")
+    .select("department role is_enabled password")
     .lean();
 
   const statsByDepartment = users.reduce<Record<string, any>>((acc, user: any) => {
@@ -148,7 +143,7 @@ const enrichDepartmentsWithStats = async (companyId: string, departments: any[])
     if (isUserAccountActive(user)) {
       acc[key].activeEmployeeCount += 1;
     }
-    if (isManagerRole(user.role || user.userType)) {
+    if (isManagerRole(user.role)) {
       acc[key].managerCount += 1;
     }
 
@@ -242,7 +237,7 @@ const findDuplicateTeam = (
 };
 
 const getPopulatedDepartment = (id: string) =>
-  Department.findById(id).populate("departmentHead", "name email username role userType department");
+  Department.findById(id).populate("departmentHead", "name username role department");
 
 const syncCompanyDepartmentNames = async (
   companyId: string,
@@ -360,10 +355,10 @@ const getDepartmentTransferPreview = async (department: any) => {
       deletedAt: null,
     })
       .select(
-        "name email username code role userType team designation officeLocation reportingManager is_enabled password"
+        "name username code role team designation officeLocation reportingManager is_enabled password"
       )
       .populate("officeLocation", "name code city state")
-      .populate("reportingManager", "name email username")
+      .populate("reportingManager", "name username")
       .sort({ name: 1 })
       .lean(),
     Department.find({
@@ -386,9 +381,9 @@ const getDepartmentTransferPreview = async (department: any) => {
     employees: employees.map((employee: any) => ({
       _id: employee._id,
       name: employee.name || "",
-      email: employee.email || employee.username || "",
+      username: employee.username || "",
       code: employee.code || "",
-      role: employee.role || employee.userType || "user",
+      role: employee.role || "user",
       team: employee.team || "",
       designation: employee.designation || "",
       officeLocation: employee.officeLocation || null,
@@ -813,7 +808,7 @@ export const transferDepartmentEmployeesService = async (
         .select("name code")
         .lean(),
       User.find({ _id: { $in: managerIds } })
-        .select("name email username")
+        .select("name username")
         .lean(),
     ]);
 
@@ -868,15 +863,14 @@ export const transferDepartmentEmployeesService = async (
       const nextRole =
         isSourceDepartmentHead &&
         otherDepartmentHeadCount === 0 &&
-        normalizeRole(employee.role || employee.userType) === "departmenthead"
+        normalizeRole(employee.role) === "departmenthead"
           ? "user"
-          : normalizeRole(employee.role || employee.userType);
+          : normalizeRole(employee.role);
       const nextUser = {
         ...previousUser,
         department: normalizeText(targetDepartment.departmentName),
         team: normalizeText(targetTeam?.name),
         role: nextRole,
-        userType: nextRole,
       };
       const snapshotContext = {
         officeLocation:
@@ -931,7 +925,6 @@ export const transferDepartmentEmployeesService = async (
         );
         plan.employee.team = normalizeText(plan.targetTeam?.name);
         plan.employee.role = plan.nextRole;
-        plan.employee.userType = plan.nextRole;
         plan.employee.updatedAt = effectiveAt;
         await plan.employee.save({ session });
 
@@ -959,7 +952,7 @@ export const transferDepartmentEmployeesService = async (
       department._id
     ).populate(
       "departmentHead",
-      "name email username role userType department"
+      "name username role department"
     );
     const impact = await getDepartmentArchiveImpact(refreshedDepartment);
 
@@ -1037,11 +1030,10 @@ export const assignDepartmentHeadService = async (
 
             if (
               otherHeadAssignments === 0 &&
-              normalizeRole(previousHead.role || previousHead.userType) ===
+              normalizeRole(previousHead.role) ===
                 "departmenthead"
             ) {
               previousHead.role = "user";
-              previousHead.userType = "user";
               previousHead.updatedAt = new Date();
               await previousHead.save({ session });
               await recordEmployeeAssignmentChange({
@@ -1062,7 +1054,7 @@ export const assignDepartmentHeadService = async (
         department.departmentHead = undefined;
         await department.save({ session });
       });
-      const updated = await Department.findById(id).populate("departmentHead", "name email username role userType department");
+      const updated = await Department.findById(id).populate("departmentHead", "name username role department");
 
       return res.status(200).send({
         status: "success",
@@ -1085,7 +1077,7 @@ export const assignDepartmentHeadService = async (
       throw generateError("User not found in this company", 404);
     }
 
-    const targetRole = normalizeRole(user.role || user.userType);
+    const targetRole = normalizeRole(user.role);
     if (["admin", "superadmin"].includes(targetRole)) {
       throw generateError("Choose an employee or manager, not an admin account", 400);
     }
@@ -1111,11 +1103,10 @@ export const assignDepartmentHeadService = async (
 
           if (
             otherHeadAssignments === 0 &&
-            normalizeRole(previousHead.role || previousHead.userType) ===
+            normalizeRole(previousHead.role) ===
               "departmenthead"
           ) {
             previousHead.role = "user";
-            previousHead.userType = "user";
             previousHead.updatedAt = new Date();
             await previousHead.save({ session });
             await recordEmployeeAssignmentChange({
@@ -1135,7 +1126,6 @@ export const assignDepartmentHeadService = async (
 
       user.department = normalizeText(department.departmentName);
       user.role = "departmenthead";
-      user.userType = "departmenthead";
       user.updatedAt = new Date();
       await user.save({ session });
       await recordEmployeeAssignmentChange({
@@ -1154,7 +1144,7 @@ export const assignDepartmentHeadService = async (
       await department.save({ session });
     });
 
-    const updated = await Department.findById(id).populate("departmentHead", "name email username role userType department");
+    const updated = await Department.findById(id).populate("departmentHead", "name username role department");
 
     return res.status(200).send({
       status: "success",
@@ -1383,7 +1373,7 @@ export const getDepartmentsService = async (
           { code: { $regex: `^${escapeRegex(actorDepartment)}$`, $options: "i" } },
         ],
       })
-        .populate("departmentHead", "name email username role userType department")
+        .populate("departmentHead", "name username role department")
         .limit(limit)
         .skip((page - 1) * limit)
         .sort({ createdAt: -1 });
@@ -1427,7 +1417,7 @@ export const getDepartmentsService = async (
       };
       const [data, total] = await Promise.all([
         Department.find(match)
-          .populate("departmentHead", "name email username role userType department")
+          .populate("departmentHead", "name username role department")
           .skip((page - 1) * limit)
           .limit(limit)
           .sort({ createdAt: -1 }),

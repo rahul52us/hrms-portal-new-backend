@@ -65,7 +65,7 @@ function normalizeSearch(value: unknown) {
 }
 
 function isLearner(user: any) {
-  return LEARNER_ROLES.has(normalizeRole(user?.role || user?.userType || "user"));
+  return LEARNER_ROLES.has(normalizeRole(user?.role || "user"));
 }
 
 function isActive(user: any) {
@@ -132,7 +132,7 @@ function getBatchDetails(enrollment: any) {
 }
 
 async function resolveActorScope(actor: any) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   if (!["superadmin", "admin", "departmenthead"].includes(role)) {
     throw generateError("Learner results are not available for this role", 403);
   }
@@ -175,10 +175,7 @@ async function resolveActorScope(actor: any) {
 function buildUserMatch(scope: any, query: any) {
   const match: any = {
     deletedAt: { $exists: false },
-    $or: [
-      { role: { $in: Array.from(LEARNER_ROLES) } },
-      { userType: { $in: Array.from(LEARNER_ROLES) } },
-    ],
+    role: { $in: Array.from(LEARNER_ROLES) },
   };
 
   if (scope.role === "superadmin") {
@@ -299,8 +296,8 @@ function summarizeResult(options: {
     enrollmentId: stringifyId(enrollment._id),
     learner: {
       _id: stringifyId(user?._id),
-      name: user?.name || user?.email || user?.username || "Unnamed learner",
-      email: user?.email || user?.username || "",
+      name: user?.name || user?.username || "Unnamed learner",
+      username: user?.username || "",
       mobileNumber: user?.mobileNumber || "",
       department: user?.department || "Unassigned",
       isActive: isActive(user),
@@ -361,7 +358,7 @@ function matchesFilters(row: any, query: any) {
   if (search) {
     const searchValues = [
       row.learner.name,
-      row.learner.email,
+      row.learner.username,
       row.learner.mobileNumber,
       row.course.title,
       ...row.manualQuizResults.map((quiz: any) => quiz.title),
@@ -434,7 +431,7 @@ function sortRows(rows: any[], query: any) {
 async function loadResultContext(actor: any, query: any) {
   const scope = await resolveActorScope(actor);
   let users = await User.find(buildUserMatch(scope, query))
-    .select("_id name email username mobileNumber role userType company department is_enabled password")
+    .select("_id name username mobileNumber role company department is_enabled password")
     .lean();
   users = (await filterUsersByDepartment(users, scope, query)).filter(isLearner);
 
@@ -575,7 +572,7 @@ async function buildFilterOptions(scope: any, users: any[], rows: any[], query: 
     users: users
       .map((user) => ({
         value: stringifyId(user._id),
-        label: user.name || user.email || user.username || "Learner",
+        label: user.name || user.username || "Learner",
       }))
       .sort((left, right) => left.label.localeCompare(right.label)),
   };
@@ -687,7 +684,7 @@ export const getLearnerResultDetailService = async (
       companyId: req.query.companyId,
       userId: stringifyId(enrollment.userId),
     }))
-      .select("_id name email username mobileNumber role userType company department is_enabled password")
+      .select("_id name username mobileNumber role company department is_enabled password")
       .lean();
     users = (await filterUsersByDepartment(users, scope, {})).filter(isLearner);
     const learner = users.find((user) => stringifyId(user._id) === stringifyId(enrollment.userId));
@@ -761,7 +758,7 @@ export const getLearnerResultDetailService = async (
           "interactions.correctResponseTexts",
           "interactions.review",
         ].join(" "))
-        .populate("interactions.review.reviewedBy", "name email username")
+        .populate("interactions.review.reviewedBy", "name username")
         .sort({ updatedAt: -1 })
         .lean(),
       getCourseQuizAnswerSectionsForUser({

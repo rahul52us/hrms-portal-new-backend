@@ -48,7 +48,7 @@ function averageNullableNumbers(values: Array<number | null | undefined>) {
 
 async function getManagerUser(actorUserId: string) {
   const manager = await User.findById(actorUserId)
-    .select("_id name email username role reportingManager")
+    .select("_id name username role reportingManager")
     .lean();
 
   if (!manager) {
@@ -79,7 +79,7 @@ async function getManagedLearners(manager: any) {
       reportingManager: { $in: managerIds },
       deletedAt: { $exists: false },
     })
-      .select("_id name email username role department company reportingManager")
+      .select("_id name username role department company reportingManager")
       .lean();
     managerIds = [];
     directReports.forEach((directReport: any) => {
@@ -92,8 +92,8 @@ async function getManagedLearners(manager: any) {
   }
 
   return managedLearners.sort((left, right) =>
-    normalizeString(left.name || left.email || left.username).localeCompare(
-      normalizeString(right.name || right.email || right.username)
+    normalizeString(left.name || left.username).localeCompare(
+      normalizeString(right.name || right.username)
     )
   );
 }
@@ -189,8 +189,7 @@ export const getManagerLearnersService = async (req: any, res: Response, next: N
 
       return {
         _id: learnerKey,
-        name: learner.name || learner.email || learner.username || "Learner",
-        email: learner.email || "",
+        name: learner.name || learner.username || "Learner",
         username: learner.username || "",
         role: learner.role || "user",
         department: learner.department || "",
@@ -320,8 +319,7 @@ export const getManagerLearnerProgressService = async (req: any, res: Response, 
       data: {
         learner: {
           _id: stringifyId(learner._id),
-          name: learner.name || learner.email || learner.username || "Learner",
-          email: learner.email || "",
+          name: learner.name || learner.username || "Learner",
           username: learner.username || "",
           role: learner.role || "user",
           department: learner.department || "",
@@ -359,7 +357,7 @@ export const getManagerLearnerAnswersService = async (req: any, res: Response, n
     }
 
     const trackingDocs = await ScormTracking.find(trackingQuery)
-      .populate("interactions.review.reviewedBy", "name email username")
+      .populate("interactions.review.reviewedBy", "name username")
       .sort({ updatedAt: -1 })
       .lean();
     const courseQuizAnswerSections = await getCourseQuizAnswerSectionsForUser({
@@ -469,7 +467,7 @@ export const reviewManagerAnswerService = async (req: any, res: Response, next: 
         await syncAggregateCourseProgress({ userId: trackingDoc.userId, courseId: trackingDoc.courseId });
     }
 
-    await trackingDoc.populate("interactions.review.reviewedBy", "name email username");
+    await trackingDoc.populate("interactions.review.reviewedBy", "name username");
 
     const course: any = await mongoose
       .model("Course")

@@ -63,7 +63,6 @@ function buildUserCompanyDocument(userId: string, companyId: string, userName: s
     activeUser: new mongoose.Types.ObjectId(normalizedUserId),
     is_active: true,
     verified_email_allowed: false,
-    addressInfo: [],
   };
 }
 
@@ -137,7 +136,6 @@ export async function upsertCourseCompanyMembership(options: {
         departments: "",
         courseIds: "",
         createdBy: "",
-        managerLevels: "",
       },
       $setOnInsert: {
         ...userCompanyDoc,
@@ -215,7 +213,6 @@ export async function syncCourseMembershipsForExistingEnrollments(options: {
           departments: "",
           courseIds: "",
           createdBy: "",
-          managerLevels: "",
         },
       }
     );
@@ -256,7 +253,6 @@ export async function syncCourseMembershipsForExistingEnrollments(options: {
             departments: "",
             courseIds: "",
             createdBy: "",
-            managerLevels: "",
           },
           $setOnInsert: {
             ...userCompanyDoc,

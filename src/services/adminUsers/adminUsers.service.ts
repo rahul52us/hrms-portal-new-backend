@@ -178,10 +178,6 @@ function parseManagerRoleLevel(role: unknown) {
   return match ? Number(match[1]) : null;
 }
 
-function getCompanyManagerLevels(company: any) {
-  return Math.max(1, Number(company?.managerLevels) || 3);
-}
-
 function getCellValue(cell: any) {
   const rawValue = cell?.value;
 
@@ -297,41 +293,6 @@ function isFutureDate(dateValue?: Date) {
   return candidateDate.getTime() > today.getTime();
 }
 
-function buildProfilePrefix(companyName: string) {
-  const tokens = normalizeText(companyName)
-    .toUpperCase()
-    .match(/[A-Z0-9]+/g) || [];
-
-  const initials = tokens.map((token) => token[0]).join("").slice(0, 4);
-  if (initials.length >= 2) {
-    return initials;
-  }
-
-  const compactName = tokens.join("").slice(0, 4);
-  if (compactName.length >= 2) {
-    return compactName;
-  }
-
-  return "USR";
-}
-
-async function generateUniqueProfileId(companyName: string) {
-  const prefix = buildProfilePrefix(companyName);
-  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-  while (true) {
-    const suffix = Array.from({ length: 5 }, () =>
-      characters.charAt(Math.floor(Math.random() * characters.length))
-    ).join("");
-    const profileId = `${prefix}-${suffix}`;
-    const existingUser = await User.findOne({ profileId });
-
-    if (!existingUser) {
-      return profileId;
-    }
-  }
-}
-
 function getCurrentFinancialYear(): string {
   const date = new Date();
   const year = date.getFullYear();
@@ -366,10 +327,8 @@ async function syncManagedUserProfileDetails(user: any, company: any, payload: a
   const personalInfo = {
     ...(existingProfile?.personalInfo || {}),
     name: user?.name || "",
-    username: user?.username || user?.email || "",
-    email: user?.email || user?.username || "",
+    username: user?.username || "",
     code: user?.code || "",
-    title: user?.title || "",
     city: user?.city || "",
     state: user?.state || "",
     designation: user?.designation || "",
@@ -378,12 +337,13 @@ async function syncManagedUserProfileDetails(user: any, company: any, payload: a
     department: user?.department || "",
     team: user?.team || "",
     officeLocation: user?.officeLocation || null,
-    profileId: user?.profileId || "",
     gender: user?.gender ?? null,
     dob: user?.dateOfBirth || null,
     dateOfBirth: user?.dateOfBirth || null,
     company: company?._id || user?.company || null,
   };
+  delete (personalInfo as any).title;
+  delete (personalInfo as any).email;
 
   if (existingProfile) {
     existingProfile.personalInfo = personalInfo as any;
@@ -429,7 +389,7 @@ function buildDuplicateUserErrors(options: {
   let skipReason = "";
 
   if (existingEmailUser) {
-    errors.push(`Email already exists (${existingEmailUser?.email || email})`);
+    errors.push(`Email already exists (${existingEmailUser?.username || email})`);
     skipReason = skipReason || "EMAIL_EXISTS";
   }
 
@@ -441,7 +401,7 @@ function buildDuplicateUserErrors(options: {
   if (existingCodeUser) {
     errors.push(
       `Employee code already exists (${code}) and belongs to ${
-        existingCodeUser?.mobileNumber || existingCodeUser?.email || existingCodeUser?.username || "another user"
+        existingCodeUser?.mobileNumber || existingCodeUser?.username || "another user"
       }`
     );
     skipReason = skipReason ? `${skipReason}_AND_CODE_EXISTS` : "CODE_EXISTS";
@@ -450,7 +410,7 @@ function buildDuplicateUserErrors(options: {
   return { errors, skipReason };
 }
 
-function buildTemplateHeaders(uploadRole: string, _companyManagerLevels: number) {
+function buildTemplateHeaders(uploadRole: string) {
   const isUserUpload = normalizeRole(uploadRole) === "user";
   const headers = [
     "Sr. No.",
@@ -471,7 +431,7 @@ function buildTemplateHeaders(uploadRole: string, _companyManagerLevels: number)
   return headers;
 }
 
-function buildTemplateRows(uploadRole: string, _companyManagerLevels: number) {
+function buildTemplateRows(uploadRole: string) {
   const normalizedRole = normalizeRole(uploadRole);
   const commonRows = [
     {
@@ -562,7 +522,7 @@ function buildRoleMatch(role: string) {
 function sortRowsByHierarchy(rows: any[]) {
   const rowByIdentifier = new Map<string, any>();
   rows.forEach((row) => {
-    [row?.payload?.email, row?.payload?.mobileNumber]
+    [row?.payload?.username, row?.payload?.mobileNumber]
       .map((value) => normalizeEmail(value) || normalizePhoneNumber(value))
       .filter(Boolean)
       .forEach((value) => rowByIdentifier.set(value, row));
@@ -576,8 +536,8 @@ function sortRowsByHierarchy(rows: any[]) {
       throw generateError("Bulk file contains a circular reporting hierarchy", 400);
     }
     state.set(row, "visiting");
-    const managerIdentifier = normalizeEmail(row?.payload?.reportingManagerEmail) ||
-      normalizePhoneNumber(row?.payload?.reportingManagerEmail);
+    const managerIdentifier = normalizeEmail(row?.payload?.reportingManagerUsername) ||
+      normalizePhoneNumber(row?.payload?.reportingManagerUsername);
     const managerRow = rowByIdentifier.get(managerIdentifier);
     if (managerRow) visit(managerRow);
     state.set(row, "visited");
@@ -804,7 +764,7 @@ async function sendSetupPasswordEmail(user: any) {
 
     await transporter.sendMail({
       from: `"${config.fromName}" <${config.fromAddress}>`,
-      to: user.email || user.username,
+      to: user.username,
       subject: "Set up your HRMS password",
       html: `
         <div style="margin:0;padding:32px 16px;background:#eef4ff;font-family:Arial,Helvetica,sans-serif;color:#10213a;">
@@ -829,7 +789,7 @@ async function sendSetupPasswordEmail(user: any) {
               <div style="padding:18px 20px;border-radius:16px;background:#f8fbff;border:1px solid #dbeafe;">
                 <p style="margin:0 0 10px;font-size:14px;color:#0f172a;font-weight:700;">Helpful details</p>
                 <p style="margin:0 0 8px;font-size:14px;color:#475569;">Company: ${companyName}</p>
-                <p style="margin:0 0 8px;font-size:14px;color:#475569;">Email: ${user.email || user.username}</p>
+                <p style="margin:0 0 8px;font-size:14px;color:#475569;">Email: ${user.username}</p>
                 <p style="margin:0;font-size:14px;color:#475569;">This secure link expires in 24 hours.</p>
               </div>
               <p style="margin:24px 0 0;font-size:13px;line-height:1.8;color:#64748b;">
@@ -864,7 +824,7 @@ async function findUserByEmail(
 
   const emailRegex = new RegExp(`^${escapeRegex(normalizedEmail)}$`, "i");
   const query: any = {
-    $or: [{ email: emailRegex }, { username: emailRegex }],
+    username: emailRegex,
     deletedAt: { $exists: false },
   };
 
@@ -890,11 +850,7 @@ async function findUserByPhone(
   }
 
   const query: any = {
-    $or: [
-      { mobileNumber: normalizedPhone },
-      { username: normalizedPhone },
-      { email: new RegExp(`^${escapeRegex(normalizedPhone)}$`, "i") },
-    ],
+    mobileNumber: normalizedPhone,
     deletedAt: { $exists: false },
   };
 
@@ -950,13 +906,11 @@ async function findUserByEmployeeIdentifier({
 async function ensureCompanyReference({
   companyId,
   companyName,
-  managerLevels,
   actorId,
   actionLabel,
 }: {
   companyId?: string;
   companyName?: string;
-  managerLevels?: number;
   actorId?: string;
   actionLabel: string;
 }) {
@@ -994,7 +948,6 @@ async function ensureCompanyReference({
     company_name: trimmedCompanyName,
     companyCode,
     companyType: "company",
-    managerLevels: Math.max(1, Number(managerLevels) || 3),
     tenantSlug,
     tenantUrl: `${(process.env.FRONTEND_BASE_URL || "http://localhost:3000").replace(/\/$/, "")}/company/${tenantSlug}`,
     verified_email_allowed: false,
@@ -1027,25 +980,24 @@ function getReportingManagerPayload(payload: any = {}) {
     directManager;
   const normalizedId = normalizeObjectIdLike(rawId);
   const id = normalizedId && mongoose.Types.ObjectId.isValid(normalizedId) ? normalizedId : "";
-  const directEmail =
-    payload?.reportingManagerEmail ??
-    payload?.directManagerEmail ??
-    directManager?.email ??
+  const directUsername =
+    payload?.reportingManagerUsername ??
+    payload?.directManagerUsername ??
     directManager?.username ??
     "";
-  const email = normalizeEmail(directEmail);
+  const username = normalizeEmail(directUsername);
 
-  return { id, email };
+  return { id, username };
 }
 
 function payloadIncludesReportingManager(payload: any = {}) {
   return [
     "reportingManager",
     "reportingManagerId",
-    "reportingManagerEmail",
+    "reportingManagerUsername",
     "directManager",
     "directManagerId",
-    "directManagerEmail",
+    "directManagerUsername",
   ].some((key) => Object.prototype.hasOwnProperty.call(payload || {}, key));
 }
 
@@ -1089,14 +1041,14 @@ async function resolveReportingManagerForCompany({
   excludeUserId,
   companyId,
 }: {
-  reportingManagerInput: { id?: string; email?: string };
+  reportingManagerInput: { id?: string; username?: string };
   excludeUserId?: string;
   companyId: string | mongoose.Types.ObjectId;
 }) {
   const managerId = normalizeObjectIdLike(reportingManagerInput?.id);
-  const managerEmail = normalizeEmail(reportingManagerInput?.email);
+  const managerUsername = normalizeEmail(reportingManagerInput?.username);
 
-  if (!managerId && !managerEmail) {
+  if (!managerId && !managerUsername) {
     return { reportingManager: null };
   }
 
@@ -1112,11 +1064,11 @@ async function resolveReportingManagerForCompany({
       _id: new mongoose.Types.ObjectId(managerId),
       company: companyObjectId,
       deletedAt: { $exists: false },
-    }).select("_id name email username role company reportingManager is_enabled");
-  } else if (managerEmail) {
+    }).select("_id name username role company reportingManager is_enabled");
+  } else if (managerUsername) {
     reportingManager =
-      (await findUserByEmail(managerEmail, excludeUserId, companyObjectId)) ||
-      (await findUserByPhone(managerEmail, excludeUserId, companyObjectId));
+      (await findUserByEmail(managerUsername, excludeUserId, companyObjectId)) ||
+      (await findUserByPhone(managerUsername, excludeUserId, companyObjectId));
   }
 
   if (!reportingManager) {
@@ -1131,7 +1083,7 @@ async function resolveReportingManagerForCompany({
     throw generateError("A user cannot be their own reporting manager", 400);
   }
 
-  if (normalizeRole(reportingManager.role || reportingManager.userType) === "superadmin") {
+  if (normalizeRole(reportingManager.role) === "superadmin") {
     throw generateError("Superadmin cannot be assigned as a company reporting manager", 400);
   }
 
@@ -1455,9 +1407,8 @@ function serializeManagerReference(value: any) {
   return {
     _id: value._id,
     name: value.name || "",
-    email: value.email || value.username || "",
-    username: value.username || value.email || "",
-    role: value.role || value.userType || "user",
+    username: value.username || "",
+    role: value.role || "user",
     designation: value.designation || "",
   };
 }
@@ -1470,7 +1421,6 @@ function serializeUser(user: any) {
         ? user.company
         : null,
   });
-  const normalizedEmail = user?.email || user?.username || "";
   const company =
     user?.company && typeof user.company === "object" && "company_name" in user.company
       ? user.company
@@ -1487,13 +1437,10 @@ function serializeUser(user: any) {
   return {
     _id: user?._id,
     name: user?.name || "",
-    email: user?.email || "",
-    username: user?.username || normalizedEmail,
-    role: user?.role || user?.userType || "user",
-    userType: user?.userType || user?.role || "user",
+    username: user?.username || "",
+    role: user?.role || "user",
     code: user?.code,
     employeeNumber: user?.employeeNumber || "",
-    profileId: user?.profileId || "",
     mobileNumber: user?.mobileNumber || "",
     city: user?.city || "",
     state: user?.state || "",
@@ -1514,14 +1461,12 @@ function serializeUser(user: any) {
           name: company.company_name,
           company_name: company.company_name,
           companyCode: company.companyCode || "",
-          managerLevels: company.managerLevels || 3,
         }
       : null,
     createdBy: createdBy
       ? {
           _id: createdBy._id,
           name: createdBy.name,
-          email: createdBy.email || createdBy.username,
           username: createdBy.username,
           role: createdBy.role,
         }
@@ -1573,7 +1518,7 @@ async function saveManagedUser({
     payload?.code || payload?.employeeNumber || payload?.employeeCode
   );
   const name = normalizeText(payload?.name);
-  const email = normalizeEmail(payload?.email || payload?.username);
+  const email = normalizeEmail(payload?.username);
   const mobileNumber = normalizeText(payload?.mobileNumber || payload?.phoneNumber);
   const designation = normalizeText(payload?.designation);
   const role = normalizeRole(payload?.role);
@@ -1581,13 +1526,6 @@ async function saveManagedUser({
   const password = normalizeText(payload?.password);
   const reportingManagerInput = getReportingManagerPayload(payload);
   const shouldApplyReportingManager = payloadIncludesReportingManager(payload);
-  const requestedManagerLevels = Math.max(
-    1,
-    Number(payload?.companyManagerLevels) ||
-      Number(payload?.managerLevels) ||
-      3
-  );
-
   if (!name) {
     throw generateError("Name is required", 400);
   }
@@ -1616,7 +1554,7 @@ async function saveManagedUser({
   }
 
   const selfManagerIdentifiers = [email, mobileNumber].filter(Boolean);
-  if (reportingManagerInput.email && selfManagerIdentifiers.includes(reportingManagerInput.email)) {
+  if (reportingManagerInput.username && selfManagerIdentifiers.includes(reportingManagerInput.username)) {
     throw generateError("A user cannot be their own manager", 400);
   }
 
@@ -1636,7 +1574,6 @@ async function saveManagedUser({
   const company = await ensureCompanyReference({
     companyId: effectiveCompanyId,
     companyName: effectiveCompanyName,
-    managerLevels: requestedManagerLevels,
     actorId: actor.userId,
     actionLabel: "add users to this company",
   });
@@ -1817,7 +1754,7 @@ async function saveManagedUser({
   } else {
     ensurePermission(actor, PERMISSION_KEYS.EDIT_USERS, "You do not have permission to edit users");
 
-    const previousRole = normalizeRole(user?.role || user?.userType);
+    const previousRole = normalizeRole(user?.role);
     if (role !== previousRole) {
       if (["hr", "hradmin"].includes(role)) {
         ensurePermission(actor, PERMISSION_KEYS.CREATE_HR_USERS, "You do not have permission to assign HR roles");
@@ -1831,7 +1768,7 @@ async function saveManagedUser({
 
   if (
     shouldApplyReportingManager &&
-    (reportingManagerInput.id || reportingManagerInput.email || hasExistingReportingManager)
+    (reportingManagerInput.id || reportingManagerInput.username || hasExistingReportingManager)
   ) {
     ensurePermission(actor, PERMISSION_KEYS.ASSIGN_MANAGERS, "You do not have permission to assign managers");
   }
@@ -1848,14 +1785,12 @@ async function saveManagedUser({
   user.code = code;
   user.employeeNumber = employeeNumber;
   user.name = name;
-  user.email = email || undefined;
-  user.username = email || mobileNumber;
+  user.username = email;
   user.role = role;
-  user.userType = role;
   user.company = company._id;
   (user as any).mobileNumber = mobileNumber || undefined;
-  user.city = normalizeText(payload?.city || user.city);
-  user.state = normalizeText(payload?.state || user.state);
+  user.city = normalizeText(payload?.city || user.city).toLowerCase();
+  user.state = normalizeText(payload?.state || user.state).toLowerCase();
   user.designation = designation;
   user.joiningDate = normalizeDateValue(payload?.joiningDate) || user.joiningDate;
   if (payloadIncludesDateOfBirth) {
@@ -1864,7 +1799,6 @@ async function saveManagedUser({
   if (payloadIncludesGender) {
     user.gender = normalizedGender;
   }
-  user.title = normalizeText(payload?.title || user.title);
   user.department = isHrAccountRole ? "" : resolvedDepartment;
   user.team = isHrAccountRole ? "" : resolvedTeam;
   (user as any).hrScope = role === "hr" ? resolvedHrScope : {
@@ -1890,9 +1824,6 @@ async function saveManagedUser({
     }
 
     user.reportingManager = resolvedReportingManager.reportingManager?._id || undefined;
-  }
-  if (!user.profileId) {
-    user.profileId = await generateUniqueProfileId(company.company_name || "USER");
   }
 
   let setupInfo: {
@@ -1957,8 +1888,8 @@ async function saveManagedUser({
   const populatedUser = await User.findById(user._id)
       .populate("company", "company_name companyCode")
       .populate("officeLocation", "name code address city state country pinCode is_active")
-      .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation");
+      .populate("createdBy", "name username role")
+      .populate("reportingManager", "name username role designation");
 
   if (setupInfo && populatedUser) {
     const emailResult = await sendSetupPasswordEmail(populatedUser);
@@ -1980,7 +1911,7 @@ async function saveManagedUser({
 }
 
 function getRequesterContext(req: any) {
-  const role = normalizeRole(req?.user?.role || req?.bodyData?.role || req?.user?.userType);
+  const role = normalizeRole(req?.user?.role || req?.bodyData?.role);
   return {
     role,
     userId: req?.userId ? String(req.userId) : undefined,
@@ -2062,7 +1993,6 @@ async function parseBulkWorkbook(
   options: {
     companyId?: string;
     companyName?: string;
-    companyManagerLevels?: number;
     uploadRole?: string;
   } = {}
 ) {
@@ -2147,8 +2077,6 @@ async function parseBulkWorkbook(
     explicitUploadRole === "user"
       ? "user"
       : "";
-  const companyManagerLevels = Math.max(1, Number(options.companyManagerLevels) || 3);
-
   const requiredHeaders = [
     { label: "Employee Number", column: employeeNumberColumn },
     { label: "Employee Name", column: nameColumn },
@@ -2183,18 +2111,18 @@ async function parseBulkWorkbook(
 
     const employeeNumber = normalizeText(readCell(employeeNumberColumn));
     const name = normalizeText(readCell(nameColumn));
-    const email = normalizeEmail(readCell(emailColumn));
+    const username = normalizeEmail(readCell(emailColumn));
     const mobileNumber = normalizeText(readCell(mobileNumberColumn));
     const department = normalizeText(readCell(departmentColumn));
     const team = normalizeText(readCell(teamColumn));
-    const city = normalizeText(readCell(cityColumn));
-    const state = normalizeText(readCell(stateColumn));
+    const city = normalizeText(readCell(cityColumn)).toLowerCase();
+    const state = normalizeText(readCell(stateColumn)).toLowerCase();
     const designation = normalizeText(readCell(designationColumn));
     const joiningDate = normalizeDateValue(readCell(joiningDateColumn));
     const rawRole = normalizeText(readCell(roleColumn));
     const companyName = normalizeText(readCell(companyColumn)) || normalizeText(options.companyName);
     const password = normalizeText(readCell(passwordColumn));
-    const reportingManagerEmail = normalizeEmail(readCell(reportingManagerColumn));
+    const reportingManagerUsername = normalizeEmail(readCell(reportingManagerColumn));
 
     const role = requestedUploadRole
       ? requestedUploadRole
@@ -2205,7 +2133,7 @@ async function parseBulkWorkbook(
     const hasRowValues =
       Boolean(employeeNumber) ||
       Boolean(name) ||
-      Boolean(email) ||
+      Boolean(username) ||
       Boolean(mobileNumber) ||
       Boolean(department) ||
       Boolean(team) ||
@@ -2215,7 +2143,7 @@ async function parseBulkWorkbook(
       Boolean(joiningDate) ||
       Boolean(rawRole) ||
       Boolean(companyName) ||
-      Boolean(reportingManagerEmail);
+      Boolean(reportingManagerUsername);
 
     if (!hasRowValues) {
       continue;
@@ -2234,9 +2162,9 @@ async function parseBulkWorkbook(
     if (mobileNumber && !isValidPhoneNumber(mobileNumber)) {
       errors.push("Phone number is invalid");
     }
-    if (!email) {
+    if (!username) {
       errors.push("Email is required");
-    } else if (!isValidEmail(email)) {
+    } else if (!isValidEmail(username)) {
       errors.push("Email is invalid");
     }
     if (!department && role !== "user" && role !== "admin" && role !== "superadmin") {
@@ -2258,8 +2186,8 @@ async function parseBulkWorkbook(
       errors.push("Duplicate employee number in file");
     }
     if (
-      reportingManagerEmail &&
-      [normalizeEmail(email), normalizePhoneNumber(mobileNumber)].includes(reportingManagerEmail)
+      reportingManagerUsername &&
+      [username, normalizePhoneNumber(mobileNumber)].includes(reportingManagerUsername)
     ) {
       errors.push("A user cannot be their own manager");
     }
@@ -2279,7 +2207,7 @@ async function parseBulkWorkbook(
       payload: {
         employeeNumber,
         name,
-        email,
+        username,
         mobileNumber,
         department,
         team,
@@ -2290,8 +2218,7 @@ async function parseBulkWorkbook(
         role,
         companyId: options.companyId,
         companyName,
-        companyManagerLevels,
-        reportingManagerEmail,
+        reportingManagerUsername,
         password,
         uploadRole: role,
       },
@@ -2303,7 +2230,7 @@ async function parseBulkWorkbook(
 }
 
 async function validateBulkRow(row: any) {
-  const existingEmailUser = row.payload.email ? await findUserByEmail(row.payload.email) : null;
+  const existingEmailUser = row.payload.username ? await findUserByEmail(row.payload.username) : null;
   const existingPhoneUser = row.payload.mobileNumber ? await findUserByPhone(row.payload.mobileNumber) : null;
   const existingCompany = row.payload.companyId && mongoose.Types.ObjectId.isValid(row.payload.companyId)
     ? await Company.findOne({
@@ -2317,7 +2244,7 @@ async function validateBulkRow(row: any) {
         })
       : null;
   const errors = [...row.errors];
-  const reportingManagerEmail = normalizeEmail(row.payload.reportingManagerEmail);
+  const reportingManagerUsername = normalizeEmail(row.payload.reportingManagerUsername);
   let resolvedReportingManager: any = null;
   let existingCodeUser: any = null;
 
@@ -2370,7 +2297,7 @@ async function validateBulkRow(row: any) {
   }
 
   const duplicateValidation = buildDuplicateUserErrors({
-    email: row.payload.email,
+    email: row.payload.username,
     mobileNumber: row.payload.mobileNumber,
     code: row.payload.code || row.payload.employeeNumber,
     existingEmailUser,
@@ -2379,24 +2306,24 @@ async function validateBulkRow(row: any) {
   });
   errors.push(...duplicateValidation.errors);
 
-  if (reportingManagerEmail) {
+  if (reportingManagerUsername) {
     const matchedManager =
-      (await findUserByEmail(reportingManagerEmail)) ||
-      (await findUserByPhone(reportingManagerEmail));
+      (await findUserByEmail(reportingManagerUsername)) ||
+      (await findUserByPhone(reportingManagerUsername));
     if (!matchedManager) {
-      errors.push(`Reporting manager not found: ${reportingManagerEmail}`);
+      errors.push(`Reporting manager not found: ${reportingManagerUsername}`);
     } else if (
       existingCompany &&
       String(matchedManager.company || "") !== String(existingCompany._id)
     ) {
-      errors.push(`Reporting manager is not in the selected company: ${reportingManagerEmail}`);
-    } else if (["admin", "superadmin"].includes(normalizeRole(matchedManager.role || matchedManager.userType))) {
+      errors.push(`Reporting manager is not in the selected company: ${reportingManagerUsername}`);
+    } else if (["admin", "superadmin"].includes(normalizeRole(matchedManager.role))) {
       errors.push("Admin and superadmin accounts cannot be reporting managers");
     } else {
       resolvedReportingManager = {
         _id: matchedManager._id,
         name: matchedManager.name || "",
-        email: matchedManager.email || matchedManager.username || reportingManagerEmail,
+        username: matchedManager.username || reportingManagerUsername,
         status: "ASSIGNED",
       };
     }
@@ -2433,7 +2360,7 @@ async function buildBulkPreview(rows: any[]) {
       rowNumber: row.rowNumber,
       name: row.payload.name,
       mobileNumber: row.payload.mobileNumber,
-      email: row.payload.email,
+      username: row.payload.username,
       employeeNumber: row.payload.employeeNumber,
       code: row.payload.code,
       department: row.payload.department,
@@ -2494,7 +2421,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     }
 
     const accessibleCompanies = await Company.find(accessibleCompanyMatch)
-      .select("_id company_name companyCode managerLevels rolePermissions")
+      .select("_id company_name companyCode rolePermissions")
       .lean();
     const accessibleCompanyIds = accessibleCompanies.map((company: any) => company._id);
 
@@ -2590,7 +2517,6 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
         $or: [
           { name: { $regex: searchRegex } },
           { mobileNumber: { $regex: searchRegex } },
-          { email: { $regex: searchRegex } },
           { username: { $regex: searchRegex } },
           { code: { $regex: searchRegex } },
           { employeeNumber: { $regex: searchRegex } },
@@ -2639,10 +2565,10 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       : 0;
     const users = total
       ? await User.find(match)
-          .populate("company", "company_name companyCode managerLevels rolePermissions")
+          .populate("company", "company_name companyCode rolePermissions")
           .populate("officeLocation", "name code address city state country pinCode is_active")
-          .populate("createdBy", "name email username role")
-          .populate("reportingManager", "name email username role designation")
+          .populate("createdBy", "name username role")
+          .populate("reportingManager", "name username role designation")
           .sort({ createdAt: -1 })
           .skip((page - 1) * limit)
           .limit(limit)
@@ -2691,28 +2617,16 @@ export async function downloadBulkUploadTemplateHandler(req: Request, res: Respo
       requester.role === "superadmin"
         ? normalizeText(req.query.companyId)
         : requester.companyId;
-    const requestedLevels = Math.max(1, Number(req.query.companyManagerLevels) || 0);
     const uploadRole = normalizeRole(req.query.uploadRole);
 
     if (!uploadRole || ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(uploadRole)) {
       throw generateError("A valid upload role is required", 400);
     }
 
-    let companyManagerLevels = requestedLevels;
-    if (!companyManagerLevels && requestedCompanyId && mongoose.Types.ObjectId.isValid(requestedCompanyId)) {
-      const company = await Company.findOne({
-        _id: new mongoose.Types.ObjectId(requestedCompanyId),
-        deletedAt: { $exists: false },
-      });
-      companyManagerLevels = getCompanyManagerLevels(company);
-    }
-
-    companyManagerLevels = Math.max(1, companyManagerLevels || parseManagerRoleLevel(uploadRole) || 3);
-
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Template");
-    const headers = buildTemplateHeaders(uploadRole, companyManagerLevels);
-    const rows = buildTemplateRows(uploadRole, companyManagerLevels);
+    const headers = buildTemplateHeaders(uploadRole);
+    const rows = buildTemplateRows(uploadRole);
 
     worksheet.addRow(headers);
     rows.forEach((row) => worksheet.addRow(row));
@@ -2841,7 +2755,7 @@ export async function updateManagedUserHandler(req: Request, res: Response) {
       throw generateError("You can only update users from your department", 403);
     }
 
-    const existingTargetRole = normalizeRole(existingUser.role || existingUser.userType);
+    const existingTargetRole = normalizeRole(existingUser.role);
     if (
       requester.role === "hr" &&
       ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(existingTargetRole)
@@ -2974,7 +2888,7 @@ export async function deleteManagedUserHandler(req: Request, res: Response) {
       throw generateError("User not found", 404);
     }
 
-    const targetRole = normalizeRole(targetUser.role || targetUser.userType);
+    const targetRole = normalizeRole(targetUser.role);
     if (targetRole === "superadmin") {
       throw generateError("Superadmin accounts cannot be deleted", 400);
     }
@@ -3091,9 +3005,9 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
     const requester = assertAdminAccess(req);
     ensurePermission(requester, PERMISSION_KEYS.EDIT_USERS, "You do not have permission to update user status");
     const targetUser = await User.findById(req.params.id)
-      .populate("company", "company_name companyCode managerLevels rolePermissions")
-      .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation");
+      .populate("company", "company_name companyCode rolePermissions")
+      .populate("createdBy", "name username role")
+      .populate("reportingManager", "name username role designation");
 
     if (!targetUser || targetUser.deletedAt) {
       throw generateError("User not found", 404);
@@ -3118,7 +3032,7 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
       throw generateError("You can only update users from your department", 403);
     }
 
-    const targetRole = normalizeRole(targetUser.role || targetUser.userType);
+    const targetRole = normalizeRole(targetUser.role);
     if (
       requester.role === "hr" &&
       ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(targetRole)
@@ -3261,9 +3175,9 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
   try {
     const requester = assertSuperAdminRequester(req);
     const targetUser = await User.findById(req.params.id)
-      .populate("company", "company_name companyCode managerLevels rolePermissions")
-      .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation");
+      .populate("company", "company_name companyCode rolePermissions")
+      .populate("createdBy", "name username role")
+      .populate("reportingManager", "name username role designation");
 
     if (!targetUser || targetUser.deletedAt) {
       throw generateError("User not found", 404);
@@ -3273,7 +3187,7 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
       throw generateError("Superadmin permissions cannot be overridden", 400);
     }
 
-    const targetRole = normalizeRole(targetUser.role || targetUser.userType);
+    const targetRole = normalizeRole(targetUser.role);
     if (!CONFIGURABLE_PERMISSION_ROLES.includes(targetRole as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
       throw generateError("Only admin and department head permissions can be overridden", 400);
     }
@@ -3321,8 +3235,6 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
       requester.role === "superadmin"
         ? normalizeText(req.body?.companyName || req.body?.companyNameInput)
         : "";
-    const bulkCompanyManagerLevels = Number(req.body?.companyManagerLevels || req.body?.managerLevels) || 0;
-
     if (requester.role === "superadmin" && !bulkCompanyId && !bulkCompanyName) {
       throw generateError("Company selection is required for bulk upload", 400);
     }
@@ -3337,19 +3249,9 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
       });
     }
 
-    let resolvedBulkManagerLevels = bulkCompanyManagerLevels;
-    if (!resolvedBulkManagerLevels && bulkCompanyId && mongoose.Types.ObjectId.isValid(bulkCompanyId)) {
-      const selectedCompany = await Company.findOne({
-        _id: new mongoose.Types.ObjectId(bulkCompanyId),
-        deletedAt: { $exists: false },
-      });
-      resolvedBulkManagerLevels = getCompanyManagerLevels(selectedCompany);
-    }
-
     const rows = await parseBulkWorkbook(req.file.buffer, {
       companyId: bulkCompanyId,
       companyName: bulkCompanyName,
-      companyManagerLevels: resolvedBulkManagerLevels,
       uploadRole: normalizeText(req.body?.uploadRole || req.body?.role),
     });
     const previewRows = await buildBulkPreview(rows);
@@ -3377,6 +3279,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
         failedCount += 1;
         results.push({
           rowNumber: row.rowNumber,
+          username: row.payload.username,
           mobileNumber: row.payload.mobileNumber,
           success: false,
           error: validation.errors.join(", "),
@@ -3388,7 +3291,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
         const existingUser = validation.existingEmailUser || validation.existingPhoneUser || validation.existingCodeUser;
         if (existingUser) {
           const duplicateValidation = buildDuplicateUserErrors({
-            email: row.payload.email,
+            email: row.payload.username,
             mobileNumber: row.payload.mobileNumber,
             code: row.payload.code,
             existingEmailUser: validation.existingEmailUser,
@@ -3398,6 +3301,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
           failedCount += 1;
           results.push({
             rowNumber: row.rowNumber,
+            username: row.payload.username,
             mobileNumber: row.payload.mobileNumber,
             success: false,
             error: duplicateValidation.errors.join(", ") || "User already exists",
@@ -3417,6 +3321,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
         createdCount += 1;
         results.push({
           rowNumber: row.rowNumber,
+          username: row.payload.username,
           mobileNumber: row.payload.mobileNumber,
           success: true,
           action: "CREATE",
@@ -3426,6 +3331,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
         failedCount += 1;
         results.push({
           rowNumber: row.rowNumber,
+          username: row.payload.username,
           mobileNumber: row.payload.mobileNumber,
           success: false,
           error: error?.message || "Failed to create user",
@@ -3477,9 +3383,9 @@ export async function setPasswordFromSetupToken(token: string, password: string)
   await user.save();
 
   const populatedUser = await User.findById(user._id)
-      .populate("company", "company_name companyCode managerLevels rolePermissions")
-      .populate("createdBy", "name email username role")
-      .populate("reportingManager", "name email username role designation");
+      .populate("company", "company_name companyCode rolePermissions")
+      .populate("createdBy", "name username role")
+      .populate("reportingManager", "name username role designation");
 
   return serializeUser(populatedUser);
 }

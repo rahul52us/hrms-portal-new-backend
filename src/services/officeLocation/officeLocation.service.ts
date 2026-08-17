@@ -19,9 +19,7 @@ function escapeRegex(value: string) {
 const getRequesterRole = (req: any) =>
   String(
     req.bodyData?.role ||
-      req.bodyData?.userType ||
       req.user?.role ||
-      req.user?.userType ||
       ""
   )
     .trim()

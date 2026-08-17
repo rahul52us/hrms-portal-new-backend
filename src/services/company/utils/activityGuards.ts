@@ -39,7 +39,7 @@ export async function ensureCompanyManagementAccess(options: {
   actionLabel: string;
   allowSuperadminWithoutCompany?: boolean;
 }): Promise<any> {
-  const role = normalizeRole(options.actor?.role || options.actor?.userType);
+  const role = normalizeRole(options.actor?.role);
   const actorCompanyId = normalizeId(options.actor?.companyId || options.actor?.company);
   const requestedCompanyId = normalizeId(options.requestedCompanyId);
   const companyId = requestedCompanyId || (role === "superadmin" ? "" : actorCompanyId);

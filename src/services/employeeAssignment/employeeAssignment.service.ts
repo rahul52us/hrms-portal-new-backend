@@ -112,13 +112,13 @@ export async function buildEmployeeAssignmentSnapshot(
   if (!reportingManager && reportingManagerId) {
     reportingManager = await withSession<any>(
       User.findOne({ _id: reportingManagerId, company })
-        .select("name email username")
+        .select("name username")
         .lean(),
       options.session
     );
   }
 
-  const role = normalizeRole(user?.role || user?.userType);
+  const role = normalizeRole(user?.role);
 
   return {
     company,
@@ -135,7 +135,7 @@ export async function buildEmployeeAssignmentSnapshot(
     reportingManager: reportingManagerId,
     reportingManagerNameSnapshot:
       normalizeText(reportingManager?.name) ||
-      normalizeText(reportingManager?.email || reportingManager?.username),
+      normalizeText(reportingManager?.username),
     roleSnapshot: role,
     isDepartmentHead: role === "departmenthead",
   };
@@ -419,7 +419,7 @@ export async function getEmployeeAssignmentHistory(options: {
     employee: normalizeObjectId(options.employeeId),
   })
     .sort({ effectiveFrom: -1, createdAt: -1 })
-    .populate("changedBy", "name email username")
-    .populate("endedBy", "name email username")
+    .populate("changedBy", "name username")
+    .populate("endedBy", "name username")
     .lean();
 }

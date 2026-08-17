@@ -79,7 +79,7 @@ const createAdminUserservice = async (
   next: NextFunction
 ) => {
   try {
-    const requesterRole = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
+    const requesterRole = String(req.bodyData?.role || "").toLowerCase();
     const isSuperAdmin = requesterRole === "superadmin";
     const isDeptHead = requesterRole === "departmenthead";
 
@@ -98,7 +98,6 @@ const createAdminUserservice = async (
       ...req.body,
       company: req.body.company || req.body.companyId || req.bodyData?.company,
       createdBy: req.userId,
-      userType: req.body.userType || 'admin',
       role: req.body.role || 'admin',
       department: req.body.department,
       requesterRole,
@@ -184,15 +183,13 @@ const getAllUserService = async (
     const search = req.body.search || undefined;
     const includeInactive = req.body.includeInactive || false;
 
-    const requesterRole = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
+    const requesterRole = String(req.bodyData?.role || "").toLowerCase();
     const isSuperAdmin = requesterRole === "superadmin";
-    const type = req.body.type || req.body.userType || (isSuperAdmin ? "superadmin" : undefined);
     const companyFilter = isSuperAdmin
       ? req.body.company || req.bodyData?.company
       : req.bodyData?.company;
 
     const { data, status, totalPages } = await getUsers({
-      userType:type,
       role: req.body.role,
       page: Number(page),
       limit: Number(limit),

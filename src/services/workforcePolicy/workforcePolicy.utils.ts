@@ -73,7 +73,7 @@ export function escapeRegex(value: string) {
 
 export function ensurePolicyViewer(req: any) {
   const actor = getPolicyActor(req);
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   if (!["superadmin", "admin", "hradmin", "hr", "departmenthead"].includes(role)) {
     throw generateError("Only company administrators and HR roles can view workforce policies", 403);
   }
@@ -87,7 +87,7 @@ export function ensurePolicyViewer(req: any) {
 
 export function ensurePolicyManager(req: any) {
   const actor = getPolicyActor(req);
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   if (!["superadmin", "admin", "hradmin"].includes(role)) {
     throw generateError("Only superadmin, company admin, or HR Admin can manage workforce policies", 403);
   }
@@ -101,7 +101,7 @@ export function ensurePolicyManager(req: any) {
 
 export async function resolvePolicyCompany(req: any, requestedCompanyInput?: unknown, mutation = false) {
   const actor = getPolicyActor(req);
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const actorCompanyId = normalizeText(actor?.company || actor?.companyId);
   const requestedCompanyId = normalizeText(requestedCompanyInput);
   const companyId = role === "superadmin" ? requestedCompanyId : actorCompanyId;

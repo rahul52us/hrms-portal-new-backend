@@ -39,9 +39,8 @@ const toObjectIdExpression = (input: any) => ({
 
 const isAdminRequest = (req: any) => {
   const role = String(req?.bodyData?.role || "").toLowerCase();
-  const userType = String(req?.bodyData?.userType || "").toLowerCase();
 
-  return role === "admin" || role === "superadmin" || userType === "admin" || userType === "superadmin";
+  return role === "admin" || role === "superadmin";
 };
 
 const resolveWorkflowObjectId = (workflowId?: string) => {

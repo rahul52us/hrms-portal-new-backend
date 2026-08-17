@@ -34,7 +34,7 @@ export function toObjectId(id: string) {
 export function getActorContext(req: any): ActorContext {
   return {
     userId: String(req.userId || req.user?._id || ""),
-    role: normalizeRole(req.user?.role || req.bodyData?.role || req.user?.userType || req.bodyData?.userType),
+    role: normalizeRole(req.user?.role || req.bodyData?.role),
     companyId: req.user?.company ? String(req.user.company) : req.bodyData?.company ? String(req.bodyData.company) : undefined,
     departmentName: String(req.user?.department || req.bodyData?.department || "").trim() || undefined,
   };

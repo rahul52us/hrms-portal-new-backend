@@ -7,34 +7,6 @@ import {
 const DEFAULT_THEME_COLOR = "#2563EB";
 const HEX_COLOR_PATTERN = /^#(?:[0-9A-Fa-f]{3}){1,2}$/;
 
-// Address schema
-const addressSchema = Joi.object({
-  address: Joi.string().required().messages({
-    "any.required": "Address field is required",
-    "string.empty": "Address field cannot be empty",
-  }),
-  country: Joi.string().required().messages({
-    "any.required": "Country field is required",
-    "string.empty": "Country field cannot be empty",
-  }),
-  state: Joi.string().required().messages({
-    "any.required": "State field is required",
-    "string.empty": "State field cannot be empty",
-  }),
-  city: Joi.string().required().messages({
-    "any.required": "City field is required",
-    "string.empty": "City field cannot be empty",
-  }),
-  pinCode: Joi.string()
-    .pattern(/^\d{6}$/)
-    .required()
-    .messages({
-      "any.required": "Pin code field is required",
-      "string.empty": "Pin code field cannot be empty",
-      "string.pattern.base": "Pin code must be a 6-digit number",
-    }),
-});
-
 // Company details schema
 const companyDetailsSchema = Joi.object({
   company_name: Joi.string().required().messages({
@@ -82,10 +54,6 @@ const companyDetailsSchema = Joi.object({
   otherLinks: Joi.array().items(Joi.string().uri().allow("")).messages({
     "array.base": "Other links must be an array",
     "array.items": "Other links must be valid URLs",
-  }),
-  addressInfo: Joi.array().items(addressSchema).messages({
-    "array.base": "Address info must be an array",
-    "array.items": "Address info must contain valid address objects",
   }),
 });
 

@@ -61,6 +61,14 @@ async function tryUploadUserPicture(pic: any) {
   }
 }
 
+function normalizeUserLocationFields(target: Record<string, any>) {
+  for (const field of ["city", "state"] as const) {
+    if (typeof target[field] === "string") {
+      target[field] = target[field].trim().toLowerCase();
+    }
+  }
+}
+
 const createAdminUser = async (data: any) => {
   try {
     // -------------------------------
@@ -107,7 +115,6 @@ const createAdminUser = async (data: any) => {
         createdBy: null,
         activeUser: null,
         is_active: true,
-        addressInfo: data.addressInfo || [],
       });
 
       savedCompany = await newCompany.save();
@@ -118,6 +125,11 @@ const createAdminUser = async (data: any) => {
     // 3️⃣ Create User
     // -------------------------------
     const { pic, ...rest } = data;
+    delete rest.title;
+    delete rest.userType;
+    delete rest.email;
+    delete rest.profileId;
+    normalizeUserLocationFields(rest);
     const hashedPassword = await hashBcrypt(data?.password);
 
     const createdUser = new User({
@@ -126,12 +138,10 @@ const createAdminUser = async (data: any) => {
       name: data.name,
       code: finalCode,
       mobileNumber: data.mobileNumber,
-      userType: data.userType,
       password: hashedPassword,
       bio: data.bio,
       is_enabled: true,
       role: data.role,
-      title: data.title,
     });
 
     const savedUser = await createdUser.save();
@@ -225,11 +235,15 @@ const createCompanyAdminUser = async (data: any) => {
       createdBy,
       ...rest
     } = data;
+    delete rest.title;
+    delete rest.userType;
+    delete rest.email;
+    delete rest.profileId;
+    normalizeUserLocationFields(rest);
 
     const hashedPassword = await hashBcrypt(password || `${finalCode}@123`);
 
     let userRole = data.role || "user";
-    let userType = (userRole === "admin" || userRole === "departmenthead") ? "admin" : (data.userType || "user");
     let userDepartment = data.department?.trim() || undefined;
 
     const requesterRole = String(data.requesterRole || "").toLowerCase();
@@ -237,7 +251,6 @@ const createCompanyAdminUser = async (data: any) => {
 
     if (isDeptHeadRequester) {
       userRole = "user"; // DeptHead can only create regular users
-      userType = "user";
       userDepartment = data.requesterDepartment; // Force their department
     }
 
@@ -273,13 +286,11 @@ const createCompanyAdminUser = async (data: any) => {
       state: data.state,
       designation: data.designation,
       joiningDate: data.joiningDate || undefined,
-      userType: userType,
       password: hashedPassword,
       bio: data.bio,
       is_enabled: true,
       role: userRole,
       department: userDepartment,
-      title: data.title,
     });
 
     const savedUser = await createdUser.save();
@@ -337,6 +348,11 @@ const createUser = async (data: any) => {
     }
 
     const { pic, ...rest } = data;
+    delete rest.title;
+    delete rest.userType;
+    delete rest.email;
+    delete rest.profileId;
+    normalizeUserLocationFields(rest);
 
     const hashedPassword = await hashBcrypt(data?.password || `${finalCode}@123`);
     const createdUser = new User({
@@ -350,11 +366,10 @@ const createUser = async (data: any) => {
       state: data.state,
       designation: data.designation,
       joiningDate: data.joiningDate || undefined,
-      userType: data.userType || data.type || 'employee',
+      role: data.role || "user",
       password: hashedPassword,
       bio: data.bio,
       is_enabled: true,
-      title: data.title,
     });
 
     const savedUser = await createdUser.save();
@@ -519,6 +534,11 @@ const updateUserProfileDetails = async (data: any) => {
       company: _company,
       ...rest
     } = data;
+    delete rest.title;
+    delete rest.userType;
+    delete rest.email;
+    delete rest.profileId;
+    normalizeUserLocationFields(rest);
 
     const users: any = await User.findByIdAndUpdate(data.userId, {
       $set: { ...rest, updatedAt: new Date() },
@@ -582,7 +602,6 @@ const updateUserProfileDetails = async (data: any) => {
 };
 
 const getUsers = async (data: {
-  userType: string;
   role?:string;
   page: number;
   limit: number;
@@ -596,10 +615,9 @@ const getUsers = async (data: {
     const page = Math.max(1, Number(data.page) || 1);
     const limit = Math.max(1, Math.min(100, Number(data.limit) || 10));
     const skip = (page - 1) * limit;
-    const normalizedUserType = String(data.userType || "").toLowerCase();
     const normalizedRole = String(data.role || "").toLowerCase();
     const shouldFetchAdmins =
-      normalizedRole === "admin" || normalizedRole === "departmenthead" || normalizedUserType === "superadmin";
+      normalizedRole === "admin" || normalizedRole === "departmenthead" || normalizedRole === "superadmin";
 
     let matchConditions: any = {
       deletedAt: { $exists: false },
@@ -611,19 +629,11 @@ const getUsers = async (data: {
     }
 
     if (normalizedRole === "admin") {
-      matchConditions.userType = "admin";
       matchConditions.role = "admin";
     } else if (normalizedRole === "departmenthead") {
-      matchConditions.userType = { $in: ["admin", "departmenthead"] };
       matchConditions.role = "departmenthead";
-    } else if (normalizedUserType === "user") {
-      matchConditions.userType = "user";
-      // Explicitly exclude admin roles if filtering for 'user' type
-      matchConditions.role = { $nin: ["admin", "departmenthead"] };
-    } else {
-      // Fallback or generic fetch
-      if (data.userType) matchConditions.userType = normalizedUserType;
-      if (data.role) matchConditions.role = normalizedRole;
+    } else if (normalizedRole) {
+      matchConditions.role = normalizedRole;
     }
 
     if (data.company?.length) {
@@ -760,7 +770,6 @@ const getCompanyDetailsByUserId = async (data: any) => {
           // Only include specific fields from managersDetails
           "details.managersDetails": {
             name: 1,
-            title: 1,
             role: 1,
             username: 1,
             code: 1,
@@ -1639,7 +1648,6 @@ export const getUserInfoWithManagersAction = async (data: any) => {
                 name: 1,
                 username: 1,
                 code: 1,
-                title: 1,
                 pic: 1,
               },
             },
@@ -1652,7 +1660,6 @@ export const getUserInfoWithManagersAction = async (data: any) => {
           name: 1,
           username: 1,
           code: 1,
-          title: 1,
           pic: 1,
           "designation.title": 1,
           "department.title": 1,
@@ -1719,7 +1726,6 @@ export const getUserInfoWithManagersAction = async (data: any) => {
           "userDetails.pic": 1,
           "userDetails.username": 1,
           "userDetails.code": 1,
-          "userDetails.title": 1,
           "companydetail.designation": 1,
           "companydetail.department": 1,
           "companydetail.doj": 1,

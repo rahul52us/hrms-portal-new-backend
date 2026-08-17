@@ -656,7 +656,7 @@ export function attachEffectivePermissions(options: {
 }) {
   const user = options.user || {};
   const normalizedRolePermissions = normalizeRolePermissionMap(options.company?.rolePermissions);
-  const role = normalizeRole(user?.role || user?.userType);
+  const role = normalizeRole(user?.role);
   const rolePermissionDefaults = computeEffectivePermissions({
     role,
     rolePermissionOverrides: normalizedRolePermissions[role],
@@ -681,7 +681,7 @@ export function attachEffectivePermissions(options: {
 }
 
 export function hasPermission(user: any, permissionKey: string) {
-  const role = normalizeRole(user?.role || user?.userType);
+  const role = normalizeRole(user?.role);
   if (role === "superadmin") {
     return true;
   }

@@ -119,7 +119,7 @@ function normalizeArray(value: unknown) {
 function getRequester(req: any) {
   return {
     userId: req?.userId ? String(req.userId) : "",
-    role: normalizeLower(req?.user?.role || req?.bodyData?.role || req?.user?.userType),
+    role: normalizeLower(req?.user?.role || req?.bodyData?.role),
   };
 }
 
@@ -186,7 +186,7 @@ function buildNotificationEmailHtml({
   const brandColor = "#334155";
   const buttonColor = "#475569";
   const safeCtaUrl = isValidUrl(ctaUrl) ? normalizeText(ctaUrl) : "";
-  const userName = user?.name || user?.email || user?.username || "there";
+  const userName = user?.name || user?.username || "there";
   const context = {
     user_name: userName,
     company_name: companyName,
@@ -346,15 +346,15 @@ function serializeNotificationUser(user: any) {
     ? {
         _id: user.reportingManager._id,
         name: user.reportingManager.name || "",
-        email: user.reportingManager.email || user.reportingManager.username || "",
+        username: user.reportingManager.username || "",
       }
     : null;
 
   return {
     _id: user._id,
-    name: user.name || user.email || user.username || "Unnamed user",
-    email: user.email || user.username || "",
-    role: user.role || user.userType || "user",
+    name: user.name || user.username || "Unnamed user",
+    username: user.username || "",
+    role: user.role || "user",
     department: user.department || "",
     designation: user.designation || "",
     isActive: lifecycleStatus === "active",
@@ -398,7 +398,7 @@ function applyNotificationFilters(users: any[], filters: any = {}) {
 
     if (managers.length) {
       const managerValues = [
-        normalizeLower(serialized.reportingManager?.email),
+        normalizeLower(serialized.reportingManager?.username),
         normalizeLower(serialized.reportingManager?.name),
         normalizeLower(serialized.reportingManager?._id),
       ];
@@ -444,8 +444,8 @@ async function loadCompanyNotificationUsers(companyId: string) {
     company: new mongoose.Types.ObjectId(companyId),
     deletedAt: { $exists: false },
   })
-    .populate("reportingManager", "name email username role")
-    .sort({ name: 1, email: 1 })
+    .populate("reportingManager", "name username role")
+    .sort({ name: 1, username: 1 })
     .lean();
 
   return buildUserSignals(users);
@@ -476,12 +476,12 @@ export async function listCompanyNotificationUsers(req: Request, res: Response) 
       new Map(
         serializedUsers
           .map((user) => user.reportingManager)
-          .filter((manager: any) => manager?.email)
+          .filter((manager: any) => manager?.username)
           .map((manager: any) => [
-            String(manager.email).toLowerCase(),
+            String(manager.username).toLowerCase(),
             {
-              label: manager.name || manager.email,
-              value: manager.email,
+              label: manager.name || manager.username,
+              value: manager.username,
             },
           ])
       ).values()
@@ -570,7 +570,7 @@ export async function sendCompanyNotification(req: Request, res: Response) {
 
     const uniqueByEmail = new Map<string, any>();
     candidates.forEach((user) => {
-      const email = normalizeLower(user.email || user.username);
+      const email = normalizeLower(user.username);
       if (EMAIL_PATTERN.test(email) && !uniqueByEmail.has(email)) {
         uniqueByEmail.set(email, user);
       }
@@ -612,7 +612,7 @@ export async function sendCompanyNotification(req: Request, res: Response) {
         ctaUrl,
         priority,
       });
-      const recipientEmail = recipient.email || recipient.username;
+      const recipientEmail = recipient.username;
 
       try {
         await transporter.sendMail({

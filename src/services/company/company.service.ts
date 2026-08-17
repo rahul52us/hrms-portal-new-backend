@@ -28,7 +28,7 @@ import { createManagedCompanyValidation } from "./utils/validations";
 import { createCompanyAdminForCompanyCreation } from "../adminUsers/adminUsers.service";
 
 const ensureSuperAdmin = (req: any) => {
-  const role = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
+  const role = String(req.bodyData?.role || "").toLowerCase();
   if (role !== "superadmin") {
     throw generateError("Only superadmin can manage companies", 403);
   }

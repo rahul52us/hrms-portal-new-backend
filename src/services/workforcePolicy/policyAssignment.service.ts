@@ -177,14 +177,14 @@ async function resolveScope(options: {
     company: options.company,
     deletedAt: { $exists: false },
   })
-    .select("name email username role")
+    .select("name username role")
     .lean();
   if (!employee || !WORKFORCE_ROLE_PATTERN.test(normalizeText(employee.role))) {
     throw generateError("Workforce employee not found", 404);
   }
   return {
     scopeId: scopeObjectId,
-    scopeNameSnapshot: `${employee.name || employee.email || employee.username || "Employee"}`,
+    scopeNameSnapshot: `${employee.name || employee.username || "Employee"}`,
   };
 }
 
@@ -222,8 +222,8 @@ export async function listPolicyAssignmentsService(req: any, res: Response, next
     const [assignments, total] = await Promise.all([
       WorkforcePolicyAssignment.find(match)
         .populate("resource", "name code status")
-        .populate("createdBy", "name email")
-        .populate("endedBy", "name email")
+        .populate("createdBy", "name username")
+        .populate("endedBy", "name username")
         .sort({ effectiveFrom: -1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -401,7 +401,7 @@ export async function endPolicyAssignmentService(req: any, res: Response, next: 
 }
 
 function assertHistoricalEmployeeAccess(actor: any, employee: any, assignmentHistory: any) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const actorId = normalizeText(actor?._id);
   if (actorId && actorId === String(employee._id)) return;
   if (["superadmin", "admin", "hradmin"].includes(role)) {
@@ -631,7 +631,7 @@ async function resolveEmployeePolicyData(options: {
     employee: {
       _id: employee._id,
       name: employee.name,
-      email: employee.email || employee.username,
+      username: employee.username,
       code: employee.code || "",
     },
     at,
@@ -650,7 +650,7 @@ async function resolveEmployeePolicyData(options: {
 }
 
 function applyCoverageActorScope(match: any, actor: any) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   if (["superadmin", "admin", "hradmin"].includes(role)) return;
 
   if (role === "departmenthead") {
@@ -726,11 +726,11 @@ export async function resolveEmployeePolicyService(req: any, res: Response, next
     const at = parseEffectiveDate(req.query.at || req.query.date || new Date().toISOString(), "resolution date") as Date;
     const employee = await User.findOne({ _id: new mongoose.Types.ObjectId(employeeId) })
       .select(
-        "_id company name email username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
+        "_id company name username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
       )
       .lean();
     if (!employee || !employee.company) throw generateError("Employee not found", 404);
-    const actorRole = normalizeRole(actor?.role || actor?.userType);
+    const actorRole = normalizeRole(actor?.role);
     const actorCompanyId = normalizeText(actor?.company || actor?.companyId);
     if (actorRole !== "superadmin" && actorCompanyId !== String(employee.company)) {
       throw generateError("You can only resolve policies from your company", 403);
@@ -766,7 +766,6 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
       match.$and.push({
         $or: [
           { name: regex },
-          { email: regex },
           { username: regex },
           { code: regex },
           { department: regex },
@@ -778,7 +777,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
     const [employees, total] = await Promise.all([
       User.find(match)
         .select(
-          "_id company name email username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
+          "_id company name username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt"
         )
         .sort({ name: 1, _id: 1 })
         .skip((page - 1) * limit)
@@ -874,7 +873,7 @@ export async function listPolicyAuditLogService(req: any, res: Response, next: N
     if (entityId) match.entityId = new mongoose.Types.ObjectId(validateObjectId(entityId, "audit entity id"));
     const [logs, total] = await Promise.all([
       WorkforcePolicyAuditLog.find(match)
-        .populate("actor", "name email role")
+        .populate("actor", "name username role")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)

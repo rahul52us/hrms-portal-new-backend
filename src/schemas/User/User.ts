@@ -2,15 +2,18 @@ import mongoose, { Schema, Document } from "mongoose";
 import Company from "../company/Company";
 import { buildEmployeeIdentifier } from "../../services/employeeCode/employeeCode.utils";
 
+export interface UserPicture {
+  name?: string;
+  url?: string;
+  type?: string;
+}
+
 export interface UserInterface extends Document {
-  title: String;
   name: string;
   mobileNumber:string;
-  email?: string;
   username: string;
   code: string;
   employeeNumber?: string;
-  profileId?: string;
   address?: string;
   city?: string;
   state?: string;
@@ -22,7 +25,7 @@ export interface UserInterface extends Document {
     lat?: number;
     lng?: number;
   };
-  pic: any;
+  pic?: UserPicture | null;
   bio?: string;
   designation?: string;
   joiningDate?: Date;
@@ -34,7 +37,6 @@ export interface UserInterface extends Document {
   profile_details: Schema.Types.ObjectId;
   is_enabled: boolean;
   role: string;
-  userType:string;
   password?: string;
   setupToken?: string;
   setupTokenExpiry?: Date;
@@ -54,13 +56,24 @@ export interface UserInterface extends Document {
   };
 }
 
-const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
-  title : {
-    type : String
+const UserPictureSchema = new Schema<UserPicture>(
+  {
+    name: { type: String, trim: true },
+    url: { type: String, trim: true },
+    type: { type: String, trim: true },
   },
+  { _id: false }
+);
+
+const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   name: { type: String, trim: true },
-  email: { type: String, trim: true, lowercase: true, index: true },
-  username: { type: String },
+  username: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true,
+    match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  },
   mobileNumber:{type : String, index : true},
   code: {
     type: String,
@@ -75,16 +88,8 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     trim: true,
     uppercase: true,
   },
-  profileId: {
-    type: String,
-    trim: true,
-    uppercase: true,
-    unique: true,
-    sparse: true,
-    index: true,
-  },
-  city: { type: String, trim: true },
-  state: { type: String, trim: true },
+  city: { type: String, trim: true, lowercase: true },
+  state: { type: String, trim: true, lowercase: true },
   address: { type: String, trim: true },
   country: { type: String, trim: true },
   postalCode: { type: String, trim: true },
@@ -105,24 +110,17 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     ref: "User",
     index: true,
   },
-  userType:{type: String, required: true, index: true, trim: true},
-  pic: {
-    name: {
-      type: String
-    },
-    url: {
-      type: String,
-    },
-    type: {
-      type: String,
-    },
-  },
+  pic: { type: UserPictureSchema, default: null },
   bio: { type: String, trim: true },
   profile_details: { type: Schema.Types.ObjectId, ref: "ProfileDetails" },
   is_enabled: { type: Boolean, default: true, required: true },
   role: {
     type: String,
-    default: "user"
+    default: "user",
+    required: true,
+    trim: true,
+    lowercase: true,
+    index: true,
   },
   department: { type: String, trim: true },
   team: { type: String, trim: true },
@@ -173,7 +171,7 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
 });
 
 UserSchema.pre("validate", async function enforceCompanyEmployeeIdentifier() {
-  if (!this.company || String(this.role || this.userType).toLowerCase() === "superadmin") {
+  if (!this.company || String(this.role).toLowerCase() === "superadmin") {
     return;
   }
 
@@ -197,6 +195,14 @@ UserSchema.pre("validate", async function enforceCompanyEmployeeIdentifier() {
 
 UserSchema.index({ company: 1, reportingManager: 1, deletedAt: 1 });
 UserSchema.index({ company: 1, name: 1, _id: 1 });
+UserSchema.index(
+  { username: 1 },
+  {
+    name: "username_active_unique",
+    unique: true,
+    partialFilterExpression: { deletedAt: null },
+  }
+);
 UserSchema.index(
   { company: 1, employeeNumber: 1 },
   {

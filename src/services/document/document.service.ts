@@ -40,7 +40,7 @@ const resolveAuthenticatedUser = (req: any) => {
     user,
     userId: req?.user?._id || req?.userId || user?._id,
     company: user?.company,
-    username: user?.username || user?.email || "",
+    username: user?.username || "",
     defaultWorkflow: user?.defaultWorkflow,
   };
 };

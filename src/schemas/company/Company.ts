@@ -1,17 +1,5 @@
 import mongoose, { Document } from "mongoose";
 
-interface addressInfo {
-  address?: string;
-  country?: string;
-  state?: string;
-  city?: string;
-  pinCode?: string;
-  formattedAddress?: string;
-  placeId?: string;
-  lat?: number;
-  lng?: number;
-}
-
 interface CompanyI extends Document {
   type?: string;
   company_name: string;
@@ -23,7 +11,6 @@ interface CompanyI extends Document {
   tenantUrl: string;
   customDomain?: string;
   companyEmail?: string;
-  managerLevels?: number;
   verified_email_allowed: boolean;
   createdBy: mongoose.Schema.Types.ObjectId;
   activeUser: mongoose.Schema.Types.ObjectId;
@@ -53,7 +40,6 @@ interface CompanyI extends Document {
   deletedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
-  addressInfo?: addressInfo[];
   primaryThemeColor?: string;
   sidebarColors?: any;
   departments?: string[];
@@ -115,11 +101,6 @@ const companySchema = new mongoose.Schema<CompanyI>({
     type: String,
     trim: true,
   },
-  managerLevels: {
-    type: Number,
-    default: 3,
-    min: 1,
-  },
   is_active: {
     type: Boolean,
     default: false
@@ -168,19 +149,6 @@ const companySchema = new mongoose.Schema<CompanyI>({
   },
   otherLinks: {
     type: [{ type: String }],
-  },
-  addressInfo: {
-    type: [{
-      address: String,
-      country: String,
-      state: String,
-      city: String,
-      pinCode: String,
-      formattedAddress: String,
-      placeId: String,
-      lat: Number,
-      lng: Number
-    }]
   },
   primaryThemeColor: {
     type: String,

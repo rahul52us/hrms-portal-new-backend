@@ -512,7 +512,7 @@ router.post(
       const visibilityType = normalizeCourseVisibilityType(courseData.visibility?.type);
       const createdBy = (req as any).userId;
       const actor = (req as any).bodyData || (req as any).user;
-      const actorRole = normalizeActorRole(actor?.role || actor?.userType);
+      const actorRole = normalizeActorRole(actor?.role);
       const scopedCompanyId =
         actorRole === 'superadmin'
           ? String(courseData.companyId || payload.companyId || '').trim()
@@ -998,7 +998,7 @@ router.put(
       }
 
       const actor = (req as any).bodyData || (req as any).user;
-      const actorRole = normalizeActorRole(actor?.role || actor?.userType || (req as any).user?.role);
+      const actorRole = normalizeActorRole(actor?.role || (req as any).user?.role);
       ensurePermission(actor, PERMISSION_KEYS.EDIT_COURSES, 'You do not have permission to edit courses');
       if (actorRole !== 'superadmin') {
         return res.status(403).json({ error: 'Only super admins can edit course details' });

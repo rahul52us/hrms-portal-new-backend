@@ -125,7 +125,7 @@ function buildMonthlyTrend(items: any[], dateKey: string) {
 }
 
 function normalizeUserRole(user: any) {
-  return normalizeRole(user?.role || user?.userType || "user") || "user";
+  return normalizeRole(user?.role || "user") || "user";
 }
 
 function isUserActive(user: any) {
@@ -183,7 +183,7 @@ export async function buildSuperadminDashboardSummary(query: any) {
   };
 
   if (filters.role) {
-    userMatch.$or = [{ role: filters.role }, { userType: filters.role }];
+    userMatch.role = filters.role;
   }
 
   if (filters.activityStatus === "active") {
@@ -203,7 +203,7 @@ export async function buildSuperadminDashboardSummary(query: any) {
   }
 
   const users = await User.find(userMatch)
-    .select("_id name email username role userType company department is_enabled password createdAt")
+    .select("_id name username role company department is_enabled password createdAt")
     .sort({ createdAt: -1 })
     .lean();
   const userIds = users.map((user: any) => user._id);
@@ -398,8 +398,8 @@ export async function buildSuperadminDashboardSummary(query: any) {
     .slice(0, 6)
     .map((user: any) => ({
       _id: user._id,
-      name: user.name || user.email || user.username || "Unnamed learner",
-      email: user.email || user.username || "",
+      name: user.name || user.username || "Unnamed learner",
+      username: user.username || "",
       companyName: getCompanyName(companyById, user.company),
       lastActivity: null,
     }));
@@ -485,7 +485,7 @@ export async function buildSuperadminDashboardSummary(query: any) {
     ...users.slice(0, 5).map((user: any) => ({
       id: `user-${user._id}`,
       type: "user",
-      title: user.name || user.email || user.username || "New user",
+      title: user.name || user.username || "New user",
       detail: `${normalizeUserRole(user)} · ${getCompanyName(companyById, user.company)}`,
       createdAt: user.createdAt,
     })),
@@ -520,7 +520,7 @@ export async function buildSuperadminDashboardSummary(query: any) {
 
   const allRoles = new Set<string>();
   const allUsersForOptions = await User.find({ deletedAt: { $exists: false } })
-    .select("role userType")
+    .select("role")
     .lean();
   allUsersForOptions.forEach((user: any) => allRoles.add(normalizeUserRole(user)));
 
@@ -616,8 +616,8 @@ export async function buildSuperadminDashboardSummary(query: any) {
       topCourses,
       recentUsers: users.slice(0, 6).map((user: any) => ({
         _id: user._id,
-        name: user.name || user.email || user.username || "Unnamed user",
-        email: user.email || user.username || "",
+        name: user.name || user.username || "Unnamed user",
+        username: user.username || "",
         role: normalizeUserRole(user),
         companyName: getCompanyName(companyById, user.company),
         isActive: isUserActive(user),

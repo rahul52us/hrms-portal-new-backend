@@ -381,7 +381,7 @@ async function resolveEligibilityContext(options: CertificateEligibilityContext)
   }
 
   const [user, course, enrollment, progressDoc, issuedCertificate] = await Promise.all([
-    options.user || User.findById(options.userId).select("name email username company code").lean(),
+    options.user || User.findById(options.userId).select("name username company code").lean(),
     options.course || Course.findById(options.courseId).lean(),
     options.enrollment ||
       CourseEnrollment.findOne({
@@ -521,7 +521,6 @@ function buildRenderValues(context: Awaited<ReturnType<typeof resolveEligibility
   const learnerName =
     String(context.user?.name || "").trim() ||
     String(context.user?.username || "").trim() ||
-    String(context.user?.email || "").trim() ||
     "Learner";
   const courseName = String(context.course?.title || "").trim() || "Course";
   const issuedOnLabel = formatIssueDate(issuedAt);
@@ -534,7 +533,7 @@ function buildRenderValues(context: Awaited<ReturnType<typeof resolveEligibility
     },
     metadata: {
       learnerName,
-      learnerEmail: context.user?.email || context.user?.username || "",
+      learnerEmail: context.user?.username || "",
       courseName,
       score: context.progressDoc?.score ?? null,
       completionDate: context.progressDoc?.updatedAt || context.enrollment?.updatedAt || null,
@@ -736,7 +735,7 @@ export const downloadMyCertificateService = async (req: any, res: Response, next
 };
 
 function resolveTemplateCompanyId(actor: any, requestedCompanyId?: string) {
-  const actorRole = normalizeRole(actor?.role || actor?.userType);
+  const actorRole = normalizeRole(actor?.role);
   if (actorRole === "superadmin") {
     return requestedCompanyId && mongoose.Types.ObjectId.isValid(requestedCompanyId)
       ? requestedCompanyId
@@ -753,7 +752,7 @@ export const listCertificateTemplatesService = async (req: any, res: Response, n
     ensurePermission(actor, PERMISSION_KEYS.VIEW_ASSIGNED_COURSES, "You do not have permission to view certificate templates");
     const requestedCompanyId = stringifyId(req.query.companyId);
     const companyId = resolveTemplateCompanyId(actor, requestedCompanyId);
-    const actorRole = normalizeRole(actor?.role || actor?.userType);
+    const actorRole = normalizeRole(actor?.role);
     const query =
       actorRole === "superadmin" && !companyId
         ? {}

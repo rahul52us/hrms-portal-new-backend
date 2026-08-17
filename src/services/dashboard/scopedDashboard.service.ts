@@ -113,7 +113,7 @@ function getBatchStatus(startDate?: Date | string | null, endDate?: Date | strin
 }
 
 function normalizeUserRole(user: any) {
-  return normalizeRole(user?.role || user?.userType || "user") || "user";
+  return normalizeRole(user?.role || "user") || "user";
 }
 
 function isLearner(user: any) {
@@ -188,7 +188,7 @@ function isEnrollmentCompleted(enrollment: any, progressByKey: Map<string, any>)
 }
 
 async function resolveScope(actor: any) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const companyId = stringifyId(actor?.company || actor?.companyId);
 
   if (!isValidObjectId(companyId)) {
@@ -347,7 +347,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
 
   const directScopedUsers = await User.find(userMatch)
     .select(
-      "_id name email username role userType department is_enabled password createdAt updatedAt"
+      "_id name username role department is_enabled password createdAt updatedAt"
     )
     .sort({ createdAt: -1 })
     .lean();
@@ -384,7 +384,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
         deletedAt: { $exists: false },
       })
         .select(
-          "_id name email username role userType department is_enabled password createdAt updatedAt"
+          "_id name username role department is_enabled password createdAt updatedAt"
         )
         .sort({ createdAt: -1 })
         .lean()
@@ -683,8 +683,8 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
 
     return {
       _id: user._id,
-      name: user.name || user.email || user.username || "Unnamed learner",
-      email: user.email || user.username || "",
+      name: user.name || user.username || "Unnamed learner",
+      username: user.username || "",
       department: getDepartmentLabel(user),
       isActive: isUserActive(user),
       assignedCourses: userEnrollments.length,
@@ -752,7 +752,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
       _id: enrollment._id,
       learnerName:
         userById.get(stringifyId(enrollment.userId))?.name ||
-        userById.get(stringifyId(enrollment.userId))?.email ||
+        userById.get(stringifyId(enrollment.userId))?.username ||
         "Learner",
       courseTitle: courseById.get(stringifyId(enrollment.courseId))?.title || "Course",
       deadline: enrollment.dueDate || enrollment.validTill,
@@ -871,7 +871,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
     ...users.slice(0, 5).map((user: any) => ({
       id: `user-${user._id}`,
       type: "user",
-      title: user.name || user.email || user.username || "New user",
+      title: user.name || user.username || "New user",
       detail: `${normalizeUserRole(user)} · ${getDepartmentLabel(user)}`,
       createdAt: user.createdAt,
     })),
@@ -880,7 +880,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
       type: "progress",
       title:
         userById.get(stringifyId(progress.userId))?.name ||
-        userById.get(stringifyId(progress.userId))?.email ||
+        userById.get(stringifyId(progress.userId))?.username ||
         "Learner activity",
       detail: `${courseById.get(stringifyId(progress.courseId))?.title || "Course"} · ${Math.round(
         Number(progress.progress || 0)
@@ -892,7 +892,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
       type: "quiz",
       title:
         userById.get(stringifyId(attempt.userId))?.name ||
-        userById.get(stringifyId(attempt.userId))?.email ||
+        userById.get(stringifyId(attempt.userId))?.username ||
         "Quiz attempt",
       detail: `${courseById.get(stringifyId(attempt.courseId))?.title || "Course"} · ${Math.round(
         Number(attempt.percentage || 0)
@@ -954,7 +954,7 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
         .filter(isLearner)
         .map((user: any) => ({
           value: stringifyId(user._id),
-          label: user.name || user.email || user.username || "Learner",
+          label: user.name || user.username || "Learner",
         })),
       courses: allVisibleCourses.map((course: any) => ({
         value: stringifyId(course._id),
@@ -1019,8 +1019,8 @@ export async function buildScopedDashboardSummary(actor: any, query: any) {
       topCourses,
       recentUsers: users.slice(0, 6).map((user: any) => ({
         _id: user._id,
-        name: user.name || user.email || user.username || "Unnamed user",
-        email: user.email || user.username || "",
+        name: user.name || user.username || "Unnamed user",
+        username: user.username || "",
         role: normalizeUserRole(user),
         department: getDepartmentLabel(user),
         isActive: isUserActive(user),
@@ -1053,7 +1053,7 @@ export const getScopedDashboardSummaryService = async (
 ) => {
   try {
     const actor = req.bodyData || req.user;
-    const role = normalizeRole(actor?.role || actor?.userType);
+    const role = normalizeRole(actor?.role);
     ensurePermission(
       actor,
       PERMISSION_KEYS.VIEW_DASHBOARD,

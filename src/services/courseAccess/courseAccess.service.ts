@@ -650,7 +650,7 @@ export const getAccessibleCoursesService = async (req: any, res: Response, next:
         userId: toObjectId(actor.userId),
       })
         .populate("courseId")
-        .populate("assignedBy", "name email username role")
+        .populate("assignedBy", "name username role")
         .sort({ createdAt: -1 })
         .lean();
 
@@ -724,7 +724,7 @@ export const getAccessibleCoursesService = async (req: any, res: Response, next:
 
     const accessDocs = await CourseAccess.find(accessQuery)
       .populate("courseId")
-      .populate("assignedBy", "name email username role")
+      .populate("assignedBy", "name username role")
       .populate("companyId", "company_name")
       .populate("departmentId", "title code")
       .sort({ createdAt: -1 })
@@ -839,7 +839,7 @@ export const enrollInPublicCourseService = async (req: any, res: Response, next:
       throw generateError("Course company must be assigned before enrollment", 422);
     }
 
-    const user = await User.findById(actor.userId).select("_id role userType").lean();
+    const user = await User.findById(actor.userId).select("_id role").lean();
     if (!user) {
       throw generateError("Learner account not found", 404);
     }
@@ -913,7 +913,7 @@ export const enrollInPublicCourseService = async (req: any, res: Response, next:
       courseId: toObjectId(courseId),
       userId: user._id,
     })
-      .populate("assignedBy", "name email username role")
+      .populate("assignedBy", "name username role")
       .lean();
 
     if (!enrollment) {
@@ -963,10 +963,10 @@ export const getAssignedCoursesService = async (req: any, res: Response, next: N
       ...(requestedCompanyId ? { companyId: toObjectId(requestedCompanyId) } : {}),
     })
       .populate("courseId", "title status")
-      .populate("assignedBy", "name email username role")
+      .populate("assignedBy", "name username role")
       .populate("companyId", "company_name")
       .populate("departmentId", "title code")
-      .populate("userId", "name email username department")
+      .populate("userId", "name username department")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -1029,7 +1029,7 @@ export const getAssignedCoursesService = async (req: any, res: Response, next: N
             ? accessDoc.companyId?.company_name
             : accessDoc.accessLevel === "department"
               ? accessDoc.departmentId?.title || accessDoc.departmentId?.code
-              : accessDoc.userId?.name || accessDoc.userId?.email || accessDoc.userId?.username,
+              : accessDoc.userId?.name || accessDoc.userId?.username,
         assignmentType: accessDoc.accessLevel,
         validFrom: accessDoc.validFrom,
         validTill: accessDoc.validTill,
@@ -1073,7 +1073,7 @@ export const getCourseAssignmentsAuditService = async (req: any, res: Response, 
       ...(userFilter ? { _id: toObjectId(userFilter) } : {}),
     };
 
-    const candidateUsers = await User.find(userQuery).select("_id name email username department company").lean();
+    const candidateUsers = await User.find(userQuery).select("_id name username department company").lean();
     let allowedUsers = candidateUsers;
 
     if (actor.role === "departmenthead" && actor.companyId) {
@@ -1100,9 +1100,9 @@ export const getCourseAssignmentsAuditService = async (req: any, res: Response, 
       ...(courseFilter ? { courseId: toObjectId(courseFilter) } : {}),
     })
       .populate("courseId", "title status")
-      .populate("userId", "name email username department company")
-      .populate("assignedBy", "name email username role")
-      .populate("sources.assignedBy", "name email username role")
+      .populate("userId", "name username department company")
+      .populate("assignedBy", "name username role")
+      .populate("sources.assignedBy", "name username role")
       .sort({ updatedAt: -1 })
       .lean();
 

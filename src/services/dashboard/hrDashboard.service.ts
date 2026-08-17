@@ -93,7 +93,7 @@ function getHrScope(actor: any) {
 }
 
 function getUserRole(user: any) {
-  return normalizeRole(user?.role || user?.userType || "user") || "user";
+  return normalizeRole(user?.role || "user") || "user";
 }
 
 function isManagerRole(role: string) {
@@ -168,7 +168,7 @@ function serializeUserLite(user: any) {
   return {
     _id: user?._id,
     name: user?.name || "",
-    email: user?.email || user?.username || "",
+    username: user?.username || "",
     role,
     department: user?.department || "",
     team: user?.team || "",
@@ -183,7 +183,7 @@ function serializeUserLite(user: any) {
 }
 
 async function resolveCompany(actor: any, query: any) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const requestedCompanyId = normalizeText(query?.companyId || query?.company);
   const companyId = role === "superadmin"
     ? requestedCompanyId
@@ -198,7 +198,7 @@ async function resolveCompany(actor: any, query: any) {
     deletedAt: { $exists: false },
     type: { $ne: "user" },
   })
-    .select("_id company_name departments managerLevels")
+    .select("_id company_name departments")
     .lean();
 
   if (!company) {
@@ -209,7 +209,7 @@ async function resolveCompany(actor: any, query: any) {
 }
 
 function buildVisibleUserMatch(actor: any, companyId: string) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const matchClauses: any[] = [
     {
       company: new mongoose.Types.ObjectId(companyId),
@@ -249,7 +249,7 @@ function buildVisibleUserMatch(actor: any, companyId: string) {
 }
 
 async function buildScopePanel(actor: any, company: any, companyId: string) {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const scope = getHrScope(actor);
   const locationDocs = scope.officeLocationIds.length
     ? await OfficeLocation.find({
@@ -285,7 +285,7 @@ export const getHrDashboardSummaryService = async (
 ) => {
   try {
     const actor = req.bodyData || req.user;
-    const actorRole = normalizeRole(actor?.role || actor?.userType);
+    const actorRole = normalizeRole(actor?.role);
 
     ensurePermission(actor, PERMISSION_KEYS.VIEW_DASHBOARD, "You do not have permission to view HR dashboard");
 
@@ -298,7 +298,7 @@ export const getHrDashboardSummaryService = async (
 
     const [visibleUsers, departments, allLocations, scopedLocations] = await Promise.all([
       User.find(visibleMatch)
-        .select("name email username role userType department team officeLocation designation joiningDate dateOfBirth reportingManager is_enabled password setupToken createdAt pic")
+        .select("name username role department team officeLocation designation joiningDate dateOfBirth reportingManager is_enabled password setupToken createdAt pic")
         .populate("officeLocation", "name code city state")
         .sort({ createdAt: -1 })
         .lean(),
@@ -465,7 +465,7 @@ export const getHrDashboardSummaryService = async (
               : null;
             return location?.name || "Unassigned";
           }),
-          managerLevels: buildBreakdown(managerUsers, (user) =>
+          managers: buildBreakdown(managerUsers, (user) =>
             isManagerRole(getUserRole(user)) ? getUserRole(user).replace("-", " ") : "Direct manager"
           ),
           statuses: buildBreakdown(workforceUsers, getStatus),

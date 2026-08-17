@@ -1,5 +1,20 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+function normalizePersonalInfoLocation(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const personalInfo = { ...(value as Record<string, unknown>) };
+  for (const field of ["city", "state"] as const) {
+    if (typeof personalInfo[field] === "string") {
+      personalInfo[field] = personalInfo[field].trim().toLowerCase();
+    }
+  }
+
+  return personalInfo;
+}
+
 interface IFamilyContact {
   name: string;
   relationship?: string;
@@ -127,7 +142,8 @@ const ProfileDetailsSchema = new mongoose.Schema<ProfileDetailsI>({
   familyContacts: [FamilyContactSchema],
   employeeDocuments: [EmployeeDocumentSchema],
   personalInfo: {
-    type: mongoose.Schema.Types.Mixed
+    type: mongoose.Schema.Types.Mixed,
+    set: normalizePersonalInfoLocation,
   }
 });
 

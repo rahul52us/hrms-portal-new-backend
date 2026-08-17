@@ -1372,7 +1372,7 @@ export const getMyScormAnswersService = async (req: any, res: Response, next: Ne
           "interactions.source",
           "interactions.review",
         ].join(" "))
-        .populate("interactions.review.reviewedBy", "name email username")
+        .populate("interactions.review.reviewedBy", "name username")
         .sort({ updatedAt: -1 })
         .lean(),
       UserSectionProgress.find(sectionProgressQuery).lean(),

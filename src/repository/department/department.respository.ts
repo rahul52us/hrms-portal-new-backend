@@ -1,6 +1,6 @@
 import Department from "../../schemas/Department/Department.schema";
 
-const departmentHeadPopulate = "name email username role userType department";
+const departmentHeadPopulate = "name username role department";
 
 export const create_department_repo = async (data: any) => {
   return Department.create(data);

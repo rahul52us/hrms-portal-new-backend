@@ -98,8 +98,7 @@ function serializeBatchUser(user: any) {
     _id: String(user?._id || ""),
     name: user?.name || "",
     mobileNumber: user?.mobileNumber || user?.username || "",
-    email: user?.email || user?.username || "",
-    username: user?.username || user?.email || "",
+    username: user?.username || "",
     code: user?.code || "",
     department: user?.department || "",
   };
@@ -1025,7 +1024,7 @@ export const listBatchesService = async (req: any, res: Response, next: NextFunc
       ...(requestedCompanyId ? { companyId: toObjectId(requestedCompanyId) } : {}),
     })
       .populate("companyId", "company_name")
-      .populate("createdBy", "name email username role")
+      .populate("createdBy", "name username role")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -1083,9 +1082,9 @@ export const getBatchDetailsService = async (req: any, res: Response, next: Next
     }
     const batch = await Batch.findById(req.params.id)
       .populate("companyId", "company_name")
-      .populate("createdBy", "name email username role")
+      .populate("createdBy", "name username role")
       .populate("courseIds", "title status description curriculum thumbnailUrl")
-      .populate("userIds", "name email username department")
+      .populate("userIds", "name username department")
       .lean();
 
     await assertBatchScope(actor, batch);
@@ -1127,9 +1126,9 @@ export const getBatchDetailsService = async (req: any, res: Response, next: Next
         createdBy: batch?.createdBy,
         users: (batch?.userIds || []).map((user: any) => ({
           _id: user._id,
-          name: user.name || user.mobileNumber || user.email || user.username,
+          name: user.name || user.mobileNumber || user.username,
           mobileNumber: user.mobileNumber || user.username || "",
-          email: user.email || user.username,
+          username: user.username,
           department: user.department || "",
         })),
         courses: (batch?.courseIds || []).map((course: any) => {
@@ -1518,7 +1517,7 @@ export const getMyBatchesService = async (req: any, res: Response, next: NextFun
         path: "batchId",
         populate: [
           { path: "companyId", select: "company_name" },
-          { path: "createdBy", select: "name email username role" },
+          { path: "createdBy", select: "name username role" },
           { path: "courseIds", select: "_id title" },
         ],
       })

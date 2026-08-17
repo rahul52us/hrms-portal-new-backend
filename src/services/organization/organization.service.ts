@@ -18,7 +18,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const MAX_HIERARCHY_DEPTH = 50;
 const USER_SELECT =
-  "name email username code profileId pic role userType designation department team officeLocation " +
+  "name username code pic role designation department team officeLocation " +
   "reportingManager is_enabled password";
 
 type OrganizationScope = {
@@ -148,15 +148,15 @@ function serializePersonReference(user: any, includeContact = true) {
   return {
     _id: normalizeObjectId(user),
     name: normalizeText(user?.name),
-    email: includeContact ? normalizeText(user?.email || user?.username) : "",
-    role: normalizeRole(user?.role || user?.userType),
+    username: includeContact ? normalizeText(user?.username) : "",
+    role: normalizeRole(user?.role),
     designation: normalizeText(user?.designation),
     department: normalizeText(user?.department),
   };
 }
 
 function resolveScope(actor: any): OrganizationScope {
-  const role = normalizeRole(actor?.role || actor?.userType);
+  const role = normalizeRole(actor?.role);
   const hrScope = getHrScope(actor);
 
   if (role === "hr") {
@@ -207,7 +207,6 @@ function buildWorkforceMatch(companyObjectId: mongoose.Types.ObjectId) {
     company: companyObjectId,
     deletedAt: { $exists: false },
     role: { $nin: ["admin", "superadmin"] },
-    userType: { $nin: ["admin", "superadmin"] },
   };
 }
 
@@ -246,7 +245,7 @@ async function buildOrganizationContext(req: any): Promise<OrganizationContext> 
     "You do not have permission to view organization data"
   );
 
-  const actorRole = normalizeRole(actor?.role || actor?.userType);
+  const actorRole = normalizeRole(actor?.role);
   if (!["superadmin", "admin", "hradmin", "hr", "departmenthead"].includes(actorRole)) {
     throw generateError("This account cannot view organization data", 403);
   }
@@ -463,7 +462,7 @@ async function hydrateOrganizationNodes(users: any[], context: OrganizationConte
             _id: { $in: managerIds.map((id) => new mongoose.Types.ObjectId(id)) },
           })
         )
-          .select("name email username role userType designation department reportingManager")
+          .select("name username role designation department reportingManager")
           .lean()
       : Promise.resolve([]),
   ]);
@@ -481,10 +480,9 @@ async function hydrateOrganizationNodes(users: any[], context: OrganizationConte
     return {
       _id: userId,
       code: contextOnly ? "" : normalizeText(user?.code),
-      profileId: contextOnly ? "" : normalizeText(user?.profileId),
-      name: normalizeText(user?.name || user?.email || user?.username) || "Unnamed employee",
-      email: contextOnly ? "" : normalizeText(user?.email || user?.username),
-      role: normalizeRole(user?.role || user?.userType),
+      name: normalizeText(user?.name || user?.username) || "Unnamed employee",
+      username: contextOnly ? "" : normalizeText(user?.username),
+      role: normalizeRole(user?.role),
       designation: normalizeText(user?.designation),
       department: normalizeText(user?.department),
       team: contextOnly ? "" : normalizeText(user?.team),
@@ -555,14 +553,13 @@ async function buildFilteredMatch(
     const searchConditions: any[] = [
       { name: regex },
       { code: regex },
-      { profileId: regex },
       { designation: regex },
       { department: regex },
       { team: regex },
     ];
 
     if (!includeContext) {
-      searchConditions.push({ email: regex }, { username: regex });
+      searchConditions.push({ username: regex });
     }
     if (matchingLocations.length > 0) {
       searchConditions.push({
@@ -730,7 +727,7 @@ async function loadManagerChain(context: OrganizationContext, user: any) {
         _id: new mongoose.Types.ObjectId(managerId),
       })
     )
-      .select("name email username role userType designation department reportingManager")
+      .select("name username role designation department reportingManager")
       .lean();
     if (!manager) {
       break;

@@ -82,7 +82,7 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
       .lean(),
     req.bodyData?.reportingManager
       ? User.findById(req.bodyData.reportingManager)
-          .select("_id name email username role designation")
+          .select("_id name username role designation")
           .lean()
       : null,
   ]);
@@ -123,7 +123,7 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
       memberships,
       activeMembership,
       activeCompany,
-      effectiveRole: activeMembership?.role || identity.userType || identity.role,
+      effectiveRole: activeMembership?.role || identity.role,
     },
     statusCode: 200,
     success: true,
@@ -164,7 +164,6 @@ const createUser = async (
         password: hashedPassword,
         company: selectedCompany._id,
         role: req.body.role,
-        userType: req.body.role === "admin" ? "admin" : "user",
         refrenceBy:req.body.refrenceBy || undefined,
         is_enabled: true,
       });
@@ -226,11 +225,9 @@ const createUser = async (
     } else {
       const user = new User({
         username: req.body.username,
-        email: req.body.username,
         name: req.body.name || "Superadmin",
         code: `SADM-${Date.now().toString(36).toUpperCase()}`,
         role: req.body.role,
-        userType: "superadmin",
         is_enabled: true,
       });
       const createdUser = await user.save();
@@ -420,13 +417,12 @@ const getUsersByCompany = async (
 
     try {
       const matchConditions: any = {};
-      const requesterRole = String(req.bodyData?.role || req.bodyData?.userType || "").toLowerCase();
+      const requesterRole = String(req.bodyData?.role || "").toLowerCase();
       const isReportingManagerSearch = String(purpose || "").toLowerCase() === "reporting-manager";
 
       if (searchValue) {
         matchConditions.$or = [
           { name: { $regex: searchValue, $options: "i" } },
-          { email: { $regex: searchValue, $options: "i" } },
           { username: { $regex: searchValue, $options: "i" } },
           { code: { $regex: searchValue, $options: "i" } },
           { department: { $regex: searchValue, $options: "i" } },
@@ -434,7 +430,7 @@ const getUsersByCompany = async (
       }
 
       if (type) {
-        matchConditions.userType = type;
+        matchConditions.role = String(type).toLowerCase();
       }
 
       if (role) {
@@ -572,11 +568,9 @@ const getUsersByCompany = async (
           $project: {
             _id: 1,
             name: 1,
-            email: { $ifNull: ["$email", "$username"] },
             username: 1,
             code: 1,
             role: 1,
-            userType: 1,
             department: 1,
             team: 1,
             designation: 1,
@@ -609,7 +603,6 @@ const getUsersByCompany = async (
             createdBy: {
               _id: "$createdBy._id",
               name: "$createdBy.name",
-              email: { $ifNull: ["$createdBy.email", "$createdBy.username"] },
               username: "$createdBy.username",
             },
           },

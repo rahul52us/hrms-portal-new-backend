@@ -147,7 +147,7 @@ async function getDepartmentRelevantCourseIds(options: {
 }
 
 export async function getVisibleCourseScopeForUser(user: any) {
-  const role = normalizeRole(user?.role || user?.userType);
+  const role = normalizeRole(user?.role);
   const userId = stringifyId(user?._id);
   const companyId = stringifyId(user?.company || user?.companyId);
   const hasManagementAccess = hasAnyCourseManagementPermission(user);

@@ -38,7 +38,7 @@ const authenticate = async (req: any, res: Response, next: NextFunction) => {
     const company =
       user.company
         ? await Company.findById(user.company)
-            .select("company_name companyCode managerLevels primaryThemeColor sidebarColors departments rolePermissions")
+            .select("company_name companyCode primaryThemeColor sidebarColors departments rolePermissions")
             .lean()
         : null;
     const userWithPermissions = attachEffectivePermissions({

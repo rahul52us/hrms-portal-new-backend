@@ -45,7 +45,7 @@ export async function downloadReport(data: any) {
       // PATIENT REPORT
       // =====================================
       case "patient": {
-        let matchStage: any = { userType: "patient" };
+        let matchStage: any = { role: "patient" };
 
         if (Object.keys(dateFilter).length > 0) {
           matchStage.createdAt = dateFilter;
@@ -141,7 +141,7 @@ export async function downloadReport(data: any) {
       // DOCTOR REPORT
       // =====================================
       case "doctor": {
-        let matchStage: any = { userType: "doctor" };
+        let matchStage: any = { role: "doctor" };
 
         if (Object.keys(dateFilter).length > 0) {
           matchStage.createdAt = dateFilter;
@@ -421,7 +421,6 @@ export async function downloadReport(data: any) {
       // =====================================
       case "staff": {
         let matchStage: any = {
-          userType: { $nin: ["patient", "doctor"] },
           role: { $in: ["admin", "user", "superadmin"] },
         };
 

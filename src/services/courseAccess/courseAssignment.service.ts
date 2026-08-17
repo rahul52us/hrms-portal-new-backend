@@ -116,8 +116,7 @@ function serializeMatchedUser(user: any) {
     _id: String(user?._id || ""),
     name: user?.name || "",
     mobileNumber: user?.mobileNumber || user?.username || "",
-    email: user?.email || user?.username || "",
-    username: user?.username || user?.email || "",
+    username: user?.username || "",
     code: user?.code || "",
     department: user?.department || "",
   };
@@ -473,7 +472,7 @@ export const assignCourseService = async (req: any, res: Response, next: NextFun
       if (actor.role === "departmenthead" && String(targetDepartmentId) !== String(actorDepartment?._id)) {
         failures.push({
           userId: targetUser._id,
-          email: targetUser.email || targetUser.username,
+          username: targetUser.username,
           reason: "User is outside your department scope",
         });
         continue;
@@ -494,7 +493,7 @@ export const assignCourseService = async (req: any, res: Response, next: NextFun
         if (!hasAccess) {
           failures.push({
             userId: targetUser._id,
-            email: targetUser.email || targetUser.username,
+            username: targetUser.username,
             courseId,
             reason: "User does not have an eligible access grant for this course",
           });
@@ -577,7 +576,7 @@ export const assignCourseService = async (req: any, res: Response, next: NextFun
         const skippedUser = permittedUsers.find((user) => stringifyId(user._id) === userId);
         failures.push({
           userId,
-          email: skippedUser?.email || skippedUser?.username,
+          username: skippedUser?.username,
           courseId,
           reason: "User is already assigned to this course",
         });

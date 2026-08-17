@@ -8,14 +8,6 @@ const DEFAULT_THEME_COLOR = "#2563EB";
 const HEX_COLOR_PATTERN = /^#(?:[0-9A-Fa-f]{3}){1,2}$/;
 const PHONE_PATTERN = /^[0-9+()\-\s]{7,20}$/;
 
-const addressSchema = Joi.object({
-  address: Joi.string().allow("", null).default(""),
-  country: Joi.string().allow("", null).default(""),
-  state: Joi.string().allow("", null).default(""),
-  city: Joi.string().allow("", null).default(""),
-  pinCode: Joi.string().allow("", null).default(""),
-});
-
 const companyAdminSchema = Joi.object({
   create: Joi.boolean().default(false),
   name: Joi.when("create", {
@@ -26,7 +18,7 @@ const companyAdminSchema = Joi.object({
     }),
     otherwise: Joi.string().trim().allow("", null).default(""),
   }),
-  email: Joi.when("create", {
+  username: Joi.when("create", {
     is: true,
     then: Joi.string().trim().email({ tlds: { allow: false } }).required().messages({
       "any.required": "Company admin email is required",
@@ -70,7 +62,6 @@ export const createManagedCompanyValidation = Joi.object({
       "string.empty": "Company email is required",
       "string.email": "Enter a valid company email address",
     }),
-  managerLevels: Joi.number().integer().min(1).max(20).default(3),
   is_active: Joi.boolean().optional(),
   mobileNo: Joi.string()
     .trim()
@@ -102,10 +93,6 @@ export const createManagedCompanyValidation = Joi.object({
   githubLink: Joi.string().trim().allow("", null).default(""),
   telegramLink: Joi.string().trim().allow("", null).default(""),
   otherLinks: Joi.array().items(Joi.string().trim()).default([]),
-  addressInfo: Joi.array().items(addressSchema).min(1).required().messages({
-    "any.required": "At least one address is required",
-    "array.min": "At least one address is required",
-  }),
   logo: Joi.alternatives()
     .try(
       Joi.object({

@@ -58,10 +58,10 @@ const resetPasswordValidation = Joi.object({
 })
 
 const passwordLoginValidation = Joi.object({
-  email: Joi.string().trim().lowercase().email().required().messages({
-    "string.email": "Email must be valid",
-    "any.required": "Email is required",
-    "string.empty": "Email is required",
+  username: Joi.string().trim().lowercase().email().required().messages({
+    "string.email": "Username must be a valid email address",
+    "any.required": "Username is required",
+    "string.empty": "Username is required",
   }),
   password: Joi.string().min(8).max(128).required().messages({
     "any.required": "Password is required",
@@ -71,9 +71,9 @@ const passwordLoginValidation = Joi.object({
 
 const bootstrapSuperadminValidation = Joi.object({
   name: Joi.string().trim().min(2).max(80).required(),
-  email: Joi.string().trim().lowercase().email().required().messages({
-    "string.email": "Email must be valid",
-    "any.required": "Email is required",
+  username: Joi.string().trim().lowercase().email().required().messages({
+    "string.email": "Username must be a valid email address",
+    "any.required": "Username is required",
   }),
   phone: Joi.string().trim().pattern(/^\d{10}$/).optional().messages({
     "string.pattern.base": "Phone must be a valid 10-digit number",
@@ -120,7 +120,7 @@ const learnerRegistrationValidation = Joi.object({
     "string.pattern.base": "Phone must be a valid 10-digit number",
     "any.required": "Phone is required",
   }),
-  email: Joi.string().trim().lowercase().email().optional(),
+  username: Joi.string().trim().lowercase().email().required(),
   verificationToken: Joi.string().trim().required().messages({
     "any.required": "Verification token is required",
   }),
@@ -135,8 +135,8 @@ const adminRegistrationValidation = Joi.object({
     "string.pattern.base": "Phone must be a valid 10-digit number",
     "any.required": "Phone is required",
   }),
-  email: Joi.string().trim().lowercase().email().optional().messages({
-    "string.email": "Email must be valid",
+  username: Joi.string().trim().lowercase().email().required().messages({
+    "string.email": "Username must be a valid email address",
   }),
   verificationToken: Joi.string().trim().required().messages({
     "any.required": "Verification token is required",
