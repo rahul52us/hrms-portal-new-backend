@@ -130,7 +130,7 @@ function isDateInCurrentMonth(value: any) {
   }
 
   const { now } = getMonthRange();
-  return date.getMonth() === now.getMonth();
+  return date.getMonth() === now.getMonth() && date.getDate() >= now.getDate();
 }
 
 function isDateInCurrentMonthAndYear(value: any) {
@@ -144,7 +144,7 @@ function isDateInCurrentMonthAndYear(value: any) {
   }
 
   const { now } = getMonthRange();
-  return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear() && date.getDate() >= now.getDate();
 }
 
 function buildBreakdown(users: any[], keyGetter: (user: any) => string) {
@@ -364,8 +364,17 @@ export const getHrDashboardSummaryService = async (
       return count + teams.filter((team: any) => team?.isActive !== false).length;
     }, 0);
 
+    const sortByDayOfMonth = (a: any, b: any, dateField: string) => {
+      const dateA = new Date(a[dateField]);
+      const dateB = new Date(b[dateField]);
+      if (Number.isNaN(dateA.getTime())) return 1;
+      if (Number.isNaN(dateB.getTime())) return -1;
+      return dateA.getDate() - dateB.getDate();
+    };
+
     const birthdaysThisMonth = workforceUsers
       .filter((user) => isDateInCurrentMonth(user?.dateOfBirth))
+      .sort((a, b) => sortByDayOfMonth(a, b, 'dateOfBirth'))
       .slice(0, 8)
       .map(serializeUserLite);
     const workAnniversaries = workforceUsers
@@ -377,10 +386,12 @@ export const getHrDashboardSummaryService = async (
         const joiningDate = new Date(String(user?.joiningDate));
         return !Number.isNaN(joiningDate.getTime()) && joiningDate.getFullYear() < new Date().getFullYear();
       })
+      .sort((a, b) => sortByDayOfMonth(a, b, 'joiningDate'))
       .slice(0, 8)
       .map(serializeUserLite);
     const newJoinersThisMonth = workforceUsers
       .filter((user) => isDateInCurrentMonthAndYear(user?.joiningDate))
+      .sort((a, b) => sortByDayOfMonth(a, b, 'joiningDate'))
       .slice(0, 8)
       .map(serializeUserLite);
 
