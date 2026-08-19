@@ -1,0 +1,115 @@
+import mongoose, { Document, Schema } from "mongoose";
+
+export const LEAVE_ACCRUAL_FREQUENCIES = ["upfront", "monthly", "quarterly", "none"] as const;
+export const LEAVE_PROBATION_RULES = ["allowed", "after_confirmation", "not_allowed"] as const;
+
+export interface LeavePolicyRule {
+  leaveType: mongoose.Types.ObjectId;
+  leaveTypeCodeSnapshot: string;
+  leaveTypeNameSnapshot: string;
+  paid: boolean;
+  balanceTracked: boolean;
+  annualEntitlement: number;
+  accrualFrequency: (typeof LEAVE_ACCRUAL_FREQUENCIES)[number];
+  accrualAmount: number;
+  prorateOnJoining: boolean;
+  prorateOnExit: boolean;
+  carryForwardEnabled: boolean;
+  maxCarryForward: number;
+  carryForwardExpiryMonths: number;
+  encashmentEnabled: boolean;
+  maxEncashmentPerYear: number;
+  negativeBalanceAllowed: boolean;
+  maxNegativeBalance: number;
+  allowHalfDay: boolean;
+  minimumRequestDays: number;
+  maximumRequestDays?: number | null;
+  minimumNoticeDays: number;
+  documentRequiredAfterDays?: number | null;
+  probationEligibility: (typeof LEAVE_PROBATION_RULES)[number];
+  sandwichRuleEnabled: boolean;
+}
+
+export interface LeavePolicyVersionI extends Document {
+  company: mongoose.Types.ObjectId;
+  policy: mongoose.Types.ObjectId;
+  versionNumber: number;
+  status: "draft" | "published" | "cancelled";
+  effectiveFrom?: Date | null;
+  leaveYearStartMonth: number;
+  leaveYearStartDay: number;
+  rules: LeavePolicyRule[];
+  changeReason?: string;
+  createdBy: mongoose.Types.ObjectId;
+  publishedAt?: Date | null;
+  publishedBy?: mongoose.Types.ObjectId | null;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
+  {
+    leaveType: { type: Schema.Types.ObjectId, ref: "LeaveType", required: true },
+    leaveTypeCodeSnapshot: { type: String, required: true, trim: true, uppercase: true },
+    leaveTypeNameSnapshot: { type: String, required: true, trim: true },
+    paid: { type: Boolean, required: true },
+    balanceTracked: { type: Boolean, required: true },
+    annualEntitlement: { type: Number, min: 0, default: 0 },
+    accrualFrequency: { type: String, enum: LEAVE_ACCRUAL_FREQUENCIES, default: "upfront" },
+    accrualAmount: { type: Number, min: 0, default: 0 },
+    prorateOnJoining: { type: Boolean, default: true },
+    prorateOnExit: { type: Boolean, default: true },
+    carryForwardEnabled: { type: Boolean, default: false },
+    maxCarryForward: { type: Number, min: 0, default: 0 },
+    carryForwardExpiryMonths: { type: Number, min: 0, max: 120, default: 0 },
+    encashmentEnabled: { type: Boolean, default: false },
+    maxEncashmentPerYear: { type: Number, min: 0, default: 0 },
+    negativeBalanceAllowed: { type: Boolean, default: false },
+    maxNegativeBalance: { type: Number, min: 0, default: 0 },
+    allowHalfDay: { type: Boolean, default: true },
+    minimumRequestDays: { type: Number, min: 0.25, default: 1 },
+    maximumRequestDays: { type: Number, min: 0.25, default: null },
+    minimumNoticeDays: { type: Number, min: 0, default: 0 },
+    documentRequiredAfterDays: { type: Number, min: 0.25, default: null },
+    probationEligibility: { type: String, enum: LEAVE_PROBATION_RULES, default: "allowed" },
+    sandwichRuleEnabled: { type: Boolean, default: false },
+  },
+  { _id: true }
+);
+
+const LeavePolicyVersionSchema = new Schema<LeavePolicyVersionI>(
+  {
+    company: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
+    policy: { type: Schema.Types.ObjectId, ref: "LeavePolicy", required: true, index: true },
+    versionNumber: { type: Number, required: true, min: 1 },
+    status: { type: String, enum: ["draft", "published", "cancelled"], default: "draft", index: true },
+    effectiveFrom: { type: Date, default: null, index: true },
+    leaveYearStartMonth: { type: Number, min: 1, max: 12, default: 1 },
+    leaveYearStartDay: { type: Number, min: 1, max: 31, default: 1 },
+    rules: {
+      type: [LeavePolicyRuleSchema],
+      default: [],
+      validate: {
+        validator(value: LeavePolicyRule[]) {
+          const ids = value.map((rule) => String(rule.leaveType));
+          return ids.length === new Set(ids).size;
+        },
+        message: "A leave type can appear only once in a policy version",
+      },
+    },
+    changeReason: { type: String, trim: true },
+    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    publishedAt: { type: Date, default: null },
+    publishedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  },
+  { timestamps: true }
+);
+
+LeavePolicyVersionSchema.index({ company: 1, policy: 1, versionNumber: 1 }, { unique: true });
+LeavePolicyVersionSchema.index({ company: 1, policy: 1, status: 1, effectiveFrom: -1 });
+
+const LeavePolicyVersion =
+  (mongoose.models.LeavePolicyVersion as mongoose.Model<LeavePolicyVersionI>) ||
+  mongoose.model<LeavePolicyVersionI>("LeavePolicyVersion", LeavePolicyVersionSchema);
+
+export default LeavePolicyVersion;

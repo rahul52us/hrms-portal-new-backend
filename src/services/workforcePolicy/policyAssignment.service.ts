@@ -12,6 +12,8 @@ import HolidayCalendar from "../../schemas/WorkforcePolicy/HolidayCalendar.schem
 import HolidayCalendarVersion from "../../schemas/WorkforcePolicy/HolidayCalendarVersion.schema";
 import WorkSchedule from "../../schemas/WorkforcePolicy/WorkSchedule.schema";
 import WorkScheduleVersion from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
+import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
+import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import WorkforcePolicyAssignment, {
   POLICY_RESOURCE_TYPES,
   POLICY_SCOPE_TYPES,
@@ -66,6 +68,15 @@ async function findResource(options: {
     return { resource, resourceModel: "WorkSchedule" as const };
   }
 
+  if (options.resourceType === "leave_policy") {
+    const resource = await LeavePolicy.findOne({
+      _id: new mongoose.Types.ObjectId(options.resourceId),
+      company: options.company,
+    }).lean();
+    if (!resource) throw generateError("Leave policy not found", 404);
+    return { resource, resourceModel: "LeavePolicy" as const };
+  }
+
   const resource = await HolidayCalendar.findOne({
     _id: new mongoose.Types.ObjectId(options.resourceId),
     company: options.company,
@@ -100,10 +111,17 @@ async function ensureResourceHasPublishedVersion(options: {
     })
       .sort({ effectiveFrom: -1, versionNumber: -1 })
       .lean();
-  } else {
+  } else if (options.resourceType === "holiday_calendar") {
     version = await HolidayCalendarVersion.findOne({
       ...query,
       calendar: new mongoose.Types.ObjectId(options.resourceId),
+    })
+      .sort({ effectiveFrom: -1, versionNumber: -1 })
+      .lean();
+  } else {
+    version = await LeavePolicyVersion.findOne({
+      ...query,
+      policy: new mongoose.Types.ObjectId(options.resourceId),
     })
       .sort({ effectiveFrom: -1, versionNumber: -1 })
       .lean();
@@ -507,6 +525,28 @@ async function resolvePublishedVersion(options: {
     return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
   }
 
+  if (options.resourceType === "leave_policy") {
+    const version = await LeavePolicyVersion.findOne({
+      company: options.company,
+      policy: options.resourceId,
+      status: "published",
+      effectiveFrom: { $lte: options.at },
+    })
+      .sort({ effectiveFrom: -1, versionNumber: -1 })
+      .lean();
+    if (!version) return null;
+    const nextVersion = await LeavePolicyVersion.findOne({
+      company: options.company,
+      policy: options.resourceId,
+      status: "published",
+      effectiveFrom: { $gt: version.effectiveFrom },
+    })
+      .sort({ effectiveFrom: 1, versionNumber: 1 })
+      .select("effectiveFrom")
+      .lean();
+    return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
+  }
+
   const version = await HolidayCalendarVersion.findOne({
     company: options.company,
     calendar: options.resourceId,
@@ -627,6 +667,7 @@ async function resolveEmployeePolicyData(options: {
   if (!resolved.attendance_policy) warnings.push("No attendance policy is effective for this employee and date");
   if (!resolved.work_schedule) warnings.push("No work schedule is effective for this employee and date");
   if (!resolved.holiday_calendar) warnings.push("No holiday calendar is effective for this employee and date");
+  if (!resolved.leave_policy) warnings.push("No leave policy is effective for this employee and date");
   return {
     employee: {
       _id: employee._id,
@@ -645,6 +686,7 @@ async function resolveEmployeePolicyData(options: {
     attendancePolicy: resolved.attendance_policy,
     workSchedule: resolved.work_schedule,
     holidayCalendar: resolved.holiday_calendar,
+    leavePolicy: resolved.leave_policy,
     warnings,
   };
 }
@@ -754,6 +796,10 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
     const page = Math.max(1, Number(req.query.page || 1));
     const limit = Math.max(1, Math.min(25, Number(req.query.limit || 20)));
     const search = normalizeText(req.query.search);
+    const requestedResourceType = normalizeText(req.query.resourceType);
+    const coverageResourceTypes = POLICY_RESOURCE_TYPES.includes(requestedResourceType as any)
+      ? [requestedResourceType]
+      : [...POLICY_RESOURCE_TYPES];
     const match: any = {
       company: companyObjectId,
       deletedAt: null,
@@ -794,11 +840,13 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         assertAccess: false,
         versionCache,
       });
-      const missing = [
-        !resolution.attendancePolicy ? "attendance_policy" : "",
-        !resolution.workSchedule ? "work_schedule" : "",
-        !resolution.holidayCalendar ? "holiday_calendar" : "",
-      ].filter(Boolean);
+      const resolutionByType: Record<string, any> = {
+        attendance_policy: resolution.attendancePolicy,
+        work_schedule: resolution.workSchedule,
+        holiday_calendar: resolution.holidayCalendar,
+        leave_policy: resolution.leavePolicy,
+      };
+      const missing = coverageResourceTypes.filter((resourceType) => !resolutionByType[resourceType]);
       const compactResource = (resolved: any) => {
         if (!resolved) return null;
         return {
@@ -833,6 +881,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         attendancePolicy: compactResource(resolution.attendancePolicy),
         workSchedule: compactResource(resolution.workSchedule),
         holidayCalendar: compactResource(resolution.holidayCalendar),
+        leavePolicy: compactResource(resolution.leavePolicy),
         warnings: resolution.warnings,
         complete: missing.length === 0,
         missing,
@@ -854,6 +903,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         total,
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
+      filters: { resourceType: requestedResourceType || null },
     });
   } catch (error) {
     next(error);

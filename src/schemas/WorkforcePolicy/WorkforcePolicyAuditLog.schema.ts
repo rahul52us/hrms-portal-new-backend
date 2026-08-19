@@ -9,6 +9,9 @@ export interface WorkforcePolicyAuditLogI extends Document {
     | "work_schedule_version"
     | "holiday_calendar"
     | "holiday_version"
+    | "leave_type"
+    | "leave_policy"
+    | "leave_version"
     | "assignment";
   entityId: mongoose.Types.ObjectId;
   action: string;
@@ -29,6 +32,9 @@ const WorkforcePolicyAuditLogSchema = new Schema<WorkforcePolicyAuditLogI>(
         "work_schedule_version",
         "holiday_calendar",
         "holiday_version",
+        "leave_type",
+        "leave_policy",
+        "leave_version",
         "assignment",
       ],
       required: true,

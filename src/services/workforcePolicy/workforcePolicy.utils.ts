@@ -148,6 +148,9 @@ export async function writePolicyAudit(options: {
     | "work_schedule_version"
     | "holiday_calendar"
     | "holiday_version"
+    | "leave_type"
+    | "leave_policy"
+    | "leave_version"
     | "assignment";
   entityId: mongoose.Types.ObjectId;
   action: string;

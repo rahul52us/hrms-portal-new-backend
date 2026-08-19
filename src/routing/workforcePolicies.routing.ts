@@ -37,6 +37,20 @@ import {
   listPolicyAuditLogService,
   resolveEmployeePolicyService,
 } from "../services/workforcePolicy/policyAssignment.service";
+import {
+  archiveLeavePolicyService,
+  archiveLeaveTypeService,
+  createLeavePolicyService,
+  createLeavePolicyVersionService,
+  createLeaveTypeService,
+  getLeavePolicyService,
+  listLeavePoliciesService,
+  listLeaveTypesService,
+  publishLeavePolicyVersionService,
+  updateLeavePolicyService,
+  updateLeavePolicyVersionService,
+  updateLeaveTypeService,
+} from "../services/workforcePolicy/leavePolicy.service";
 
 const workforcePoliciesRouting = express.Router();
 
@@ -90,6 +104,29 @@ workforcePoliciesRouting.put(
 workforcePoliciesRouting.post(
   "/holiday-calendars/:calendarId/versions/:versionId/publish",
   publishHolidayCalendarVersionService
+);
+
+workforcePoliciesRouting.get("/leave-types", listLeaveTypesService);
+workforcePoliciesRouting.post("/leave-types", createLeaveTypeService);
+workforcePoliciesRouting.put("/leave-types/:leaveTypeId", updateLeaveTypeService);
+workforcePoliciesRouting.post("/leave-types/:leaveTypeId/archive", archiveLeaveTypeService);
+
+workforcePoliciesRouting.get("/leave-policies", listLeavePoliciesService);
+workforcePoliciesRouting.post("/leave-policies", createLeavePolicyService);
+workforcePoliciesRouting.get("/leave-policies/:policyId", getLeavePolicyService);
+workforcePoliciesRouting.put("/leave-policies/:policyId", updateLeavePolicyService);
+workforcePoliciesRouting.post("/leave-policies/:policyId/archive", archiveLeavePolicyService);
+workforcePoliciesRouting.post(
+  "/leave-policies/:policyId/versions",
+  createLeavePolicyVersionService
+);
+workforcePoliciesRouting.put(
+  "/leave-policies/:policyId/versions/:versionId",
+  updateLeavePolicyVersionService
+);
+workforcePoliciesRouting.post(
+  "/leave-policies/:policyId/versions/:versionId/publish",
+  publishLeavePolicyVersionService
 );
 
 workforcePoliciesRouting.get("/assignments", listPolicyAssignmentsService);
