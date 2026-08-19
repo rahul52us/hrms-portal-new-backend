@@ -493,3 +493,71 @@ export const getHrDashboardSummaryService = async (
     next(err);
   }
 };
+
+export const getHrEmployeeStatsService = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const actor = req.bodyData || req.user;
+    const { companyId } = await resolveCompany(actor, req.query);
+    const visibleMatch = buildVisibleUserMatch(actor, companyId);
+    
+    // Add additional filters if any from query (like role)
+    const roleFilter = req.query.role ? String(req.query.role) : null;
+    const locationFilter = req.query.officeLocationId ? String(req.query.officeLocationId) : null;
+    
+    let matchQuery: any = visibleMatch;
+    
+    if (roleFilter || locationFilter) {
+      const additionalClauses: any[] = [];
+      if (roleFilter) {
+         additionalClauses.push({ role: roleFilter });
+      }
+      if (locationFilter) {
+         additionalClauses.push({ officeLocation: new mongoose.Types.ObjectId(locationFilter) });
+      }
+      
+      if (additionalClauses.length > 0) {
+        matchQuery = { $and: [visibleMatch, ...additionalClauses] };
+      }
+    }
+
+    const users = await User.find(matchQuery)
+      .select("is_enabled password setupToken status")
+      .lean();
+
+    const stats = {
+      total: users.length,
+      active: 0,
+      inactive: 0,
+      pending: 0,
+      passwordReady: 0,
+    };
+
+    for (const user of users) {
+      const statusMetaLabel = getUserAccountStatus(user);
+      
+      if (statusMetaLabel === "ACTIVE") {
+        stats.active++;
+      } else if (statusMetaLabel === "INACTIVE") {
+        stats.inactive++;
+      } else if (statusMetaLabel === "PENDING") {
+        stats.pending++;
+      }
+      
+      const isPasswordSet = Boolean(user.password && !user.setupToken);
+      if (isPasswordSet) {
+        stats.passwordReady++;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
