@@ -1139,18 +1139,13 @@ async function updateDocumentDetails(data: any) {
         let finalFile = previousFile;
 
         if (entry?.isAdd && uploadSource?.file) {
-          const uploaded = await uploadToBunny({
-            file: uploadSource.file,
-            filename: uploadSource.filename || `${data.id}-document`,
-            type: uploadSource.type,
-            folder: `employee-documents/${data.id}`,
-          });
+          const uploadedUrl = await uploadFile(uploadSource.file);
 
           finalFile = {
-            name: uploaded.fileName,
-            url: uploaded.url,
+            name: uploadSource.filename || `${data.id}-document`,
+            url: uploadedUrl,
             type: uploadSource.type || "application/octet-stream",
-            path: uploaded.path,
+            path: uploadedUrl,
           };
         }
 
