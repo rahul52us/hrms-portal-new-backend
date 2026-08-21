@@ -30,8 +30,27 @@ import {
   createAdminUserservice,
   toggleUserStatusService
 } from "../services/employe/user.service";
+import {
+  getManagedUserProfileDetailsHandler,
+  updateManagedUserPersonalDetailsHandler,
+  updateManagedUserFamilyContactsHandler,
+  updateManagedUserSkillsHandler,
+  updateManagedUserStatutoryDetailsHandler,
+  updateManagedUserEmployeeDocumentsHandler,
+} from "../services/adminUsers/adminUsers.service";
 
 const router = express.Router();
+
+const setMeIdParam = (req: any, res: any, next: any) => {
+  req.params.id = req.userId;
+  next();
+};
+router.get("/me/profile-details", authenticate, setMeIdParam, getManagedUserProfileDetailsHandler);
+router.put("/me/profile/personal", authenticate, setMeIdParam, updateManagedUserPersonalDetailsHandler);
+router.put("/me/profile/family", authenticate, setMeIdParam, updateManagedUserFamilyContactsHandler);
+router.put("/me/profile/skills", authenticate, setMeIdParam, updateManagedUserSkillsHandler);
+router.put("/me/profile/statutory", authenticate, setMeIdParam, updateManagedUserStatutoryDetailsHandler);
+router.put("/me/profile/documents", authenticate, setMeIdParam, updateManagedUserEmployeeDocumentsHandler);
 
 router.post("/create", authenticate, createUserservice);
 router.post("/admin/create", authenticate, createAdminUserservice);
