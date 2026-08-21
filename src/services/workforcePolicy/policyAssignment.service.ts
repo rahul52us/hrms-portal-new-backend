@@ -568,7 +568,7 @@ async function resolvePublishedVersion(options: {
   return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
 }
 
-async function resolveEmployeePolicyData(options: {
+export async function resolveEmployeePolicyData(options: {
   actor: any;
   employee: any;
   at: Date;
