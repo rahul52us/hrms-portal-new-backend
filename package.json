@@ -32,6 +32,7 @@
     "companies:manager-levels:cleanup:apply": "ts-node src/scripts/removeLegacyCompanyManagerLevels.ts --apply",
     "companies:address-info:cleanup": "ts-node src/scripts/removeLegacyCompanyAddressInfo.ts",
     "companies:address-info:cleanup:apply": "ts-node src/scripts/removeLegacyCompanyAddressInfo.ts --apply",
+    "test:employee-day-context": "ts-node src/services/attendance/employeeDayContext.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"
