@@ -574,6 +574,16 @@ const getUsersByCompany = async (
             department: 1,
             team: 1,
             designation: 1,
+            employeeNumber: 1,
+            mobileNumber: 1,
+            gender: 1,
+            dateOfBirth: 1,
+            pic: 1,
+            address: 1,
+            city: 1,
+            state: 1,
+            country: 1,
+            postalCode: 1,
             is_enabled: 1,
             isEnabled: { $ne: ["$is_enabled", false] },
             status: {
@@ -609,12 +619,13 @@ const getUsersByCompany = async (
         },
       ]);
 
+      console.log("getUsersByCompany returning first user address:", users[0]?.address, users[0]?.city);
       res.status(statusCode.success).send({
         message: "Fetch Users Successfully",
         data: users,
         status: "success",
       });
-    } catch (err) {
+    } catch (err: any) {
       throw err;
     }
   } catch (err) {

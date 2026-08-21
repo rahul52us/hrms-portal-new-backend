@@ -1444,6 +1444,9 @@ function serializeUser(user: any) {
     mobileNumber: user?.mobileNumber || "",
     city: user?.city || "",
     state: user?.state || "",
+    address: user?.address || "",
+    country: user?.country || "",
+    postalCode: user?.postalCode || "",
     department: user?.department || "",
     team: user?.team || "",
     hrScope: serializeHrScope(user?.hrScope),
@@ -3406,7 +3409,12 @@ export async function getManagedUserProfileDetailsHandler(req: Request, res: Res
       .populate("employeeDocuments.createdBy", "name")
       .populate("employeeDocuments.approvedBy", "name");
 
-    return res.status(200).json({ success: true, data: profileDetails || {} });
+    const responseData: any = profileDetails ? profileDetails.toObject() : {};
+    if (responseData.personalInfo) {
+      delete responseData.personalInfo;
+    }
+
+    return res.status(200).json({ success: true, data: responseData });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message || "Failed to fetch profile details" });
   }
@@ -3416,8 +3424,64 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
     const targetUserId = req.params.id;
     let profile = await ProfileDetails.findOne({ user: targetUserId });
     if (!profile) profile = new ProfileDetails({ user: targetUserId });
-    profile.personalDetails = req.body;
+    
+    // Sanitize enum and date fields
+    if (req.body.maritalStatus === "") {
+      delete req.body.maritalStatus;
+    }
+    if (req.body.anniversaryDate === "") {
+      delete req.body.anniversaryDate;
+    }
+
+    // Save additional personal details (extracting only relevant fields for ProfileDetails)
+    profile.personalDetails = {
+      knownAs: req.body.knownAs,
+      maritalStatus: req.body.maritalStatus,
+      anniversaryDate: req.body.anniversaryDate,
+      fatherHusbandName: req.body.fatherHusbandName,
+      bloodGroup: req.body.bloodGroup,
+      religion: req.body.religion,
+      nationality: req.body.nationality,
+      emergencyContactName: req.body.emergencyContactName,
+      emergencyContactNumber: req.body.emergencyContactNumber,
+      personalEmail: req.body.personalEmail,
+    };
     await profile.save();
+
+    // Sync core fields back to User collection
+    const user = await User.findById(targetUserId);
+    if (user) {
+      if (req.body.employeeNumber !== undefined) user.employeeNumber = req.body.employeeNumber;
+      if (req.body.designation !== undefined) user.designation = req.body.designation;
+      if (req.body.fullName !== undefined) user.name = req.body.fullName;
+      
+      if (req.body.dateOfBirth !== undefined) {
+        user.dateOfBirth = req.body.dateOfBirth === "" ? null : req.body.dateOfBirth;
+      }
+      if (req.body.gender !== undefined) {
+        const genderMap: Record<string, number> = { 'male': 1, 'female': 2, 'other': 3 };
+        user.gender = genderMap[req.body.gender] || user.gender;
+      }
+      if (req.body.mobileNumber !== undefined) user.mobileNumber = req.body.mobileNumber;
+      if (req.body.email !== undefined) user.username = req.body.email; // assuming email mapped to username
+      if (req.body.address !== undefined) user.address = req.body.address;
+      if (req.body.city !== undefined) user.city = req.body.city;
+      if (req.body.state !== undefined) user.state = req.body.state;
+      if (req.body.country !== undefined) user.country = req.body.country;
+      if (req.body.postalCode !== undefined) user.postalCode = req.body.postalCode;
+
+      if (req.body.pic) {
+        if (req.body.pic.isDeleted) {
+          user.pic = null;
+        } else if (req.body.pic.isAdd && req.body.pic.buffer) {
+          const uploadedUrl = await uploadFile(req.body.pic);
+          user.pic = { url: uploadedUrl };
+        }
+      }
+
+      await user.save();
+    }
+
     return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message || "Failed to update personal details" });

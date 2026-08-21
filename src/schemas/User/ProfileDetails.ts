@@ -49,13 +49,16 @@ interface IEmployeeDocument {
 export interface ProfileDetailsI extends Document {
   user: mongoose.Schema.Types.ObjectId;
   personalDetails?: {
-    firstName?: string;
-    middleName?: string;
-    lastName?: string;
     knownAs?: string;
     maritalStatus?: string;
     anniversaryDate?: Date;
     fatherHusbandName?: string;
+    bloodGroup?: string;
+    religion?: string;
+    nationality?: string;
+    emergencyContactName?: string;
+    emergencyContactNumber?: string;
+    personalEmail?: string;
   };
   employmentDetails?: {
     continuousServiceDate?: Date;
@@ -116,13 +119,16 @@ const ProfileDetailsSchema = new mongoose.Schema<ProfileDetailsI>({
     ref: "User",
   },
   personalDetails: {
-    firstName: { type: String },
-    middleName: { type: String },
-    lastName: { type: String },
     knownAs: { type: String },
     maritalStatus: { type: String, lowercase: true, enum: ['single', 'married', 'divorced', 'widowed', 'other'] },
     anniversaryDate: { type: Date },
     fatherHusbandName: { type: String },
+    bloodGroup: { type: String },
+    religion: { type: String },
+    nationality: { type: String },
+    emergencyContactName: { type: String },
+    emergencyContactNumber: { type: String },
+    personalEmail: { type: String },
   },
   employmentDetails: {
     continuousServiceDate: { type: Date },
