@@ -108,6 +108,9 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
     memberships[0] ||
     null;
   const activeCompany = activeMembership?.company || companyDetails || null;
+  
+  console.log("DEBUG AUTH ME: department=", req.bodyData?.department, "location=", req.bodyData?.officeLocation);
+
   const identity = {
     ...req.bodyData,
     profile_details,

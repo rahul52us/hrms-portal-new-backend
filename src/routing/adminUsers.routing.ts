@@ -19,7 +19,8 @@ import {
   updateManagedUserFamilyContactsHandler,
   updateManagedUserSkillsHandler,
   updateManagedUserStatutoryDetailsHandler,
-  updateManagedUserEmployeeDocumentsHandler
+  updateManagedUserEmployeeDocumentsHandler,
+  updateManagedUserReportingManagerHandler
 } from "../services/adminUsers/adminUsers.service";
 
 const router = express.Router();
@@ -42,6 +43,7 @@ router.put("/:id/profile/family", authenticate, updateManagedUserFamilyContactsH
 router.put("/:id/profile/skills", authenticate, updateManagedUserSkillsHandler);
 router.put("/:id/profile/statutory", authenticate, updateManagedUserStatutoryDetailsHandler);
 router.put("/:id/profile/documents", authenticate, updateManagedUserEmployeeDocumentsHandler);
+router.put("/:id/manager", authenticate, updateManagedUserReportingManagerHandler);
 router.put("/:id", authenticate, updateManagedUserHandler);
 
 export default router;

@@ -2570,6 +2570,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       ? await User.find(match)
           .populate("company", "company_name companyCode rolePermissions")
           .populate("officeLocation", "name code address city state country pinCode is_active")
+          .populate({ path: "department", model: "Department", select: "departmentName" })
           .populate("createdBy", "name username role")
           .populate("reportingManager", "name username role designation")
           .sort({ createdAt: -1 })
@@ -3396,10 +3397,8 @@ export async function setPasswordFromSetupToken(token: string, password: string)
 export async function getManagedUserProfileDetailsHandler(req: Request, res: Response) {
   try {
     const targetUserId = req.params.id;
-    const authContext = (req as any).authContext;
-    
     // In a real app we might check permissions, but for now we assume admin/hr access via middleware
-    const user = await User.findById(targetUserId).select("_id company");
+    const user = await User.findById(targetUserId).lean();
     if (!user) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
@@ -3414,11 +3413,34 @@ export async function getManagedUserProfileDetailsHandler(req: Request, res: Res
       delete responseData.personalInfo;
     }
 
+    // Attach core user fields so the admin UI can display them correctly
+    responseData.user = {
+      _id: user._id,
+      company: user.company,
+      department: user.department,
+      officeLocation: user.officeLocation,
+      employeeNumber: user.employeeNumber,
+      code: user.code,
+      name: user.name,
+      designation: user.designation,
+      gender: user.gender,
+      dateOfBirth: user.dateOfBirth,
+      username: user.username,
+      mobileNumber: user.mobileNumber,
+      address: user.address,
+      city: user.city,
+      state: user.state,
+      country: user.country,
+      postalCode: user.postalCode,
+      pic: user.pic,
+    };
+
     return res.status(200).json({ success: true, data: responseData });
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message || "Failed to fetch profile details" });
   }
 }
+
 export async function updateManagedUserPersonalDetailsHandler(req: Request, res: Response) {
   try {
     const targetUserId = req.params.id;
@@ -3469,17 +3491,31 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
       if (req.body.state !== undefined) user.state = req.body.state;
       if (req.body.country !== undefined) user.country = req.body.country;
       if (req.body.postalCode !== undefined) user.postalCode = req.body.postalCode;
+      if (req.body.department !== undefined) user.department = req.body.department;
+      if (req.body.officeLocation !== undefined) user.officeLocation = req.body.officeLocation;
 
       if (req.body.pic) {
         if (req.body.pic.isDeleted) {
           user.pic = null;
         } else if (req.body.pic.isAdd && req.body.pic.buffer) {
+          if (req.body.pic.filename) {
+            const lastDotIndex = req.body.pic.filename.lastIndexOf('.');
+            if (lastDotIndex !== -1) {
+              const name = req.body.pic.filename.substring(0, lastDotIndex);
+              const ext = req.body.pic.filename.substring(lastDotIndex);
+              req.body.pic.filename = `${name}_${Date.now()}${ext}`;
+            } else {
+              req.body.pic.filename = `${req.body.pic.filename}_${Date.now()}`;
+            }
+          }
           const uploadedUrl = await uploadFile(req.body.pic);
           user.pic = { url: uploadedUrl };
         }
       }
 
+      console.log("DEBUG BACKEND BEFORE SAVE: department=", user.department, "location=", user.officeLocation);
       await user.save();
+      console.log("DEBUG BACKEND AFTER SAVE!");
     }
 
     return res.status(200).json({ success: true, data: profile });
@@ -3536,6 +3572,34 @@ export async function updateManagedUserEmployeeDocumentsHandler(req: Request, re
     await profile.save();
     return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message || "Failed to update documents" });
+    return res.status(500).json({ status: false, message: "Server error", error: error instanceof Error ? error.message : "Unknown error" });
+  }
+}
+
+export async function updateManagedUserReportingManagerHandler(req: Request, res: Response) {
+  try {
+    const targetUserId = req.params.id;
+    const newManagerId = req.body.reportingManager || null;
+    const user = await User.findById(targetUserId);
+
+    if (!user) {
+      return res.status(404).json({ status: false, message: "User not found" });
+    }
+
+    // Assign the new manager
+    user.reportingManager = newManagerId;
+    await user.save();
+
+    return res.json({
+      status: true,
+      message: "Reporting manager updated successfully",
+      data: {
+        _id: user._id,
+        reportingManager: user.reportingManager
+      }
+    });
+  } catch (error) {
+    console.error("Error updating reporting manager:", error);
+    return res.status(500).json({ status: false, message: "Server error", error: error instanceof Error ? error.message : "Unknown error" });
   }
 }
