@@ -3460,7 +3460,7 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
       }
       if (req.body.gender !== undefined) {
         const genderMap: Record<string, number> = { 'male': 1, 'female': 2, 'other': 3 };
-        user.gender = genderMap[req.body.gender] || user.gender;
+        user.gender = genderMap[String(req.body.gender).toLowerCase()] || user.gender;
       }
       if (req.body.mobileNumber !== undefined) user.mobileNumber = req.body.mobileNumber;
       if (req.body.email !== undefined) user.username = req.body.email; // assuming email mapped to username
