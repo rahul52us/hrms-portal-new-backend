@@ -468,7 +468,16 @@ export const getHrDashboardSummaryService = async (
           },
         ],
         breakdowns: {
-          departments: buildBreakdown(workforceUsers, (user) => user.department),
+          departments: buildBreakdown(workforceUsers, (user) => {
+            const dept = user.department;
+            if (!dept) return "Unassigned";
+            // If it looks like a MongoDB ObjectId, look up the name
+            if (/^[a-f\d]{24}$/i.test(String(dept))) {
+              const found = departments.find((d: any) => String(d._id) === String(dept));
+              return found?.departmentName || "Unassigned";
+            }
+            return String(dept);
+          }),
           teams: buildBreakdown(workforceUsers, (user) => user.team),
           locations: buildBreakdown(workforceUsers, (user) => {
             const location = user?.officeLocation && typeof user.officeLocation === "object"
