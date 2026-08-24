@@ -12,6 +12,8 @@ export interface WorkforcePolicyAuditLogI extends Document {
     | "leave_type"
     | "leave_policy"
     | "leave_version"
+    | "remote_work_policy"
+    | "remote_work_version"
     | "assignment";
   entityId: mongoose.Types.ObjectId;
   action: string;
@@ -35,6 +37,8 @@ const WorkforcePolicyAuditLogSchema = new Schema<WorkforcePolicyAuditLogI>(
         "leave_type",
         "leave_policy",
         "leave_version",
+        "remote_work_policy",
+        "remote_work_version",
         "assignment",
       ],
       required: true,

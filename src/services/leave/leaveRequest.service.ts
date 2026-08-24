@@ -5,6 +5,7 @@ import EmployeeLeaveBalance from "../../schemas/Leave/EmployeeLeaveBalance.schem
 import LeaveBalanceTransaction from "../../schemas/Leave/LeaveBalanceTransaction.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
 import LeaveRequestDateLock from "../../schemas/Leave/LeaveRequestDateLock.schema";
+import EmployeeDayRequestLock from "../../schemas/Request/EmployeeDayRequestLock.schema";
 import LeaveAttachment from "../../schemas/Leave/LeaveAttachment.schema";
 import User from "../../schemas/User/User";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
@@ -331,13 +332,14 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       const lockDates = result.calculation.dayBreakdown
         .filter((day: any) => Number(day.chargedUnits || 0) > 0)
         .map((day: any) => day.attendanceDate);
-      await LeaveRequestDateLock.create(
+      await EmployeeDayRequestLock.create(
         lockDates.map((attendanceDate: string) => ({
           company,
           employee: employee._id,
           attendanceDate,
+          requestType: "leave",
+          requestModel: "LeaveRequest",
           request: request._id,
-          leaveType: result.leaveType._id,
         })),
         { session }
       );
@@ -511,11 +513,19 @@ async function releaseRequestReservation(request: any, session: mongoose.ClientS
 }
 
 async function releaseRequestDateLocks(request: any, session: mongoose.ClientSession) {
-  await LeaveRequestDateLock.deleteMany({
-    company: request.company,
-    employee: request.employee,
-    request: request._id,
-  }).session(session);
+  await Promise.all([
+    EmployeeDayRequestLock.deleteMany({
+      company: request.company,
+      employee: request.employee,
+      requestType: "leave",
+      request: request._id,
+    }).session(session),
+    LeaveRequestDateLock.deleteMany({
+      company: request.company,
+      employee: request.employee,
+      request: request._id,
+    }).session(session),
+  ]);
 }
 
 export async function approveLeaveRequestService(req: any, res: Response, next: NextFunction) {

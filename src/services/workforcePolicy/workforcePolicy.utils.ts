@@ -151,6 +151,8 @@ export async function writePolicyAudit(options: {
     | "leave_type"
     | "leave_policy"
     | "leave_version"
+    | "remote_work_policy"
+    | "remote_work_version"
     | "assignment";
   entityId: mongoose.Types.ObjectId;
   action: string;

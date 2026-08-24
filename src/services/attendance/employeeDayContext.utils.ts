@@ -52,6 +52,7 @@ export interface EmployeePolicyResolutionLike {
   workSchedule?: ResolvedPolicyLike<WorkScheduleVersionLike> | null;
   holidayCalendar?: ResolvedPolicyLike<HolidayCalendarVersionLike> | null;
   leavePolicy?: ResolvedPolicyLike | null;
+  remoteWorkPolicy?: ResolvedPolicyLike | null;
   warnings?: string[];
 }
 
@@ -347,12 +348,14 @@ export function buildEmployeeDayContext(options: {
       workSchedule: policyResolution.workSchedule || null,
       holidayCalendar: policyResolution.holidayCalendar || null,
       leavePolicy: policyResolution.leavePolicy || null,
+      remoteWorkPolicy: policyResolution.remoteWorkPolicy || null,
     },
     policyReferences: {
       attendancePolicy: compactPolicyReference(policyResolution.attendancePolicy),
       workSchedule: compactPolicyReference(policyResolution.workSchedule),
       holidayCalendar: compactPolicyReference(policyResolution.holidayCalendar),
       leavePolicy: compactPolicyReference(policyResolution.leavePolicy),
+      remoteWorkPolicy: compactPolicyReference(policyResolution.remoteWorkPolicy),
     },
     missingPolicies,
     warnings: Array.from(warnings),

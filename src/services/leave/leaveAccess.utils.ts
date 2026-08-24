@@ -15,7 +15,7 @@ export function normalizeLeaveRole(value: unknown) {
     .replace(/^hr[-\s]?executive$/, "hr");
 }
 
-export function getLeaveActor(req: any) {
+export function getEmployeeRequestActor(req: any) {
   const source = req?.user || req?.bodyData || {};
   const actorId = normalizeText(req?.userId || source?._id);
   if (!mongoose.Types.ObjectId.isValid(actorId)) {
@@ -29,11 +29,19 @@ export function getLeaveActor(req: any) {
   };
 }
 
-export function resolveLeaveCompanyId(actor: any, requestedCompanyId?: unknown) {
+export function getLeaveActor(req: any) {
+  return getEmployeeRequestActor(req);
+}
+
+export function resolveEmployeeRequestCompanyId(
+  actor: any,
+  requestedCompanyId?: unknown,
+  operationLabel = "employee request"
+) {
   const requested = normalizeText(requestedCompanyId);
   if (actor.role === "superadmin") {
     if (!mongoose.Types.ObjectId.isValid(requested)) {
-      throw generateError("A valid companyId is required for superadmin leave operations", 400);
+      throw generateError(`A valid companyId is required for superadmin ${operationLabel} operations`, 400);
     }
     return new mongoose.Types.ObjectId(requested);
   }
@@ -41,9 +49,13 @@ export function resolveLeaveCompanyId(actor: any, requestedCompanyId?: unknown) 
     throw generateError("Your account is not assigned to a company", 403);
   }
   if (requested && requested !== actor.company) {
-    throw generateError("You can only access leave data from your company", 403);
+    throw generateError(`You can only access ${operationLabel} data from your company`, 403);
   }
   return new mongoose.Types.ObjectId(actor.company);
+}
+
+export function resolveLeaveCompanyId(actor: any, requestedCompanyId?: unknown) {
+  return resolveEmployeeRequestCompanyId(actor, requestedCompanyId, "leave");
 }
 
 function values(value: unknown) {
@@ -123,3 +135,5 @@ export function buildLeaveRequestScope(actor: any, permissionKey: string, includ
   }
   return or.length === 1 ? or[0] : { $or: or };
 }
+
+export const buildEmployeeRequestScope = buildLeaveRequestScope;

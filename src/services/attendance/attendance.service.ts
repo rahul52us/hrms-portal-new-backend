@@ -4,6 +4,7 @@ import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
+import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import { calculateAttendance } from "./attendanceCalculator.utils";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
@@ -134,6 +135,53 @@ function contextSnapshots(context: any) {
     holidayCalendar: optionalObjectId(holidayReference.resourceId),
     holidayCalendarVersion: optionalObjectId(holidayReference.versionId),
     policyResolvedAt: new Date(),
+  };
+}
+
+async function approvedRemoteWorkAuthorization(options: {
+  companyId: mongoose.Types.ObjectId;
+  employeeId: mongoose.Types.ObjectId;
+  attendanceDate: string;
+}) {
+  const request = await RemoteWorkRequest.findOne({
+    company: options.companyId,
+    employee: options.employeeId,
+    status: "approved",
+    "dates.attendanceDate": options.attendanceDate,
+  })
+    .select(
+      "_id fromDate toDate dates remoteWorkPolicyAssignment remoteWorkPolicy remoteWorkPolicyVersion remoteWorkPolicyVersionNumber"
+    )
+    .lean();
+  if (!request) return null;
+  const day = request.dates.find((item: any) => item.attendanceDate === options.attendanceDate);
+  if (!day) return null;
+  return {
+    requestId: request._id,
+    portion: day.portion,
+    workMode: day.portion === "full" ? "remote" : "hybrid",
+    remoteWorkPolicyAssignment: request.remoteWorkPolicyAssignment,
+    remoteWorkPolicy: request.remoteWorkPolicy,
+    remoteWorkPolicyVersion: request.remoteWorkPolicyVersion,
+    remoteWorkPolicyVersionNumber: request.remoteWorkPolicyVersionNumber,
+  };
+}
+
+function remoteWorkRecordFields(authorization: any) {
+  if (!authorization) {
+    return {
+      workMode: "office",
+      workModeSource: "default",
+    };
+  }
+  return {
+    workMode: authorization.workMode,
+    workModeSource: "remote_work_request",
+    remoteWorkRequest: authorization.requestId,
+    remoteWorkPortion: authorization.portion,
+    remoteWorkPolicyAssignment: authorization.remoteWorkPolicyAssignment,
+    remoteWorkPolicy: authorization.remoteWorkPolicy,
+    remoteWorkPolicyVersion: authorization.remoteWorkPolicyVersion,
   };
 }
 
@@ -272,7 +320,7 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
     const actor = actorDetails(req);
     const now = new Date();
     const { context, attendanceDate, timezone } = await resolveCurrentContext({ ...actor, now });
-    const [record, activeRecord] = await Promise.all([
+    const [record, activeRecord, remoteWorkAuthorization] = await Promise.all([
       AttendanceRecord.findOne({
         company: actor.companyId,
         employee: actor.employeeId,
@@ -286,6 +334,7 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
       })
         .sort({ attendanceDate: -1 })
         .lean(),
+      approvedRemoteWorkAuthorization({ ...actor, attendanceDate }),
     ]);
     const effectiveRecord = activeRecord || record;
     return res.status(200).json({
@@ -304,6 +353,7 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
           missingPolicies: context.missingPolicies,
           warnings: context.warnings,
         },
+        remoteWorkAuthorization,
         actions: {
           canPunchIn: Boolean(
             !activeRecord &&
@@ -341,6 +391,10 @@ export async function punchInService(req: any, res: Response, next: NextFunction
     }
 
     const rules = context.policies.attendancePolicy?.version?.rules || {};
+    const remoteWorkAuthorization = await approvedRemoteWorkAuthorization({
+      ...actor,
+      attendanceDate,
+    });
     const existing = await AttendanceRecord.findOne({
       company: actor.companyId,
       employee: actor.employeeId,
@@ -370,7 +424,15 @@ export async function punchInService(req: any, res: Response, next: NextFunction
         },
         {
           $push: { punchSessions: session },
-          $set: { state: "open", status: "pending", source: "punch", updatedBy: actor.employeeId },
+          $set: {
+            state: "open",
+            status: "pending",
+            source: "punch",
+            updatedBy: actor.employeeId,
+            ...(existing.workModeSource === "manual"
+              ? {}
+              : remoteWorkRecordFields(remoteWorkAuthorization)),
+          },
           $inc: { revisionNumber: 1 },
         },
         { new: true, runValidators: true }
@@ -385,8 +447,7 @@ export async function punchInService(req: any, res: Response, next: NextFunction
           timezone,
           state: "open",
           status: "pending",
-          workMode: "office",
-          workModeSource: "default",
+          ...remoteWorkRecordFields(remoteWorkAuthorization),
           punchSessions: [session],
           revisionNumber: 1,
           calculationVersion: 0,

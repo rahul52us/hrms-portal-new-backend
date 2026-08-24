@@ -33,6 +33,11 @@ export interface AttendanceRecordI extends Document {
   status: (typeof ATTENDANCE_RECORD_STATUSES)[number];
   workMode: (typeof ATTENDANCE_WORK_MODES)[number];
   workModeSource: "default" | "remote_work_request" | "manual" | "import";
+  remoteWorkRequest?: mongoose.Types.ObjectId | null;
+  remoteWorkPortion?: "full" | "first_half" | "second_half" | null;
+  remoteWorkPolicyAssignment?: mongoose.Types.ObjectId | null;
+  remoteWorkPolicy?: mongoose.Types.ObjectId | null;
+  remoteWorkPolicyVersion?: mongoose.Types.ObjectId | null;
   punchSessions: AttendancePunchSessionI[];
   workedMinutes: number;
   breakMinutes: number;
@@ -139,6 +144,11 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
       required: true,
       default: "default",
     },
+    remoteWorkRequest: { type: Schema.Types.ObjectId, ref: "RemoteWorkRequest", default: null, index: true },
+    remoteWorkPortion: { type: String, enum: ["full", "first_half", "second_half"], default: null },
+    remoteWorkPolicyAssignment: { type: Schema.Types.ObjectId, ref: "WorkforcePolicyAssignment", default: null },
+    remoteWorkPolicy: { type: Schema.Types.ObjectId, ref: "RemoteWorkPolicy", default: null },
+    remoteWorkPolicyVersion: { type: Schema.Types.ObjectId, ref: "RemoteWorkPolicyVersion", default: null },
     punchSessions: { type: [AttendancePunchSessionSchema], default: [] },
     workedMinutes: { type: Number, min: 0, default: 0 },
     breakMinutes: { type: Number, min: 0, default: 0 },

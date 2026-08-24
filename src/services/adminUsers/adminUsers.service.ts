@@ -2607,7 +2607,6 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
       ? await User.find(match)
           .populate("company", "company_name companyCode rolePermissions")
           .populate("officeLocation", "name code address city state country pinCode is_active")
-          .populate({ path: "department", model: "Department", select: "departmentName" })
           .populate("createdBy", "name username role")
           .populate("reportingManager", "name username role designation")
           .sort({ createdAt: -1 })

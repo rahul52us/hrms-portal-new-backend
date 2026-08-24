@@ -51,6 +51,16 @@ import {
   updateLeavePolicyVersionService,
   updateLeaveTypeService,
 } from "../services/workforcePolicy/leavePolicy.service";
+import {
+  archiveRemoteWorkPolicyService,
+  createRemoteWorkPolicyService,
+  createRemoteWorkPolicyVersionService,
+  getRemoteWorkPolicyService,
+  listRemoteWorkPoliciesService,
+  publishRemoteWorkPolicyVersionService,
+  updateRemoteWorkPolicyService,
+  updateRemoteWorkPolicyVersionService,
+} from "../services/workforcePolicy/remoteWorkPolicy.service";
 
 const workforcePoliciesRouting = express.Router();
 
@@ -127,6 +137,24 @@ workforcePoliciesRouting.put(
 workforcePoliciesRouting.post(
   "/leave-policies/:policyId/versions/:versionId/publish",
   publishLeavePolicyVersionService
+);
+
+workforcePoliciesRouting.get("/remote-work-policies", listRemoteWorkPoliciesService);
+workforcePoliciesRouting.post("/remote-work-policies", createRemoteWorkPolicyService);
+workforcePoliciesRouting.get("/remote-work-policies/:policyId", getRemoteWorkPolicyService);
+workforcePoliciesRouting.put("/remote-work-policies/:policyId", updateRemoteWorkPolicyService);
+workforcePoliciesRouting.post("/remote-work-policies/:policyId/archive", archiveRemoteWorkPolicyService);
+workforcePoliciesRouting.post(
+  "/remote-work-policies/:policyId/versions",
+  createRemoteWorkPolicyVersionService
+);
+workforcePoliciesRouting.put(
+  "/remote-work-policies/:policyId/versions/:versionId",
+  updateRemoteWorkPolicyVersionService
+);
+workforcePoliciesRouting.post(
+  "/remote-work-policies/:policyId/versions/:versionId/publish",
+  publishRemoteWorkPolicyVersionService
 );
 
 workforcePoliciesRouting.get("/assignments", listPolicyAssignmentsService);

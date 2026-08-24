@@ -34,6 +34,7 @@
     "companies:address-info:cleanup:apply": "ts-node src/scripts/removeLegacyCompanyAddressInfo.ts --apply",
     "test:employee-day-context": "ts-node src/services/attendance/employeeDayContext.test.ts",
     "test:attendance-calculator": "ts-node src/services/attendance/attendanceCalculator.test.ts",
+    "test:remote-work-request": "ts-node src/services/remoteWork/remoteWorkRequest.test.ts",
     "test:leave-request-calculator": "ts-node src/services/leave/leaveRequestCalculator.test.ts",
     "test:leave-accrual-calculator": "ts-node src/services/leave/leaveAccrualCalculator.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",

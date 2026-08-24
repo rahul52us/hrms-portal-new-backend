@@ -14,6 +14,8 @@ import WorkSchedule from "../../schemas/WorkforcePolicy/WorkSchedule.schema";
 import WorkScheduleVersion from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
 import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
 import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
+import RemoteWorkPolicy from "../../schemas/WorkforcePolicy/RemoteWorkPolicy.schema";
+import RemoteWorkPolicyVersion from "../../schemas/WorkforcePolicy/RemoteWorkPolicyVersion.schema";
 import WorkforcePolicyAssignment, {
   POLICY_RESOURCE_TYPES,
   POLICY_SCOPE_TYPES,
@@ -77,6 +79,15 @@ async function findResource(options: {
     return { resource, resourceModel: "LeavePolicy" as const };
   }
 
+  if (options.resourceType === "remote_work_policy") {
+    const resource = await RemoteWorkPolicy.findOne({
+      _id: new mongoose.Types.ObjectId(options.resourceId),
+      company: options.company,
+    }).lean();
+    if (!resource) throw generateError("Remote-work policy not found", 404);
+    return { resource, resourceModel: "RemoteWorkPolicy" as const };
+  }
+
   const resource = await HolidayCalendar.findOne({
     _id: new mongoose.Types.ObjectId(options.resourceId),
     company: options.company,
@@ -118,8 +129,15 @@ async function ensureResourceHasPublishedVersion(options: {
     })
       .sort({ effectiveFrom: -1, versionNumber: -1 })
       .lean();
-  } else {
+  } else if (options.resourceType === "leave_policy") {
     version = await LeavePolicyVersion.findOne({
+      ...query,
+      policy: new mongoose.Types.ObjectId(options.resourceId),
+    })
+      .sort({ effectiveFrom: -1, versionNumber: -1 })
+      .lean();
+  } else {
+    version = await RemoteWorkPolicyVersion.findOne({
       ...query,
       policy: new mongoose.Types.ObjectId(options.resourceId),
     })
@@ -547,6 +565,28 @@ async function resolvePublishedVersion(options: {
     return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
   }
 
+  if (options.resourceType === "remote_work_policy") {
+    const version = await RemoteWorkPolicyVersion.findOne({
+      company: options.company,
+      policy: options.resourceId,
+      status: "published",
+      effectiveFrom: { $lte: options.at },
+    })
+      .sort({ effectiveFrom: -1, versionNumber: -1 })
+      .lean();
+    if (!version) return null;
+    const nextVersion = await RemoteWorkPolicyVersion.findOne({
+      company: options.company,
+      policy: options.resourceId,
+      status: "published",
+      effectiveFrom: { $gt: version.effectiveFrom },
+    })
+      .sort({ effectiveFrom: 1, versionNumber: 1 })
+      .select("effectiveFrom")
+      .lean();
+    return { ...version, effectiveTo: nextVersion?.effectiveFrom || null };
+  }
+
   const version = await HolidayCalendarVersion.findOne({
     company: options.company,
     calendar: options.resourceId,
@@ -668,6 +708,7 @@ export async function resolveEmployeePolicyData(options: {
   if (!resolved.work_schedule) warnings.push("No work schedule is effective for this employee and date");
   if (!resolved.holiday_calendar) warnings.push("No holiday calendar is effective for this employee and date");
   if (!resolved.leave_policy) warnings.push("No leave policy is effective for this employee and date");
+  if (!resolved.remote_work_policy) warnings.push("No remote-work policy is effective for this employee and date");
   return {
     employee: {
       _id: employee._id,
@@ -687,6 +728,7 @@ export async function resolveEmployeePolicyData(options: {
     workSchedule: resolved.work_schedule,
     holidayCalendar: resolved.holiday_calendar,
     leavePolicy: resolved.leave_policy,
+    remoteWorkPolicy: resolved.remote_work_policy,
     warnings,
   };
 }
@@ -845,6 +887,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         work_schedule: resolution.workSchedule,
         holiday_calendar: resolution.holidayCalendar,
         leave_policy: resolution.leavePolicy,
+        remote_work_policy: resolution.remoteWorkPolicy,
       };
       const missing = coverageResourceTypes.filter((resourceType) => !resolutionByType[resourceType]);
       const compactResource = (resolved: any) => {
@@ -882,6 +925,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         workSchedule: compactResource(resolution.workSchedule),
         holidayCalendar: compactResource(resolution.holidayCalendar),
         leavePolicy: compactResource(resolution.leavePolicy),
+        remoteWorkPolicy: compactResource(resolution.remoteWorkPolicy),
         warnings: resolution.warnings,
         complete: missing.length === 0,
         missing,
