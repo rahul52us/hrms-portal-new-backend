@@ -2,6 +2,17 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export const LEAVE_ACCRUAL_FREQUENCIES = ["upfront", "monthly", "quarterly", "none"] as const;
 export const LEAVE_PROBATION_RULES = ["allowed", "after_confirmation", "not_allowed"] as const;
+export const LEAVE_CREDIT_COMPONENT_FREQUENCIES = ["upfront", "monthly", "quarterly"] as const;
+export const LEAVE_UPFRONT_CREDIT_TIMINGS = ["leave_year_start", "first_eligibility"] as const;
+
+export interface LeaveCreditComponent {
+  componentId: string;
+  frequency: (typeof LEAVE_CREDIT_COMPONENT_FREQUENCIES)[number];
+  amount: number;
+  upfrontTiming: (typeof LEAVE_UPFRONT_CREDIT_TIMINGS)[number];
+  prorateOnJoining: boolean;
+  prorateOnExit: boolean;
+}
 
 export interface LeavePolicyRule {
   leaveType: mongoose.Types.ObjectId;
@@ -12,6 +23,7 @@ export interface LeavePolicyRule {
   annualEntitlement: number;
   accrualFrequency: (typeof LEAVE_ACCRUAL_FREQUENCIES)[number];
   accrualAmount: number;
+  creditComponents: LeaveCreditComponent[];
   prorateOnJoining: boolean;
   prorateOnExit: boolean;
   carryForwardEnabled: boolean;
@@ -29,6 +41,28 @@ export interface LeavePolicyRule {
   probationEligibility: (typeof LEAVE_PROBATION_RULES)[number];
   sandwichRuleEnabled: boolean;
 }
+
+const LeaveCreditComponentSchema = new Schema<LeaveCreditComponent>(
+  {
+    componentId: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+      match: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/,
+    },
+    frequency: { type: String, enum: LEAVE_CREDIT_COMPONENT_FREQUENCIES, required: true },
+    amount: { type: Number, min: 0, required: true },
+    upfrontTiming: {
+      type: String,
+      enum: LEAVE_UPFRONT_CREDIT_TIMINGS,
+      default: "leave_year_start",
+    },
+    prorateOnJoining: { type: Boolean, default: true },
+    prorateOnExit: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
 
 export interface LeavePolicyVersionI extends Document {
   company: mongoose.Types.ObjectId;
@@ -57,6 +91,17 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     annualEntitlement: { type: Number, min: 0, default: 0 },
     accrualFrequency: { type: String, enum: LEAVE_ACCRUAL_FREQUENCIES, default: "upfront" },
     accrualAmount: { type: Number, min: 0, default: 0 },
+    creditComponents: {
+      type: [LeaveCreditComponentSchema],
+      default: [],
+      validate: {
+        validator(value: LeaveCreditComponent[]) {
+          const ids = value.map((component) => component.componentId);
+          return ids.length === new Set(ids).size;
+        },
+        message: "Credit component IDs must be unique within a leave rule",
+      },
+    },
     prorateOnJoining: { type: Boolean, default: true },
     prorateOnExit: { type: Boolean, default: true },
     carryForwardEnabled: { type: Boolean, default: false },

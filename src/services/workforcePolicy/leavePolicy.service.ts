@@ -4,7 +4,10 @@ import { generateError } from "../../config/Error/functions";
 import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
 import LeavePolicyVersion, {
   LEAVE_ACCRUAL_FREQUENCIES,
+  LEAVE_CREDIT_COMPONENT_FREQUENCIES,
   LEAVE_PROBATION_RULES,
+  LEAVE_UPFRONT_CREDIT_TIMINGS,
+  LeaveCreditComponent,
   LeavePolicyRule,
 } from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
@@ -59,6 +62,85 @@ function calculateAccrualAmount(
   const periods = frequency === "monthly" ? 12 : frequency === "quarterly" ? 4 : 1;
   if (frequency === "none" || annualEntitlement <= 0) return 0;
   return Math.round((annualEntitlement / periods) * 10000) / 10000;
+}
+
+function normalizeCreditAmount(
+  value: unknown,
+  fallback: number,
+  label: string,
+  minimum = 0
+) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < minimum) {
+    throw generateError(`${label} must be at least ${minimum}`, 400);
+  }
+  return Math.round((parsed + Number.EPSILON) * 10000) / 10000;
+}
+
+function scheduledAnnualCredit(components: LeaveCreditComponent[]) {
+  return Math.round(
+    (components.reduce((total, component) => {
+      const periods = component.frequency === "monthly" ? 12 : component.frequency === "quarterly" ? 4 : 1;
+      return total + component.amount * periods;
+    }, 0) + Number.EPSILON) * 10000
+  ) / 10000;
+}
+
+function normalizeCreditComponents(options: {
+  value: unknown;
+  leaveTypeCode: string;
+  balanceTracked: boolean;
+  prorateOnJoining: boolean;
+  prorateOnExit: boolean;
+}) {
+  if (!options.balanceTracked) return [];
+  if (options.value === undefined || options.value === null) return [];
+  if (!Array.isArray(options.value)) {
+    throw generateError(`${options.leaveTypeCode} credit components must be an array`, 400);
+  }
+  if (options.value.length > 20) {
+    throw generateError(`${options.leaveTypeCode} cannot have more than 20 credit components`, 400);
+  }
+
+  const componentIds = new Set<string>();
+  return options.value.map((input: any, index): LeaveCreditComponent => {
+    const componentId = String(input?.componentId || "").trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._:-]{0,99}$/.test(componentId)) {
+      throw generateError(
+        `${options.leaveTypeCode} credit component ${index + 1} has an invalid component id`,
+        400
+      );
+    }
+    if (componentIds.has(componentId)) {
+      throw generateError(`${options.leaveTypeCode} credit component ids must be unique`, 409);
+    }
+    componentIds.add(componentId);
+
+    const frequency = normalizeText(input?.frequency || "monthly") as LeaveCreditComponent["frequency"];
+    if (!LEAVE_CREDIT_COMPONENT_FREQUENCIES.includes(frequency as any)) {
+      throw generateError(`${options.leaveTypeCode} credit component ${index + 1} has an invalid frequency`, 400);
+    }
+    const upfrontTiming = normalizeText(
+      input?.upfrontTiming || "leave_year_start"
+    ) as LeaveCreditComponent["upfrontTiming"];
+    if (!LEAVE_UPFRONT_CREDIT_TIMINGS.includes(upfrontTiming as any)) {
+      throw generateError(`${options.leaveTypeCode} credit component ${index + 1} has invalid upfront timing`, 400);
+    }
+
+    return {
+      componentId,
+      frequency,
+      amount: normalizeCreditAmount(
+        input?.amount,
+        0,
+        `${options.leaveTypeCode} credit component ${index + 1} amount`
+      ),
+      upfrontTiming: frequency === "upfront" ? upfrontTiming : "leave_year_start",
+      prorateOnJoining: normalizeBoolean(input?.prorateOnJoining, options.prorateOnJoining),
+      prorateOnExit: normalizeBoolean(input?.prorateOnExit, options.prorateOnExit),
+    };
+  });
 }
 
 function usesIncrement(value: number, increment: number) {
@@ -137,7 +219,7 @@ async function normalizeLeaveRules(options: {
       throw generateError(`${leaveType.name} is archived and cannot be used in a new policy version`, 409);
     }
     const current = currentByLeaveType.get(leaveTypeId) || {};
-    const annualEntitlement = leaveType.balanceTracked
+    const manualAnnualEntitlement = leaveType.balanceTracked
       ? normalizeNumber(
           inputRule.annualEntitlement,
           Number(current.annualEntitlement || 0),
@@ -147,13 +229,41 @@ async function normalizeLeaveRules(options: {
     const requestedAccrualFrequency = normalizeText(
       inputRule.accrualFrequency || current.accrualFrequency || "upfront"
     );
-    const accrualFrequency = (leaveType.balanceTracked
+    const legacyAccrualFrequency = (leaveType.balanceTracked
       ? requestedAccrualFrequency
       : "none") as LeavePolicyRule["accrualFrequency"];
-    if (!LEAVE_ACCRUAL_FREQUENCIES.includes(accrualFrequency as any)) {
+    if (!LEAVE_ACCRUAL_FREQUENCIES.includes(legacyAccrualFrequency as any)) {
       throw generateError(`Invalid accrual frequency for ${leaveType.code}`, 400);
     }
-    const accrualAmount = calculateAccrualAmount(annualEntitlement, accrualFrequency);
+    const prorateOnJoining = normalizeBoolean(
+      inputRule.prorateOnJoining,
+      current.prorateOnJoining ?? true
+    );
+    const prorateOnExit = normalizeBoolean(
+      inputRule.prorateOnExit,
+      current.prorateOnExit ?? true
+    );
+    const hasInputComponents = Object.prototype.hasOwnProperty.call(inputRule, "creditComponents");
+    const creditComponents = normalizeCreditComponents({
+      value: hasInputComponents ? inputRule.creditComponents : current.creditComponents,
+      leaveTypeCode: leaveType.code,
+      balanceTracked: leaveType.balanceTracked,
+      prorateOnJoining,
+      prorateOnExit,
+    });
+    const annualEntitlement = creditComponents.length
+      ? scheduledAnnualCredit(creditComponents)
+      : manualAnnualEntitlement;
+    const accrualFrequency = creditComponents.length === 1
+      ? creditComponents[0].frequency
+      : creditComponents.length > 1
+        ? "none"
+        : legacyAccrualFrequency;
+    const accrualAmount = creditComponents.length === 1
+      ? creditComponents[0].amount
+      : creditComponents.length > 1
+        ? 0
+        : calculateAccrualAmount(annualEntitlement, accrualFrequency);
     const minimumRequestDays = normalizeNumber(
       inputRule.minimumRequestDays,
       Number(current.minimumRequestDays || 1),
@@ -194,8 +304,9 @@ async function normalizeLeaveRules(options: {
       annualEntitlement,
       accrualFrequency,
       accrualAmount,
-      prorateOnJoining: normalizeBoolean(inputRule.prorateOnJoining, current.prorateOnJoining ?? true),
-      prorateOnExit: normalizeBoolean(inputRule.prorateOnExit, current.prorateOnExit ?? true),
+      creditComponents,
+      prorateOnJoining,
+      prorateOnExit,
       carryForwardEnabled,
       maxCarryForward: carryForwardEnabled
         ? normalizeNumber(inputRule.maxCarryForward, Number(current.maxCarryForward || 0), `${leaveType.code} carry-forward limit`)
@@ -787,6 +898,15 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
     if (emptyEntitlementRule) {
       throw generateError(
         `${emptyEntitlementRule.leaveTypeCodeSnapshot} annual entitlement must be greater than zero before publishing`,
+        422
+      );
+    }
+    const invalidCreditComponentRule = rules.find((rule) =>
+      rule.creditComponents.some((component) => component.amount <= 0)
+    );
+    if (invalidCreditComponentRule) {
+      throw generateError(
+        `${invalidCreditComponentRule.leaveTypeCodeSnapshot} automatic credit amounts must be greater than zero before publishing`,
         422
       );
     }

@@ -8,7 +8,7 @@ import {
 } from "./employeeDayContext.utils";
 
 const EMPLOYEE_CONTEXT_FIELDS =
-  "_id company name username code role department team officeLocation designation reportingManager joiningDate createdAt deletedAt";
+  "_id company name username code role department team officeLocation designation reportingManager joiningDate confirmationDate employmentEndDate createdAt deletedAt";
 
 function objectId(value: unknown, label: string) {
   const normalized = String((value as any)?._id || value || "").trim();

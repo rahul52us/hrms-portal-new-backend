@@ -13,6 +13,8 @@ export const ATTENDANCE_RECORD_STATUSES = [
 
 export const ATTENDANCE_RECORD_STATES = ["open", "calculated", "finalized"] as const;
 
+export const ATTENDANCE_WORK_MODES = ["office", "remote", "hybrid", "field"] as const;
+
 export interface AttendancePunchSessionI {
   punchIn?: Date | null;
   punchOut?: Date | null;
@@ -29,6 +31,8 @@ export interface AttendanceRecordI extends Document {
   timezone: string;
   state: (typeof ATTENDANCE_RECORD_STATES)[number];
   status: (typeof ATTENDANCE_RECORD_STATUSES)[number];
+  workMode: (typeof ATTENDANCE_WORK_MODES)[number];
+  workModeSource: "default" | "remote_work_request" | "manual" | "import";
   punchSessions: AttendancePunchSessionI[];
   workedMinutes: number;
   breakMinutes: number;
@@ -38,6 +42,11 @@ export interface AttendanceRecordI extends Document {
   isLate: boolean;
   isEarlyExit: boolean;
   hasMissingPunch: boolean;
+  dayTypeSnapshot?: string;
+  requiresAttendanceSnapshot?: boolean | null;
+  expectedWorkMinutesSnapshot?: number | null;
+  scheduleStartTimeSnapshot?: string;
+  scheduleEndTimeSnapshot?: string;
   employeeAssignmentHistory?: mongoose.Types.ObjectId | null;
   department?: mongoose.Types.ObjectId | null;
   departmentNameSnapshot?: string;
@@ -59,7 +68,12 @@ export interface AttendanceRecordI extends Document {
   holidayCalendarAssignment?: mongoose.Types.ObjectId | null;
   holidayCalendar?: mongoose.Types.ObjectId | null;
   holidayCalendarVersion?: mongoose.Types.ObjectId | null;
+  leaveRequest?: mongoose.Types.ObjectId | null;
+  leaveType?: mongoose.Types.ObjectId | null;
+  leaveUnits: number;
+  leaveUnit?: "days" | "hours" | null;
   policyResolvedAt?: Date | null;
+  revisionNumber: number;
   calculationVersion: number;
   calculatedAt?: Date | null;
   calculatedBy?: mongoose.Types.ObjectId | null;
@@ -112,6 +126,19 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
       default: "pending",
       index: true,
     },
+    workMode: {
+      type: String,
+      enum: ATTENDANCE_WORK_MODES,
+      required: true,
+      default: "office",
+      index: true,
+    },
+    workModeSource: {
+      type: String,
+      enum: ["default", "remote_work_request", "manual", "import"],
+      required: true,
+      default: "default",
+    },
     punchSessions: { type: [AttendancePunchSessionSchema], default: [] },
     workedMinutes: { type: Number, min: 0, default: 0 },
     breakMinutes: { type: Number, min: 0, default: 0 },
@@ -121,6 +148,11 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
     isLate: { type: Boolean, default: false },
     isEarlyExit: { type: Boolean, default: false },
     hasMissingPunch: { type: Boolean, default: false },
+    dayTypeSnapshot: { type: String, trim: true },
+    requiresAttendanceSnapshot: { type: Boolean, default: null },
+    expectedWorkMinutesSnapshot: { type: Number, min: 0, default: null },
+    scheduleStartTimeSnapshot: { type: String, trim: true },
+    scheduleEndTimeSnapshot: { type: String, trim: true },
     employeeAssignmentHistory: {
       type: Schema.Types.ObjectId,
       ref: "EmployeeAssignmentHistory",
@@ -170,7 +202,12 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
       ref: "HolidayCalendarVersion",
       default: null,
     },
+    leaveRequest: { type: Schema.Types.ObjectId, ref: "LeaveRequest", default: null, index: true },
+    leaveType: { type: Schema.Types.ObjectId, ref: "LeaveType", default: null },
+    leaveUnits: { type: Number, min: 0, default: 0 },
+    leaveUnit: { type: String, enum: ["days", "hours"], default: null },
     policyResolvedAt: { type: Date, default: null },
+    revisionNumber: { type: Number, min: 0, default: 0 },
     calculationVersion: { type: Number, min: 0, default: 0 },
     calculatedAt: { type: Date, default: null },
     calculatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },

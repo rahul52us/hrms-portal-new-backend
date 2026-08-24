@@ -8,6 +8,7 @@ export const ATTENDANCE_REVISION_ACTIONS = [
   "manual_adjustment",
   "finalized",
   "reopened",
+  "leave_updated",
 ] as const;
 
 export interface AttendanceRecordRevisionI extends Document {

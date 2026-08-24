@@ -11,6 +11,7 @@ import { statusCode } from "./config/helper/statusCode";
 import connectToDatabase from "./db/db";
 import mongoose from "mongoose";
 import { serveCourseAsset } from "./services/scorm/scormStorage.service";
+import { startLeaveAccrualScheduler } from "./services/leave/leaveAccrualScheduler";
 
 dotenv.config();
 
@@ -130,6 +131,7 @@ const startServer = async () => {
     setupSocket(server);
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      startLeaveAccrualScheduler();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

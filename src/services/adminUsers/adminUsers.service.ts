@@ -333,6 +333,8 @@ async function syncManagedUserProfileDetails(user: any, company: any, payload: a
     state: user?.state || "",
     designation: user?.designation || "",
     joiningDate: user?.joiningDate || null,
+    confirmationDate: user?.confirmationDate || null,
+    employmentEndDate: user?.employmentEndDate || null,
     mobileNumber: user?.mobileNumber || "",
     department: user?.department || "",
     team: user?.team || "",
@@ -1455,6 +1457,8 @@ function serializeUser(user: any) {
     officeLocationName: officeLocation?.name || "",
     designation: user?.designation || "",
     joiningDate: user?.joiningDate || null,
+    confirmationDate: user?.confirmationDate || null,
+    employmentEndDate: user?.employmentEndDate || null,
     dateOfBirth: user?.dateOfBirth || null,
     gender: user?.gender ?? null,
     companyId: company?._id || user?.company || null,
@@ -1665,11 +1669,19 @@ async function saveManagedUser({
     Object.prototype.hasOwnProperty.call(payload || {}, "dateOfBirth") ||
     Object.prototype.hasOwnProperty.call(payload || {}, "dob");
   const payloadIncludesGender = Object.prototype.hasOwnProperty.call(payload || {}, "gender");
+  const payloadIncludesConfirmationDate = Object.prototype.hasOwnProperty.call(payload || {}, "confirmationDate");
+  const payloadIncludesEmploymentEndDate = Object.prototype.hasOwnProperty.call(payload || {}, "employmentEndDate");
   const rawDateOfBirth = payload?.dateOfBirth ?? payload?.dob;
   const parsedDateOfBirth = payloadIncludesDateOfBirth
     ? normalizeDateValue(rawDateOfBirth)
     : user?.dateOfBirth;
   const normalizedGender = payloadIncludesGender ? normalizeGender(payload?.gender) : user?.gender;
+  const parsedConfirmationDate = payloadIncludesConfirmationDate
+    ? normalizeDateValue(payload?.confirmationDate)
+    : user?.confirmationDate;
+  const parsedEmploymentEndDate = payloadIncludesEmploymentEndDate
+    ? normalizeDateValue(payload?.employmentEndDate)
+    : user?.employmentEndDate;
   const resolvedDepartment =
     isHrAccountRole
       ? ""
@@ -1705,6 +1717,25 @@ async function saveManagedUser({
 
   if (payloadIncludesGender && normalizeText(payload?.gender) && normalizedGender === undefined) {
     throw generateError("Select a valid gender", 400);
+  }
+
+  if (payloadIncludesConfirmationDate && payload?.confirmationDate && !parsedConfirmationDate) {
+    throw generateError("Enter a valid confirmation date", 400);
+  }
+
+  if (payloadIncludesEmploymentEndDate && payload?.employmentEndDate && !parsedEmploymentEndDate) {
+    throw generateError("Enter a valid employment end date", 400);
+  }
+
+  const effectiveJoiningDate = normalizeDateValue(payload?.joiningDate) || user?.joiningDate;
+  if (parsedConfirmationDate && effectiveJoiningDate && parsedConfirmationDate < effectiveJoiningDate) {
+    throw generateError("Confirmation date cannot be before joining date", 400);
+  }
+  if (parsedEmploymentEndDate && effectiveJoiningDate && parsedEmploymentEndDate < effectiveJoiningDate) {
+    throw generateError("Employment end date cannot be before joining date", 400);
+  }
+  if (parsedEmploymentEndDate && parsedConfirmationDate && parsedEmploymentEndDate < parsedConfirmationDate) {
+    throw generateError("Employment end date cannot be before confirmation date", 400);
   }
 
   if (role === "departmenthead") {
@@ -1796,6 +1827,12 @@ async function saveManagedUser({
   user.state = normalizeText(payload?.state || user.state).toLowerCase();
   user.designation = designation;
   user.joiningDate = normalizeDateValue(payload?.joiningDate) || user.joiningDate;
+  if (payloadIncludesConfirmationDate) {
+    user.confirmationDate = parsedConfirmationDate || undefined;
+  }
+  if (payloadIncludesEmploymentEndDate) {
+    user.employmentEndDate = parsedEmploymentEndDate || undefined;
+  }
   if (payloadIncludesDateOfBirth) {
     user.dateOfBirth = parsedDateOfBirth || undefined;
   }

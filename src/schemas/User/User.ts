@@ -29,6 +29,8 @@ export interface UserInterface extends Document {
   bio?: string;
   designation?: string;
   joiningDate?: Date;
+  confirmationDate?: Date;
+  employmentEndDate?: Date;
   dateOfBirth?: Date;
   gender?: number;
   company: Schema.Types.ObjectId;
@@ -101,6 +103,8 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   },
   designation: { type: String, trim: true },
   joiningDate: { type: Date },
+  confirmationDate: { type: Date },
+  employmentEndDate: { type: Date },
   dateOfBirth: { type: Date },
   gender: { type: Number, enum: [1, 2, 3, 4] },
   company : {type : Schema.Types.ObjectId, ref:'Company'},
