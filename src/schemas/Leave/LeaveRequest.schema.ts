@@ -66,6 +66,13 @@ export interface LeaveRequestAttachmentI {
   size: number;
 }
 
+export interface CompOffAllocationI {
+  creditLot: mongoose.Types.ObjectId;
+  units: number;
+  expiresOn: string;
+  status: "reserved" | "consumed" | "released" | "reversed" | "expired";
+}
+
 export interface LeaveRequestI extends Document {
   company: mongoose.Types.ObjectId;
   employee: mongoose.Types.ObjectId;
@@ -75,6 +82,8 @@ export interface LeaveRequestI extends Document {
   leaveUnit: "days" | "hours";
   paid: boolean;
   balanceTracked: boolean;
+  entitlementModeSnapshot: "fixed" | "earned" | "manual" | "untracked";
+  compOffAllocations: CompOffAllocationI[];
   departmentNameSnapshot?: string;
   teamNameSnapshot?: string;
   officeLocation?: mongoose.Types.ObjectId | null;
@@ -175,6 +184,21 @@ const LeaveRequestAttachmentSchema = new Schema<LeaveRequestAttachmentI>(
   { _id: false }
 );
 
+const CompOffAllocationSchema = new Schema<CompOffAllocationI>(
+  {
+    creditLot: { type: Schema.Types.ObjectId, ref: "CompOffCreditLot", required: true },
+    units: { type: Number, min: 0.25, required: true },
+    expiresOn: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+    status: {
+      type: String,
+      enum: ["reserved", "consumed", "released", "reversed", "expired"],
+      default: "reserved",
+      required: true,
+    },
+  },
+  { _id: false }
+);
+
 const LeaveRequestSchema = new Schema<LeaveRequestI>(
   {
     company: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
@@ -185,6 +209,13 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
     leaveUnit: { type: String, enum: ["days", "hours"], required: true },
     paid: { type: Boolean, required: true },
     balanceTracked: { type: Boolean, required: true },
+    entitlementModeSnapshot: {
+      type: String,
+      enum: ["fixed", "earned", "manual", "untracked"],
+      default: "fixed",
+      required: true,
+    },
+    compOffAllocations: { type: [CompOffAllocationSchema], default: [] },
     departmentNameSnapshot: { type: String, trim: true, index: true },
     teamNameSnapshot: { type: String, trim: true, index: true },
     officeLocation: { type: Schema.Types.ObjectId, ref: "OfficeLocation", default: null, index: true },

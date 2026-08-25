@@ -23,6 +23,7 @@ import workforcePoliciesRouting from "./workforcePolicies.routing";
 import leaveRouting from "./leave.routing";
 import attendanceRouting from "./attendance.routing";
 import remoteWorkRouting from "./remoteWork.routing";
+import compOffRouting from "./compOff.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -51,6 +52,7 @@ const importRoutings = (app: any) => {
   app.use('/api/leave', leaveRouting);
   app.use('/api/attendance', attendanceRouting);
   app.use('/api/remote-work', remoteWorkRouting);
+  app.use('/api/comp-off', compOffRouting);
 };
 
 export default importRoutings;

@@ -105,7 +105,7 @@ export async function postLeaveBalanceTransaction(options: {
   key: LeaveBalanceKey;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "comp_off_claim" | "manual" | "policy" | "system";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -114,6 +114,7 @@ export async function postLeaveBalanceTransaction(options: {
   leavePolicy?: mongoose.Types.ObjectId | null;
   leavePolicyVersion?: mongoose.Types.ObjectId | null;
   reversalOf?: mongoose.Types.ObjectId | null;
+  compOffCreditLot?: mongoose.Types.ObjectId | null;
   createdBy: mongoose.Types.ObjectId;
   session: ClientSession;
 }) {
@@ -142,6 +143,7 @@ export async function postLeaveBalanceTransaction(options: {
         leavePolicy: options.leavePolicy || null,
         leavePolicyVersion: options.leavePolicyVersion || null,
         reversalOf: options.reversalOf || null,
+        compOffCreditLot: options.compOffCreditLot || null,
         createdBy: options.createdBy,
       },
     ],

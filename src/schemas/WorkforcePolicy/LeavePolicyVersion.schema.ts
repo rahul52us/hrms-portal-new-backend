@@ -4,6 +4,7 @@ export const LEAVE_ACCRUAL_FREQUENCIES = ["upfront", "monthly", "quarterly", "no
 export const LEAVE_PROBATION_RULES = ["allowed", "after_confirmation", "not_allowed"] as const;
 export const LEAVE_CREDIT_COMPONENT_FREQUENCIES = ["upfront", "monthly", "quarterly"] as const;
 export const LEAVE_UPFRONT_CREDIT_TIMINGS = ["leave_year_start", "first_eligibility"] as const;
+export const LEAVE_ENTITLEMENT_MODES = ["fixed", "earned", "manual", "untracked"] as const;
 
 export interface LeaveCreditComponent {
   componentId: string;
@@ -20,6 +21,7 @@ export interface LeavePolicyRule {
   leaveTypeNameSnapshot: string;
   paid: boolean;
   balanceTracked: boolean;
+  entitlementMode: (typeof LEAVE_ENTITLEMENT_MODES)[number];
   annualEntitlement: number;
   accrualFrequency: (typeof LEAVE_ACCRUAL_FREQUENCIES)[number];
   accrualAmount: number;
@@ -40,6 +42,9 @@ export interface LeavePolicyRule {
   documentRequiredAfterDays?: number | null;
   probationEligibility: (typeof LEAVE_PROBATION_RULES)[number];
   sandwichRuleEnabled: boolean;
+  compOffValidityDays: number;
+  compOffFullDayMinutes: number;
+  compOffHalfDayMinutes: number;
 }
 
 const LeaveCreditComponentSchema = new Schema<LeaveCreditComponent>(
@@ -88,6 +93,12 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     leaveTypeNameSnapshot: { type: String, required: true, trim: true },
     paid: { type: Boolean, required: true },
     balanceTracked: { type: Boolean, required: true },
+    entitlementMode: {
+      type: String,
+      enum: LEAVE_ENTITLEMENT_MODES,
+      default: "fixed",
+      required: true,
+    },
     annualEntitlement: { type: Number, min: 0, default: 0 },
     accrualFrequency: { type: String, enum: LEAVE_ACCRUAL_FREQUENCIES, default: "upfront" },
     accrualAmount: { type: Number, min: 0, default: 0 },
@@ -118,6 +129,9 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     documentRequiredAfterDays: { type: Number, min: 0.25, default: null },
     probationEligibility: { type: String, enum: LEAVE_PROBATION_RULES, default: "allowed" },
     sandwichRuleEnabled: { type: Boolean, default: false },
+    compOffValidityDays: { type: Number, min: 1, max: 730, default: 90 },
+    compOffFullDayMinutes: { type: Number, min: 1, max: 1440, default: 480 },
+    compOffHalfDayMinutes: { type: Number, min: 1, max: 1440, default: 240 },
   },
   { _id: true }
 );

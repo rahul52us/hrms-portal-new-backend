@@ -11,6 +11,7 @@ export const LEAVE_TRANSACTION_TYPES = [
   "expiry",
   "encashment",
   "comp_off_credit",
+  "comp_off_reversal",
 ] as const;
 
 export interface LeaveBalanceTransactionI extends Document {
@@ -22,7 +23,7 @@ export interface LeaveBalanceTransactionI extends Document {
   leaveYearEnd: string;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "comp_off_claim" | "manual" | "policy" | "system";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -31,6 +32,7 @@ export interface LeaveBalanceTransactionI extends Document {
   leavePolicy?: mongoose.Types.ObjectId | null;
   leavePolicyVersion?: mongoose.Types.ObjectId | null;
   reversalOf?: mongoose.Types.ObjectId | null;
+  compOffCreditLot?: mongoose.Types.ObjectId | null;
   createdBy: mongoose.Types.ObjectId;
   createdAt?: Date;
 }
@@ -52,7 +54,11 @@ const LeaveBalanceTransactionSchema = new Schema<LeaveBalanceTransactionI>(
       },
     },
     transactionType: { type: String, enum: LEAVE_TRANSACTION_TYPES, required: true, index: true },
-    sourceType: { type: String, enum: ["leave_request", "manual", "policy", "system"], required: true },
+    sourceType: {
+      type: String,
+      enum: ["leave_request", "comp_off_claim", "manual", "policy", "system"],
+      required: true,
+    },
     sourceId: { type: Schema.Types.ObjectId, default: null, index: true },
     effectiveDate: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/, index: true },
     idempotencyKey: { type: String, required: true, trim: true },
@@ -61,6 +67,7 @@ const LeaveBalanceTransactionSchema = new Schema<LeaveBalanceTransactionI>(
     leavePolicy: { type: Schema.Types.ObjectId, ref: "LeavePolicy", default: null },
     leavePolicyVersion: { type: Schema.Types.ObjectId, ref: "LeavePolicyVersion", default: null },
     reversalOf: { type: Schema.Types.ObjectId, ref: "LeaveBalanceTransaction", default: null },
+    compOffCreditLot: { type: Schema.Types.ObjectId, ref: "CompOffCreditLot", default: null, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }

@@ -37,6 +37,13 @@ import {
   ensureEmployeeLeaveAccruals,
   runCompanyLeaveAccrualCatchUp,
 } from "./leaveAccrual.service";
+import {
+  consumeReservedCompOffCredits,
+  expireCompOffCredits,
+  releaseReservedCompOffCredits,
+  reserveCompOffCredits,
+  reverseConsumedCompOffCredits,
+} from "../compOff/compOffCredit.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -192,6 +199,9 @@ function requestBalanceSegments(request: any) {
       leaveYearStart: day.leaveYearStart,
       leaveYearEnd: day.leaveYearEnd,
       chargedUnits: Number(((existing?.chargedUnits || 0) + units).toFixed(4)),
+      firstAttendanceDate: existing?.firstAttendanceDate || day.attendanceDate,
+      lastAttendanceDate: day.attendanceDate,
+      entitlementMode: day.entitlementMode || request.entitlementModeSnapshot || "fixed",
       leavePolicyAssignment: day.leavePolicyAssignment,
       leavePolicy: day.leavePolicy,
       leavePolicyVersion: day.leavePolicyVersion,
@@ -304,6 +314,7 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       leaveUnit: result.leaveType.unit,
       paid: result.leaveType.paid,
       balanceTracked: result.leaveType.balanceTracked,
+      entitlementModeSnapshot: result.calculation.entitlementMode,
       departmentNameSnapshot: firstDay.departmentNameSnapshot || employee.department || "",
       teamNameSnapshot: firstDay.teamNameSnapshot || employee.team || "",
       officeLocation: firstDay.officeLocation || employee.officeLocation || null,
@@ -346,6 +357,16 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       if (result.leaveType.balanceTracked) {
         for (const segment of result.calculation.balanceSegments) {
           if (segment.balanceTracked === false) continue;
+          if (segment.entitlementMode === "earned") {
+            await expireCompOffCredits({
+              company,
+              employee: employee._id,
+              leaveType: result.leaveType._id,
+              asOf: currentDateKey(),
+              actorId: actor._id,
+              session,
+            });
+          }
           await reserveLeaveBalance({
             key: balanceKey({
               company,
@@ -357,6 +378,22 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
             maxNegativeBalance: segment.negativeBalanceAllowed ? segment.maxNegativeBalance : 0,
             session,
           });
+          if (segment.entitlementMode === "earned") {
+            const allocations = await reserveCompOffCredits({
+              company,
+              employee: employee._id,
+              leaveType: result.leaveType._id,
+              leaveYearKey: segment.leaveYearKey,
+              usage: result.calculation.dayBreakdown
+                .filter((day: any) => day.leaveYearKey === segment.leaveYearKey && Number(day.chargedUnits || 0) > 0)
+                .map((day: any) => ({
+                  attendanceDate: day.attendanceDate,
+                  units: Number(day.chargedUnits),
+                })),
+              session,
+            });
+            request.compOffAllocations.push(...(allocations as any));
+          }
         }
       }
       await request.save({ session });
@@ -496,7 +533,11 @@ export async function getLeaveRequestService(req: any, res: Response, next: Next
   }
 }
 
-async function releaseRequestReservation(request: any, session: mongoose.ClientSession) {
+async function releaseRequestReservation(
+  request: any,
+  actorId: mongoose.Types.ObjectId,
+  session: mongoose.ClientSession
+) {
   if (!request.balanceTracked) return;
   for (const segment of requestBalanceSegments(request)) {
     await releasePendingLeaveBalance({
@@ -507,6 +548,14 @@ async function releaseRequestReservation(request: any, session: mongoose.ClientS
         ...segment,
       }),
       units: segment.chargedUnits,
+      session,
+    });
+  }
+  if (request.entitlementModeSnapshot === "earned") {
+    await releaseReservedCompOffCredits({
+      request,
+      actorId,
+      asOf: currentDateKey(),
       session,
     });
   }
@@ -566,6 +615,9 @@ export async function approveLeaveRequestService(req: any, res: Response, next: 
           });
         }
       }
+      if (request.entitlementModeSnapshot === "earned") {
+        await consumeReservedCompOffCredits(request, session);
+      }
       await applyApprovedLeaveToAttendance({ request, actor: actor._id, session });
       request.status = "approved";
       request.decidedAt = new Date();
@@ -595,7 +647,7 @@ export async function rejectLeaveRequestService(req: any, res: Response, next: N
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "submitted" }).session(session);
       if (!request) throw generateError("Only a submitted leave request can be rejected", 409);
-      await releaseRequestReservation(request, session);
+      await releaseRequestReservation(request, actor._id, session);
       await releaseRequestDateLocks(request, session);
       request.status = "rejected";
       request.decidedAt = new Date();
@@ -622,7 +674,7 @@ export async function withdrawLeaveRequestService(req: any, res: Response, next:
       if (String(request.employee) !== String(actor._id)) {
         throw generateError("Only the employee can withdraw this leave request", 403);
       }
-      await releaseRequestReservation(request, session);
+      await releaseRequestReservation(request, actor._id, session);
       await releaseRequestDateLocks(request, session);
       request.status = "withdrawn";
       request.history.push(event(actor, "withdrawn", req.body?.comment) as any);
@@ -673,6 +725,14 @@ export async function cancelLeaveRequestService(req: any, res: Response, next: N
           session,
         });
       }
+      if (request.entitlementModeSnapshot === "earned") {
+        await reverseConsumedCompOffCredits({
+          request,
+          actorId: actor._id,
+          asOf: currentDateKey(),
+          session,
+        });
+      }
       await removeCancelledLeaveFromAttendance({ request, actor: actor._id, session });
       await releaseRequestDateLocks(request, session);
       request.status = "cancelled";
@@ -710,6 +770,15 @@ export async function getEligibleLeaveTypesService(req: any, res: Response, next
       employee,
       asOf: accrualAt,
       context: accrualAt === at ? context : undefined,
+    });
+    await mongoose.connection.transaction(async (session) => {
+      await expireCompOffCredits({
+        company,
+        employee: employee._id,
+        asOf: currentDateKey(),
+        actorId: actor._id,
+        session,
+      });
     });
     const typeIds = (version.rules || []).map((rule: any) => optionalObjectId(rule.leaveType)).filter(Boolean);
     const types = await LeaveType.find({ _id: { $in: typeIds }, company, status: "active" }).lean();
@@ -759,6 +828,15 @@ export async function listLeaveBalancesService(req: any, res: Response, next: Ne
       ? parseAttendanceDate(text(req.query.at)).dateKey
       : currentDateKey();
     await ensureEmployeeLeaveAccruals({ companyId: company, employee, asOf: accrualAt });
+    await mongoose.connection.transaction(async (session) => {
+      await expireCompOffCredits({
+        company,
+        employee: employee._id,
+        asOf: currentDateKey(),
+        actorId: actor._id,
+        session,
+      });
+    });
     const match: any = { company, employee: employee._id };
     if (req.query?.leaveTypeId) match.leaveType = objectId(req.query.leaveTypeId, "leave type id");
     if (req.query?.at) {
@@ -863,6 +941,12 @@ export async function adjustLeaveBalanceService(req: any, res: Response, next: N
       ? "opening_balance"
       : "manual_adjustment";
     const resolved = await resolveAdjustmentContext({ company, employee, leaveTypeId, effectiveDate });
+    if (resolved.rule.entitlementMode === "earned") {
+      throw generateError(
+        "Earned comp-off balances can be changed only through comp-off claim and credit workflows",
+        422
+      );
+    }
     const key = balanceKey({
       company,
       employee: employee._id,

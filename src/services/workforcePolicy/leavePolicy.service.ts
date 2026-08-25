@@ -5,6 +5,7 @@ import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
 import LeavePolicyVersion, {
   LEAVE_ACCRUAL_FREQUENCIES,
   LEAVE_CREDIT_COMPONENT_FREQUENCIES,
+  LEAVE_ENTITLEMENT_MODES,
   LEAVE_PROBATION_RULES,
   LEAVE_UPFRONT_CREDIT_TIMINGS,
   LeaveCreditComponent,
@@ -219,6 +220,20 @@ async function normalizeLeaveRules(options: {
       throw generateError(`${leaveType.name} is archived and cannot be used in a new policy version`, 409);
     }
     const current = currentByLeaveType.get(leaveTypeId) || {};
+    const entitlementMode = normalizeText(
+      inputRule.entitlementMode ||
+        current.entitlementMode ||
+        (leaveType.balanceTracked ? "fixed" : "untracked")
+    ) as LeavePolicyRule["entitlementMode"];
+    if (!LEAVE_ENTITLEMENT_MODES.includes(entitlementMode as any)) {
+      throw generateError(`Invalid entitlement mode for ${leaveType.code}`, 400);
+    }
+    if (!leaveType.balanceTracked && entitlementMode !== "untracked") {
+      throw generateError(`${leaveType.code} must track balances to use ${entitlementMode} entitlement`, 422);
+    }
+    if (entitlementMode === "earned" && leaveType.unit !== "days") {
+      throw generateError(`${leaveType.code} earned comp-off entitlement must use days`, 422);
+    }
     const manualAnnualEntitlement = leaveType.balanceTracked
       ? normalizeNumber(
           inputRule.annualEntitlement,
@@ -244,22 +259,30 @@ async function normalizeLeaveRules(options: {
       current.prorateOnExit ?? true
     );
     const hasInputComponents = Object.prototype.hasOwnProperty.call(inputRule, "creditComponents");
-    const creditComponents = normalizeCreditComponents({
+    const creditComponents = entitlementMode === "fixed" ? normalizeCreditComponents({
       value: hasInputComponents ? inputRule.creditComponents : current.creditComponents,
       leaveTypeCode: leaveType.code,
       balanceTracked: leaveType.balanceTracked,
       prorateOnJoining,
       prorateOnExit,
-    });
-    const annualEntitlement = creditComponents.length
-      ? scheduledAnnualCredit(creditComponents)
-      : manualAnnualEntitlement;
-    const accrualFrequency = creditComponents.length === 1
+    }) : [];
+    const annualEntitlement = entitlementMode === "fixed"
+      ? creditComponents.length
+        ? scheduledAnnualCredit(creditComponents)
+        : manualAnnualEntitlement
+      : entitlementMode === "manual"
+        ? manualAnnualEntitlement
+        : 0;
+    const accrualFrequency = entitlementMode !== "fixed"
+      ? "none"
+      : creditComponents.length === 1
       ? creditComponents[0].frequency
       : creditComponents.length > 1
         ? "none"
         : legacyAccrualFrequency;
-    const accrualAmount = creditComponents.length === 1
+    const accrualAmount = entitlementMode !== "fixed"
+      ? 0
+      : creditComponents.length === 1
       ? creditComponents[0].amount
       : creditComponents.length > 1
         ? 0
@@ -279,20 +302,53 @@ async function normalizeLeaveRules(options: {
       throw generateError(`${leaveType.code} maximum request must be at least the minimum request`, 400);
     }
     const carryForwardEnabled =
-      leaveType.balanceTracked &&
+      entitlementMode === "fixed" && leaveType.balanceTracked &&
       normalizeBoolean(inputRule.carryForwardEnabled, Boolean(current.carryForwardEnabled));
     const encashmentEnabled =
-      leaveType.balanceTracked &&
+      entitlementMode === "fixed" && leaveType.balanceTracked &&
       leaveType.paid &&
       normalizeBoolean(inputRule.encashmentEnabled, Boolean(current.encashmentEnabled));
     const negativeBalanceAllowed =
-      leaveType.balanceTracked &&
+      entitlementMode === "fixed" && leaveType.balanceTracked &&
       normalizeBoolean(inputRule.negativeBalanceAllowed, Boolean(current.negativeBalanceAllowed));
     const probationEligibility = normalizeText(
       inputRule.probationEligibility || current.probationEligibility || "allowed"
     ) as LeavePolicyRule["probationEligibility"];
     if (!LEAVE_PROBATION_RULES.includes(probationEligibility as any)) {
       throw generateError(`Invalid probation rule for ${leaveType.code}`, 400);
+    }
+    const compOffValidityDays = entitlementMode === "earned"
+      ? normalizeNumber(
+          inputRule.compOffValidityDays,
+          Number(current.compOffValidityDays || 90),
+          `${leaveType.code} comp-off validity`,
+          1,
+          730
+        )
+      : 90;
+    const compOffFullDayMinutes = entitlementMode === "earned"
+      ? normalizeNumber(
+          inputRule.compOffFullDayMinutes,
+          Number(current.compOffFullDayMinutes || 480),
+          `${leaveType.code} full-day earning threshold`,
+          1,
+          1440
+        )
+      : 480;
+    const compOffHalfDayMinutes = entitlementMode === "earned"
+      ? normalizeNumber(
+          inputRule.compOffHalfDayMinutes,
+          Number(current.compOffHalfDayMinutes || 240),
+          `${leaveType.code} half-day earning threshold`,
+          1,
+          1440
+        )
+      : 240;
+    if (compOffHalfDayMinutes > compOffFullDayMinutes) {
+      throw generateError(
+        `${leaveType.code} half-day earning threshold cannot exceed the full-day threshold`,
+        422
+      );
     }
 
     return {
@@ -301,6 +357,7 @@ async function normalizeLeaveRules(options: {
       leaveTypeNameSnapshot: leaveType.name,
       paid: leaveType.paid,
       balanceTracked: leaveType.balanceTracked,
+      entitlementMode,
       annualEntitlement,
       accrualFrequency,
       accrualAmount,
@@ -357,6 +414,9 @@ async function normalizeLeaveRules(options: {
         inputRule.sandwichRuleEnabled,
         Boolean(current.sandwichRuleEnabled)
       ),
+      compOffValidityDays,
+      compOffFullDayMinutes,
+      compOffHalfDayMinutes,
     };
   });
 }
@@ -893,7 +953,10 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
     });
     if (!rules.length) throw generateError("Add at least one leave type rule before publishing", 422);
     const emptyEntitlementRule = rules.find(
-      (rule) => rule.balanceTracked && rule.annualEntitlement <= 0
+      (rule) =>
+        rule.balanceTracked &&
+        rule.entitlementMode === "fixed" &&
+        rule.annualEntitlement <= 0
     );
     if (emptyEntitlementRule) {
       throw generateError(

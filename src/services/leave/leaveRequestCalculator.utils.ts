@@ -246,6 +246,7 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
       requestedUnits: roundUnits(requestedUnits),
       chargedUnits: roundUnits(chargedUnits),
       chargeReason,
+      entitlementMode: rule.entitlementMode || (rule.balanceTracked === false ? "untracked" : "fixed"),
       timezone: context.timezone || "Asia/Kolkata",
       ...leaveYear,
       holiday: context.holiday
@@ -284,6 +285,10 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
   const chargedUnits = roundUnits(days.reduce((sum, day) => sum + day.chargedUnits, 0));
   if (chargedUnits <= 0) {
     throw generateError("The selected dates do not contain any chargeable work time", 422);
+  }
+  const entitlementModes = new Set(days.map((day) => day.entitlementMode));
+  if (entitlementModes.size > 1) {
+    throw generateError("The leave entitlement mode changes within the selected date range", 409);
   }
 
   const minimumRequest = Math.max(...rules.map((rule) => Number(rule.minimumRequestDays || 0.25)));
@@ -348,7 +353,10 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
       leaveYearStart: day.leaveYearStart,
       leaveYearEnd: day.leaveYearEnd,
       chargedUnits: roundUnits((current?.chargedUnits || 0) + day.chargedUnits),
+      firstAttendanceDate: current?.firstAttendanceDate || day.attendanceDate,
+      lastAttendanceDate: day.attendanceDate,
       balanceTracked: rule.balanceTracked !== false,
+      entitlementMode: rule.entitlementMode || (rule.balanceTracked === false ? "untracked" : "fixed"),
       negativeBalanceAllowed: current
         ? current.negativeBalanceAllowed && negativeBalanceAllowed
         : negativeBalanceAllowed,
@@ -375,5 +383,6 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
       minimumNoticeDays,
       documentRequiredAfter,
     },
+    entitlementMode: days[0]?.entitlementMode || "fixed",
   };
 }
