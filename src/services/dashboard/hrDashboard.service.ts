@@ -159,18 +159,28 @@ function buildBreakdown(users: any[], keyGetter: (user: any) => string) {
     .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
 }
 
-function serializeUserLite(user: any) {
+function serializeUserLite(user: any, departments?: any[]) {
   const role = getUserRole(user);
   const location = user?.officeLocation && typeof user.officeLocation === "object"
     ? user.officeLocation
     : null;
+
+  let deptName = user?.department || "";
+  if (departments && /^[a-f\d]{24}$/i.test(String(deptName))) {
+    const found = departments.find((d: any) => String(d._id) === String(deptName));
+    if (found?.departmentName) {
+      deptName = found.departmentName;
+    }
+  } else if (typeof user?.department === "object") {
+    deptName = user.department.departmentName || "";
+  }
 
   return {
     _id: user?._id,
     name: user?.name || "",
     username: user?.username || "",
     role,
-    department: user?.department || "",
+    department: deptName,
     team: user?.team || "",
     designation: user?.designation || "",
     officeLocationName: location?.name || "",
@@ -376,7 +386,7 @@ export const getHrDashboardSummaryService = async (
       .filter((user) => isDateInCurrentMonth(user?.dateOfBirth))
       .sort((a, b) => sortByDayOfMonth(a, b, 'dateOfBirth'))
       .slice(0, 8)
-      .map(serializeUserLite);
+      .map((u) => serializeUserLite(u, departments));
     const workAnniversaries = workforceUsers
       .filter((user) => {
         if (!isDateInCurrentMonth(user?.joiningDate)) {
@@ -388,12 +398,12 @@ export const getHrDashboardSummaryService = async (
       })
       .sort((a, b) => sortByDayOfMonth(a, b, 'joiningDate'))
       .slice(0, 8)
-      .map(serializeUserLite);
+      .map((u) => serializeUserLite(u, departments));
     const newJoinersThisMonth = workforceUsers
       .filter((user) => isDateInCurrentMonthAndYear(user?.joiningDate))
       .sort((a, b) => sortByDayOfMonth(a, b, 'joiningDate'))
       .slice(0, 8)
-      .map(serializeUserLite);
+      .map((u) => serializeUserLite(u, departments));
 
     return res.status(200).json({
       success: true,
@@ -490,7 +500,7 @@ export const getHrDashboardSummaryService = async (
           ),
           statuses: buildBreakdown(workforceUsers, getStatus),
         },
-        recentEmployees: workforceUsers.slice(0, 8).map(serializeUserLite),
+        recentEmployees: workforceUsers.slice(0, 8).map((u) => serializeUserLite(u, departments)),
         upcoming: {
           newJoiners: newJoinersThisMonth,
           birthdays: birthdaysThisMonth,
