@@ -568,13 +568,45 @@ const getUsersByCompany = async (
           },
         },
         {
+          $addFields: {
+            departmentObjectId: {
+              $convert: {
+                input: "$department",
+                to: "objectId",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "departments",
+            localField: "departmentObjectId",
+            foreignField: "_id",
+            as: "departmentDoc",
+          },
+        },
+        {
+          $unwind: {
+            path: "$departmentDoc",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
           $project: {
             _id: 1,
             name: 1,
             username: 1,
             code: 1,
             role: 1,
-            department: 1,
+            department: {
+              $cond: {
+                if: { $ne: [{ $type: "$departmentDoc" }, "missing"] },
+                then: { departmentName: "$departmentDoc.departmentName" },
+                else: "$department"
+              }
+            },
             team: 1,
             designation: 1,
             employeeNumber: 1,

@@ -2606,6 +2606,7 @@ export async function listManagedUsersHandler(req: Request, res: Response) {
     const users = total
       ? await User.find(match)
           .populate("company", "company_name companyCode rolePermissions")
+          .populate("department", "departmentName")
           .populate("officeLocation", "name code address city state country pinCode is_active")
           .populate("createdBy", "name username role")
           .populate("reportingManager", "name username role designation")
