@@ -102,6 +102,8 @@ export interface LeaveRequestI extends Document {
   attachments: LeaveRequestAttachmentI[];
   status: (typeof LEAVE_REQUEST_STATUSES)[number];
   approver?: mongoose.Types.ObjectId | null;
+  currentApprovers: mongoose.Types.ObjectId[];
+  approvalInstance?: mongoose.Types.ObjectId | null;
   approverNameSnapshot?: string;
   history: LeaveRequestEventI[];
   submittedAt: Date;
@@ -234,6 +236,8 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
     attachments: { type: [LeaveRequestAttachmentSchema], default: [] },
     status: { type: String, enum: LEAVE_REQUEST_STATUSES, default: "submitted", required: true, index: true },
     approver: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+    currentApprovers: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    approvalInstance: { type: Schema.Types.ObjectId, ref: "ApprovalInstance", default: null, index: true },
     approverNameSnapshot: { type: String, trim: true },
     history: { type: [LeaveRequestEventSchema], default: [] },
     submittedAt: { type: Date, required: true, default: Date.now },
@@ -249,6 +253,7 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
 
 LeaveRequestSchema.index({ company: 1, employee: 1, status: 1, fromDate: -1 });
 LeaveRequestSchema.index({ company: 1, approver: 1, status: 1, submittedAt: -1 });
+LeaveRequestSchema.index({ company: 1, currentApprovers: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, departmentNameSnapshot: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, leaveType: 1, status: 1, fromDate: -1 });
 

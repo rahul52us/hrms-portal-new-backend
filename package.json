@@ -39,6 +39,7 @@
     "test:leave-request-calculator": "ts-node src/services/leave/leaveRequestCalculator.test.ts",
     "test:leave-accrual-calculator": "ts-node src/services/leave/leaveAccrualCalculator.test.ts",
     "test:comp-off": "ts-node src/services/compOff/compOffClaim.test.ts",
+    "test:approval-workflow": "ts-node src/services/approval/approvalDecision.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

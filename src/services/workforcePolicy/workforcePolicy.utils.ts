@@ -153,12 +153,18 @@ export async function writePolicyAudit(options: {
     | "leave_version"
     | "remote_work_policy"
     | "remote_work_version"
+    | "approval_workflow"
+    | "approval_workflow_version"
     | "assignment";
   entityId: mongoose.Types.ObjectId;
   action: string;
   actor: mongoose.Types.ObjectId;
   details?: any;
-}) {
+}, session?: mongoose.ClientSession) {
+  if (session) {
+    await WorkforcePolicyAuditLog.create([options], { session });
+    return;
+  }
   await WorkforcePolicyAuditLog.create(options);
 }
 

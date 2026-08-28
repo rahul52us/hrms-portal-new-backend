@@ -45,6 +45,12 @@ export interface LeavePolicyRule {
   compOffValidityDays: number;
   compOffFullDayMinutes: number;
   compOffHalfDayMinutes: number;
+  requestApprovalWorkflow?: mongoose.Types.ObjectId | null;
+  requestApprovalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  requestApprovalWorkflowVersionNumber?: number | null;
+  compOffClaimApprovalWorkflow?: mongoose.Types.ObjectId | null;
+  compOffClaimApprovalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  compOffClaimApprovalWorkflowVersionNumber?: number | null;
 }
 
 const LeaveCreditComponentSchema = new Schema<LeaveCreditComponent>(
@@ -132,6 +138,12 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     compOffValidityDays: { type: Number, min: 1, max: 730, default: 90 },
     compOffFullDayMinutes: { type: Number, min: 1, max: 1440, default: 480 },
     compOffHalfDayMinutes: { type: Number, min: 1, max: 1440, default: 240 },
+    requestApprovalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+    requestApprovalWorkflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", default: null },
+    requestApprovalWorkflowVersionNumber: { type: Number, min: 1, default: null },
+    compOffClaimApprovalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+    compOffClaimApprovalWorkflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", default: null },
+    compOffClaimApprovalWorkflowVersionNumber: { type: Number, min: 1, default: null },
   },
   { _id: true }
 );

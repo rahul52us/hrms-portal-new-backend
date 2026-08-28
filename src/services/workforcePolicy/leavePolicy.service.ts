@@ -13,6 +13,7 @@ import LeavePolicyVersion, {
 } from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -181,6 +182,13 @@ function normalizeLeaveYear(input: any = {}, current?: any) {
 
 function currentRuleToObject(rule: any) {
   return rule?.toObject ? rule.toObject() : { ...(rule || {}) };
+}
+
+function normalizeOptionalReference(value: unknown, current: unknown, label: string) {
+  const source = value === undefined ? current : value;
+  const normalized = normalizeText((source as any)?._id || source);
+  if (!normalized) return null;
+  return new mongoose.Types.ObjectId(validateObjectId(normalized, label));
 }
 
 async function normalizeLeaveRules(options: {
@@ -417,6 +425,35 @@ async function normalizeLeaveRules(options: {
       compOffValidityDays,
       compOffFullDayMinutes,
       compOffHalfDayMinutes,
+      requestApprovalWorkflow: normalizeOptionalReference(
+        inputRule.requestApprovalWorkflow,
+        current.requestApprovalWorkflow,
+        `${leaveType.code} request approval workflow`
+      ),
+      requestApprovalWorkflowVersion: normalizeOptionalReference(
+        inputRule.requestApprovalWorkflowVersion,
+        current.requestApprovalWorkflowVersion,
+        `${leaveType.code} request approval workflow version`
+      ),
+      requestApprovalWorkflowVersionNumber:
+        Number(inputRule.requestApprovalWorkflowVersionNumber || current.requestApprovalWorkflowVersionNumber || 0) || null,
+      compOffClaimApprovalWorkflow: entitlementMode === "earned"
+        ? normalizeOptionalReference(
+            inputRule.compOffClaimApprovalWorkflow,
+            current.compOffClaimApprovalWorkflow,
+            `${leaveType.code} comp-off claim approval workflow`
+          )
+        : null,
+      compOffClaimApprovalWorkflowVersion: entitlementMode === "earned"
+        ? normalizeOptionalReference(
+            inputRule.compOffClaimApprovalWorkflowVersion,
+            current.compOffClaimApprovalWorkflowVersion,
+            `${leaveType.code} comp-off claim approval workflow version`
+          )
+        : null,
+      compOffClaimApprovalWorkflowVersionNumber: entitlementMode === "earned"
+        ? Number(inputRule.compOffClaimApprovalWorkflowVersionNumber || current.compOffClaimApprovalWorkflowVersionNumber || 0) || null
+        : null,
     };
   });
 }
@@ -952,6 +989,32 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
       current: version.rules as any,
     });
     if (!rules.length) throw generateError("Add at least one leave type rule before publishing", 422);
+    for (const rule of rules) {
+      if (rule.requestApprovalWorkflow || rule.requestApprovalWorkflowVersion) {
+        const reference = await validatePublishedApprovalWorkflowReference({
+          company: companyObjectId,
+          workflowId: rule.requestApprovalWorkflow,
+          versionId: rule.requestApprovalWorkflowVersion,
+          requestType: "leave_request",
+        });
+        rule.requestApprovalWorkflowVersionNumber = reference.versionNumber;
+      }
+      if (rule.compOffClaimApprovalWorkflow || rule.compOffClaimApprovalWorkflowVersion) {
+        if (rule.entitlementMode !== "earned") {
+          throw generateError(
+            `${rule.leaveTypeCodeSnapshot} can use a comp-off claim workflow only when its entitlement is earned`,
+            422
+          );
+        }
+        const reference = await validatePublishedApprovalWorkflowReference({
+          company: companyObjectId,
+          workflowId: rule.compOffClaimApprovalWorkflow,
+          versionId: rule.compOffClaimApprovalWorkflowVersion,
+          requestType: "comp_off_claim",
+        });
+        rule.compOffClaimApprovalWorkflowVersionNumber = reference.versionNumber;
+      }
+    }
     const emptyEntitlementRule = rules.find(
       (rule) =>
         rule.balanceTracked &&

@@ -9,6 +9,7 @@ import EmployeeDayRequestLock from "../../schemas/Request/EmployeeDayRequestLock
 import LeaveAttachment from "../../schemas/Leave/LeaveAttachment.schema";
 import User from "../../schemas/User/User";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
+import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import { resolveEmployeeDayContext } from "../attendance/employeeDayContext.service";
 import { PERMISSION_KEYS, hasPermission } from "../permissions/permission.utils";
 import {
@@ -44,6 +45,12 @@ import {
   reserveCompOffCredits,
   reverseConsumedCompOffCredits,
 } from "../compOff/compOffCredit.service";
+import {
+  approveApprovalInstance,
+  cancelApprovalInstance,
+  createApprovalInstance,
+  rejectApprovalInstance,
+} from "../approval/approvalEngine.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -131,7 +138,19 @@ function requestScopeEmployee(request: any) {
   };
 }
 
+function isApprovalParticipant(actor: any, request: any) {
+  if ((request.currentApprovers || []).some((item: any) => String(item?._id || item) === String(actor._id))) {
+    return true;
+  }
+  return Boolean(
+    request.approvalInstance?.steps?.some((step: any) =>
+      (step.approvers || []).some((approver: any) => String(approver.user?._id || approver.user) === String(actor._id))
+    )
+  );
+}
+
 function ensureCanViewRequest(actor: any, request: any) {
+  if (isApprovalParticipant(actor, request)) return;
   if (
     !isEmployeeInActorScope(
       actor,
@@ -215,7 +234,69 @@ function populateRequest(query: any) {
     .populate("employee", "name username code role department team officeLocation designation reportingManager")
     .populate("leaveType", "name code color unit paid balanceTracked")
     .populate("approver", "name username code role designation")
+    .populate("currentApprovers", "name username code role designation")
+    .populate({
+      path: "approvalInstance",
+      populate: [
+        { path: "steps.approvers.user", select: "name username code role designation" },
+        { path: "history.actor", select: "name username code role" },
+      ],
+    })
     .populate("history.actor", "name username role");
+}
+
+async function resolveLeaveApprovalWorkflow(company: mongoose.Types.ObjectId, calculation: any, leaveTypeId: any) {
+  const versionIds = Array.from(
+    new Set(
+      (calculation.dayBreakdown || [])
+        .filter((day: any) => Number(day.chargedUnits || 0) > 0)
+        .map((day: any) => text(day.leavePolicyVersion))
+        .filter(mongoose.Types.ObjectId.isValid)
+    )
+  ).map((id) => new mongoose.Types.ObjectId(String(id)));
+  if (!versionIds.length) return null;
+
+  const versions = await LeavePolicyVersion.find({
+    _id: { $in: versionIds },
+    company,
+    status: "published",
+  })
+    .select("_id rules")
+    .lean();
+  if (versions.length !== versionIds.length) {
+    throw generateError("One or more leave policy versions are unavailable", 409);
+  }
+
+  const references = versions.map((version: any) => {
+    const rule = (version.rules || []).find((item: any) => String(item.leaveType) === String(leaveTypeId));
+    if (!rule) throw generateError("The selected leave type is missing from its resolved policy version", 409);
+    const workflowId = text(rule.requestApprovalWorkflow);
+    const workflowVersionId = text(rule.requestApprovalWorkflowVersion);
+    if (!workflowId && !workflowVersionId) return null;
+    if (!mongoose.Types.ObjectId.isValid(workflowId) || !mongoose.Types.ObjectId.isValid(workflowVersionId)) {
+      throw generateError("The leave policy has an incomplete approval workflow reference", 409);
+    }
+    return { workflowId, workflowVersionId };
+  });
+  const keys = new Set(references.map((reference) => reference
+    ? `${reference.workflowId}:${reference.workflowVersionId}`
+    : "legacy"));
+  if (keys.size > 1) {
+    throw generateError(
+      "The selected dates use different leave approval workflows. Submit separate requests for each policy period",
+      422
+    );
+  }
+  return references[0];
+}
+
+function syncRequestApprovalState(request: any, approval: any) {
+  request.approvalInstance = approval.instance._id;
+  request.currentApprovers = approval.currentApprovers;
+  request.approver = approval.currentApprovers[0] || null;
+  const current = approval.instance.steps?.find((step: any) => step.order === approval.instance.currentStepOrder);
+  const currentApprover = current?.approvers?.find((item: any) => item.status === "pending");
+  request.approverNameSnapshot = currentApprover?.nameSnapshot || "";
 }
 
 export async function previewLeaveRequestService(req: any, res: Response, next: NextFunction) {
@@ -305,6 +386,11 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
         }).select("_id name").lean()
       : null;
     const firstDay = result.calculation.dayBreakdown[0];
+    const approvalWorkflow = await resolveLeaveApprovalWorkflow(
+      company,
+      result.calculation,
+      result.leaveType._id
+    );
     const request = new LeaveRequest({
       company,
       employee: employee._id,
@@ -396,6 +482,35 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
           }
         }
       }
+      if (approvalWorkflow) {
+        const approval = await createApprovalInstance({
+          company,
+          requestType: "leave_request",
+          requestModel: "LeaveRequest",
+          requestId: request._id,
+          employee: {
+            ...employee,
+            departmentId: firstDay.department,
+            departmentNameSnapshot: firstDay.departmentNameSnapshot || employee.department || "",
+            teamNameSnapshot: firstDay.teamNameSnapshot || employee.team || "",
+            officeLocation: firstDay.officeLocation || employee.officeLocation || null,
+            reportingManager: firstDay.reportingManager || employee.reportingManager || null,
+          },
+          workflowId: approvalWorkflow.workflowId,
+          workflowVersionId: approvalWorkflow.workflowVersionId,
+          actorId: actor._id,
+          session,
+        });
+        syncRequestApprovalState(request, approval);
+        if (approval.finalApproved) {
+          await finalizeLeaveApproval(request, actor._id, session);
+          request.status = "approved";
+          request.decidedAt = new Date();
+          request.decidedBy = actor._id;
+          request.decisionComment = "Auto-approved by approval workflow";
+          request.history.push(event(actor, "approved", "Auto-approved by approval workflow") as any);
+        }
+      }
       await request.save({ session });
       if (attachments.length) {
         const attachmentIds = attachments.map((item) => item.attachment);
@@ -477,7 +592,11 @@ export async function listLeaveRequestsService(req: any, res: Response, next: Ne
     if (requestedScope === "mine") {
       match.employee = actor._id;
     } else if (requestedScope === "approvals") {
-      Object.assign(match, buildLeaveRequestScope(actor, PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS, false));
+      const legacyScope = buildLeaveRequestScope(actor, PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS, false);
+      match.$or = [
+        { currentApprovers: actor._id },
+        { approvalInstance: null, ...legacyScope },
+      ];
     } else if (requestedScope === "company") {
       if (!hasPermission(actor, PERMISSION_KEYS.VIEW_LEAVE_REQUESTS)) {
         throw generateError("You do not have permission to view company leave requests", 403);
@@ -577,6 +696,43 @@ async function releaseRequestDateLocks(request: any, session: mongoose.ClientSes
   ]);
 }
 
+async function finalizeLeaveApproval(
+  request: any,
+  actorId: mongoose.Types.ObjectId,
+  session: mongoose.ClientSession
+) {
+  if (request.balanceTracked) {
+    for (const segment of requestBalanceSegments(request)) {
+      const key = balanceKey({
+        company: request.company,
+        employee: request.employee,
+        leaveType: request.leaveType,
+        ...segment,
+      });
+      await releasePendingLeaveBalance({ key, units: segment.chargedUnits, session });
+      await postLeaveBalanceTransaction({
+        key,
+        units: -segment.chargedUnits,
+        transactionType: "leave_debit",
+        sourceType: "leave_request",
+        sourceId: request._id,
+        effectiveDate: segment.leaveYearStart > request.fromDate ? segment.leaveYearStart : request.fromDate,
+        idempotencyKey: `${request._id}:debit:${segment.leaveYearKey}`,
+        reason: `Approved ${request.leaveTypeCodeSnapshot} leave request`,
+        leavePolicyAssignment: optionalObjectId(segment.leavePolicyAssignment),
+        leavePolicy: optionalObjectId(segment.leavePolicy),
+        leavePolicyVersion: optionalObjectId(segment.leavePolicyVersion),
+        createdBy: actorId,
+        session,
+      });
+    }
+  }
+  if (request.entitlementModeSnapshot === "earned") {
+    await consumeReservedCompOffCredits(request, session);
+  }
+  await applyApprovedLeaveToAttendance({ request, actor: actorId, session });
+}
+
 export async function approveLeaveRequestService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = getLeaveActor(req);
@@ -584,50 +740,47 @@ export async function approveLeaveRequestService(req: any, res: Response, next: 
     const requestId = objectId(req.params.requestId, "leave request id");
     const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("Leave request not found", 404);
-    ensureCanApproveRequest(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanApproveRequest(actor, candidate);
 
+    let finalApproved = true;
+    let currentStepName: string | null = null;
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "submitted" }).session(session);
       if (!request) throw generateError("Only a submitted leave request can be approved", 409);
-      if (request.balanceTracked) {
-        for (const segment of requestBalanceSegments(request)) {
-          const key = balanceKey({
-            company,
-            employee: request.employee,
-            leaveType: request.leaveType,
-            ...segment,
-          });
-          await releasePendingLeaveBalance({ key, units: segment.chargedUnits, session });
-          await postLeaveBalanceTransaction({
-            key,
-            units: -segment.chargedUnits,
-            transactionType: "leave_debit",
-            sourceType: "leave_request",
-            sourceId: request._id,
-            effectiveDate: segment.leaveYearStart > request.fromDate ? segment.leaveYearStart : request.fromDate,
-            idempotencyKey: `${request._id}:debit:${segment.leaveYearKey}`,
-            reason: `Approved ${request.leaveTypeCodeSnapshot} leave request`,
-            leavePolicyAssignment: optionalObjectId(segment.leavePolicyAssignment),
-            leavePolicy: optionalObjectId(segment.leavePolicy),
-            leavePolicyVersion: optionalObjectId(segment.leavePolicyVersion),
-            createdBy: actor._id,
-            session,
-          });
-        }
+      if (request.approvalInstance) {
+        const approval = await approveApprovalInstance({
+          company,
+          requestModel: "LeaveRequest",
+          requestId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+        syncRequestApprovalState(request, approval);
+        finalApproved = approval.finalApproved;
+        currentStepName = approval.currentStepName;
       }
-      if (request.entitlementModeSnapshot === "earned") {
-        await consumeReservedCompOffCredits(request, session);
+      if (finalApproved) {
+        await finalizeLeaveApproval(request, actor._id, session);
+        request.status = "approved";
+        request.currentApprovers = [];
+        request.approver = null;
+        request.approverNameSnapshot = "";
+        request.decidedAt = new Date();
+        request.decidedBy = actor._id;
+        request.decisionComment = text(req.body?.comment);
+        request.history.push(event(actor, "approved", req.body?.comment) as any);
       }
-      await applyApprovedLeaveToAttendance({ request, actor: actor._id, session });
-      request.status = "approved";
-      request.decidedAt = new Date();
-      request.decidedBy = actor._id;
-      request.decisionComment = text(req.body?.comment);
-      request.history.push(event(actor, "approved", req.body?.comment) as any);
       await request.save({ session });
     });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
-    return res.status(200).json({ success: true, data: updated, message: "Leave request approved" });
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: finalApproved
+        ? "Leave request approved"
+        : `Approval recorded${currentStepName ? `; awaiting ${currentStepName}` : ""}`,
+    });
   } catch (error) {
     next(error);
   }
@@ -640,16 +793,29 @@ export async function rejectLeaveRequestService(req: any, res: Response, next: N
     const requestId = objectId(req.params.requestId, "leave request id");
     const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("Leave request not found", 404);
-    ensureCanApproveRequest(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanApproveRequest(actor, candidate);
     const comment = text(req.body?.comment);
     if (comment.length < 3) throw generateError("A rejection reason is required", 422);
 
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "submitted" }).session(session);
       if (!request) throw generateError("Only a submitted leave request can be rejected", 409);
+      if (request.approvalInstance) {
+        await rejectApprovalInstance({
+          company,
+          requestModel: "LeaveRequest",
+          requestId,
+          actor,
+          comment,
+          session,
+        });
+      }
       await releaseRequestReservation(request, actor._id, session);
       await releaseRequestDateLocks(request, session);
       request.status = "rejected";
+      request.currentApprovers = [];
+      request.approver = null;
+      request.approverNameSnapshot = "";
       request.decidedAt = new Date();
       request.decidedBy = actor._id;
       request.decisionComment = comment;
@@ -674,9 +840,22 @@ export async function withdrawLeaveRequestService(req: any, res: Response, next:
       if (String(request.employee) !== String(actor._id)) {
         throw generateError("Only the employee can withdraw this leave request", 403);
       }
+      if (request.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "LeaveRequest",
+          requestId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+      }
       await releaseRequestReservation(request, actor._id, session);
       await releaseRequestDateLocks(request, session);
       request.status = "withdrawn";
+      request.currentApprovers = [];
+      request.approver = null;
+      request.approverNameSnapshot = "";
       request.history.push(event(actor, "withdrawn", req.body?.comment) as any);
       await request.save({ session });
     });
@@ -701,6 +880,16 @@ export async function cancelLeaveRequestService(req: any, res: Response, next: N
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "approved" }).session(session);
       if (!request) throw generateError("Only an approved leave request can be cancelled", 409);
+      if (request.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "LeaveRequest",
+          requestId,
+          actor,
+          comment,
+          session,
+        });
+      }
       const debits = await LeaveBalanceTransaction.find({
         company,
         sourceType: "leave_request",

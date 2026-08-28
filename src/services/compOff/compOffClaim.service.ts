@@ -23,6 +23,12 @@ import {
   calculateCompOffEligibleUnits,
   calculateCompOffExpiryDate,
 } from "./compOffClaim.utils";
+import {
+  approveApprovalInstance,
+  cancelApprovalInstance,
+  createApprovalInstance,
+  rejectApprovalInstance,
+} from "../approval/approvalEngine.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -59,7 +65,35 @@ function populateClaim(query: any) {
     .populate("employee", "name username code role department team officeLocation designation reportingManager")
     .populate("leaveType", "name code color unit paid balanceTracked")
     .populate("approver", "name username code role designation")
+    .populate("currentApprovers", "name username code role designation")
+    .populate({
+      path: "approvalInstance",
+      populate: [
+        { path: "steps.approvers.user", select: "name username code role designation" },
+        { path: "history.actor", select: "name username code role" },
+      ],
+    })
     .populate("history.actor", "name username role");
+}
+
+function syncClaimApprovalState(claim: any, approval: any) {
+  claim.approvalInstance = approval.instance._id;
+  claim.currentApprovers = approval.currentApprovers;
+  claim.approver = approval.currentApprovers[0] || null;
+  const current = approval.instance.steps?.find((step: any) => step.order === approval.instance.currentStepOrder);
+  const currentApprover = current?.approvers?.find((item: any) => item.status === "pending");
+  claim.approverNameSnapshot = currentApprover?.nameSnapshot || "";
+}
+
+function isApprovalParticipant(actor: any, claim: any) {
+  if ((claim.currentApprovers || []).some((item: any) => String(item?._id || item) === String(actor._id))) {
+    return true;
+  }
+  return Boolean(
+    claim.approvalInstance?.steps?.some((step: any) =>
+      (step.approvers || []).some((approver: any) => String(approver.user?._id || approver.user) === String(actor._id))
+    )
+  );
 }
 
 async function loadEmployee(company: mongoose.Types.ObjectId, employeeId: mongoose.Types.ObjectId) {
@@ -247,7 +281,10 @@ export async function createCompOffClaimService(req: any, res: Response, next: N
       : null;
     const assignment = result.context.organizationAssignment || {};
     const reference = result.context.policyReferences.leavePolicy;
-    const claim = await CompOffClaim.create({
+    const usesApprovalWorkflow = Boolean(
+      eligible.rule.compOffClaimApprovalWorkflow && eligible.rule.compOffClaimApprovalWorkflowVersion
+    );
+    const claim = new CompOffClaim({
       company,
       employee: employeeId,
       leaveType: leaveTypeId,
@@ -276,8 +313,49 @@ export async function createCompOffClaimService(req: any, res: Response, next: N
       submittedAt: new Date(),
       createdBy: actor._id,
     });
+    let autoApproved = false;
+    await mongoose.connection.transaction(async (session) => {
+      if (usesApprovalWorkflow) {
+        const approval = await createApprovalInstance({
+          company,
+          requestType: "comp_off_claim",
+          requestModel: "CompOffClaim",
+          requestId: claim._id,
+          employee: {
+            ...result.employee,
+            departmentId: assignment.department,
+            departmentNameSnapshot: assignment.departmentNameSnapshot || result.employee.department || "",
+            teamNameSnapshot: assignment.teamNameSnapshot || result.employee.team || "",
+            officeLocation: assignment.officeLocation || result.employee.officeLocation || null,
+            reportingManager: assignment.reportingManager || result.employee.reportingManager || null,
+          },
+          workflowId: eligible.rule.compOffClaimApprovalWorkflow,
+          workflowVersionId: eligible.rule.compOffClaimApprovalWorkflowVersion,
+          actorId: actor._id,
+          session,
+        });
+        syncClaimApprovalState(claim, approval);
+        autoApproved = approval.finalApproved;
+        if (autoApproved) {
+          await finalizeCompOffClaim(claim, actor._id, session);
+          claim.status = "approved";
+          claim.currentApprovers = [];
+          claim.approver = null;
+          claim.approverNameSnapshot = "";
+          claim.decidedAt = new Date();
+          claim.decidedBy = actor._id;
+          claim.decisionComment = "Auto-approved by approval workflow";
+          claim.history.push(claimEvent(actor, "approved", "Auto-approved by approval workflow") as any);
+        }
+      }
+      await claim.save({ session });
+    });
     const populated = await populateClaim(CompOffClaim.findById(claim._id));
-    return res.status(201).json({ success: true, data: populated, message: "Comp-off claim submitted" });
+    return res.status(201).json({
+      success: true,
+      data: populated,
+      message: autoApproved ? "Comp-off claim approved and credited automatically" : "Comp-off claim submitted",
+    });
   } catch (error: any) {
     if (error?.code === 11000) {
       next(generateError("An active comp-off claim already exists for this date", 409));
@@ -295,7 +373,13 @@ export async function listCompOffClaimsService(req: any, res: Response, next: Ne
     const scope = text(req.query?.scope || "self");
     const match: any = { company };
     if (scope === "self") match.employee = actor._id;
-    else if (scope === "approvals") match.approver = actor._id;
+    else if (scope === "approvals") {
+      const legacyScope = buildLeaveRequestScope(actor, PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS, false);
+      match.$or = [
+        { currentApprovers: actor._id },
+        { approvalInstance: null, ...legacyScope },
+      ];
+    }
     else Object.assign(match, buildLeaveRequestScope(actor, PERMISSION_KEYS.VIEW_LEAVE_REQUESTS));
     const status = text(req.query?.status);
     if (["submitted", "approved", "rejected", "withdrawn", "revoked"].includes(status)) match.status = status;
@@ -329,6 +413,7 @@ export async function getCompOffClaimService(req: any, res: Response, next: Next
       officeLocation: claim.officeLocation,
     };
     if (
+      !isApprovalParticipant(actor, claim) &&
       String(claim.approver?._id || claim.approver || "") !== String(actor._id) &&
       !isEmployeeInActorScope(actor, employee, PERMISSION_KEYS.VIEW_LEAVE_REQUESTS)
     ) {
@@ -340,6 +425,97 @@ export async function getCompOffClaimService(req: any, res: Response, next: Next
   }
 }
 
+async function finalizeCompOffClaim(
+  claim: any,
+  actorId: mongoose.Types.ObjectId,
+  session: mongoose.ClientSession
+) {
+  const company = objectId(claim.company, "company id");
+  const [record, version] = await Promise.all([
+    AttendanceRecord.findOne({
+      _id: claim.attendanceRecord,
+      company,
+      employee: claim.employee,
+      attendanceDate: claim.attendanceDate,
+    }).session(session),
+    LeavePolicyVersion.findOne({
+      _id: claim.leavePolicyVersion,
+      company,
+      policy: claim.leavePolicy,
+      status: "published",
+    }).session(session),
+  ]);
+  if (!record || record.state === "open" || record.hasMissingPunch) {
+    throw generateError("Attendance evidence is missing or incomplete", 409);
+  }
+  const rule: any = version?.rules?.find((item: any) => String(item.leaveType) === String(claim.leaveType));
+  if (!version || !rule || rule.entitlementMode !== "earned") {
+    throw generateError("The historical comp-off policy rule is unavailable", 409);
+  }
+  const eligibleUnits = calculateCompOffEligibleUnits({
+    workedMinutes: Number(record.workedMinutes || 0),
+    fullDayMinutes: Number(rule.compOffFullDayMinutes || 480),
+    halfDayMinutes: Number(rule.compOffHalfDayMinutes || 240),
+  });
+  if (eligibleUnits !== claim.requestedUnits) {
+    throw generateError("Current attendance evidence no longer supports the claimed units", 409);
+  }
+  const leaveYear = resolveLeaveYear(
+    claim.attendanceDate,
+    Number(version.leaveYearStartMonth || 1),
+    Number(version.leaveYearStartDay || 1)
+  );
+  const expiresOn = calculateCompOffExpiryDate({
+    earnedDate: claim.attendanceDate,
+    validityDays: Number(rule.compOffValidityDays || 90),
+    leaveYearEnd: leaveYear.leaveYearEnd,
+  });
+  if (expiresOn < currentDateKey()) throw generateError("This comp-off earning claim has already expired", 409);
+
+  const [lot] = await CompOffCreditLot.create([
+    {
+      company,
+      employee: claim.employee,
+      leaveType: claim.leaveType,
+      claim: claim._id,
+      attendanceRecord: claim.attendanceRecord,
+      earnedDate: claim.attendanceDate,
+      expiresOn,
+      ...leaveYear,
+      originalUnits: claim.requestedUnits,
+      availableUnits: claim.requestedUnits,
+      reservedUnits: 0,
+      consumedUnits: 0,
+      expiredUnits: 0,
+      status: "active",
+      leavePolicyAssignment: claim.leavePolicyAssignment,
+      leavePolicy: claim.leavePolicy,
+      leavePolicyVersion: claim.leavePolicyVersion,
+      createdBy: actorId,
+    },
+  ], { session });
+  const transaction = await postLeaveBalanceTransaction({
+    key: { company, employee: claim.employee, leaveType: claim.leaveType, ...leaveYear },
+    units: claim.requestedUnits,
+    transactionType: "comp_off_credit",
+    sourceType: "comp_off_claim",
+    sourceId: claim._id,
+    effectiveDate: claim.attendanceDate,
+    idempotencyKey: `comp-off-claim:${claim._id}:credit`,
+    reason: `Approved comp-off earned on ${claim.attendanceDate}`,
+    leavePolicyAssignment: claim.leavePolicyAssignment,
+    leavePolicy: claim.leavePolicy,
+    leavePolicyVersion: claim.leavePolicyVersion,
+    compOffCreditLot: lot._id as mongoose.Types.ObjectId,
+    createdBy: actorId,
+    session,
+  });
+  lot.creditTransaction = transaction._id as mongoose.Types.ObjectId;
+  await lot.save({ session });
+  claim.approvedUnits = claim.requestedUnits;
+  claim.expiresOn = expiresOn;
+}
+
 export async function approveCompOffClaimService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = getLeaveActor(req);
@@ -347,109 +523,47 @@ export async function approveCompOffClaimService(req: any, res: Response, next: 
     const claimId = objectId(req.params.claimId, "comp-off claim id");
     const candidate = await CompOffClaim.findOne({ _id: claimId, company }).lean();
     if (!candidate) throw generateError("Comp-off claim not found", 404);
-    ensureCanApproveClaim(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanApproveClaim(actor, candidate);
 
+    let finalApproved = true;
+    let currentStepName: string | null = null;
     await mongoose.connection.transaction(async (session) => {
       const claim = await CompOffClaim.findOne({ _id: claimId, company, status: "submitted" }).session(session);
       if (!claim) throw generateError("Only a submitted comp-off claim can be approved", 409);
-      const [record, version] = await Promise.all([
-        AttendanceRecord.findOne({
-          _id: claim.attendanceRecord,
+      if (claim.approvalInstance) {
+        const approval = await approveApprovalInstance({
           company,
-          employee: claim.employee,
-          attendanceDate: claim.attendanceDate,
-        }).session(session),
-        LeavePolicyVersion.findOne({
-          _id: claim.leavePolicyVersion,
-          company,
-          policy: claim.leavePolicy,
-          status: "published",
-        }).session(session),
-      ]);
-      if (!record || record.state === "open" || record.hasMissingPunch) {
-        throw generateError("Attendance evidence is missing or incomplete", 409);
+          requestModel: "CompOffClaim",
+          requestId: claimId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+        syncClaimApprovalState(claim, approval);
+        finalApproved = approval.finalApproved;
+        currentStepName = approval.currentStepName;
       }
-      const rule: any = version?.rules?.find((item: any) => String(item.leaveType) === String(claim.leaveType));
-      if (!version || !rule || rule.entitlementMode !== "earned") {
-        throw generateError("The historical comp-off policy rule is unavailable", 409);
+      if (finalApproved) {
+        await finalizeCompOffClaim(claim, actor._id, session);
+        claim.status = "approved";
+        claim.currentApprovers = [];
+        claim.approver = null;
+        claim.approverNameSnapshot = "";
+        claim.decidedAt = new Date();
+        claim.decidedBy = actor._id;
+        claim.decisionComment = text(req.body?.comment);
+        claim.history.push(claimEvent(actor, "approved", req.body?.comment) as any);
       }
-      const workedMinutes = Number(record.workedMinutes || 0);
-      const eligibleUnits = calculateCompOffEligibleUnits({
-        workedMinutes,
-        fullDayMinutes: Number(rule.compOffFullDayMinutes || 480),
-        halfDayMinutes: Number(rule.compOffHalfDayMinutes || 240),
-      });
-      if (eligibleUnits !== claim.requestedUnits) {
-        throw generateError("Current attendance evidence no longer supports the claimed units", 409);
-      }
-      const leaveYear = resolveLeaveYear(
-        claim.attendanceDate,
-        Number(version.leaveYearStartMonth || 1),
-        Number(version.leaveYearStartDay || 1)
-      );
-      const expiresOn = calculateCompOffExpiryDate({
-        earnedDate: claim.attendanceDate,
-        validityDays: Number(rule.compOffValidityDays || 90),
-        leaveYearEnd: leaveYear.leaveYearEnd,
-      });
-      if (expiresOn < currentDateKey()) throw generateError("This comp-off earning claim has already expired", 409);
-
-      const [lot] = await CompOffCreditLot.create([
-        {
-          company,
-          employee: claim.employee,
-          leaveType: claim.leaveType,
-          claim: claim._id,
-          attendanceRecord: claim.attendanceRecord,
-          earnedDate: claim.attendanceDate,
-          expiresOn,
-          ...leaveYear,
-          originalUnits: claim.requestedUnits,
-          availableUnits: claim.requestedUnits,
-          reservedUnits: 0,
-          consumedUnits: 0,
-          expiredUnits: 0,
-          status: "active",
-          leavePolicyAssignment: claim.leavePolicyAssignment,
-          leavePolicy: claim.leavePolicy,
-          leavePolicyVersion: claim.leavePolicyVersion,
-          createdBy: actor._id,
-        },
-      ], { session });
-      const transaction = await postLeaveBalanceTransaction({
-        key: {
-          company,
-          employee: claim.employee,
-          leaveType: claim.leaveType,
-          ...leaveYear,
-        },
-        units: claim.requestedUnits,
-        transactionType: "comp_off_credit",
-        sourceType: "comp_off_claim",
-        sourceId: claim._id,
-        effectiveDate: claim.attendanceDate,
-        idempotencyKey: `comp-off-claim:${claim._id}:credit`,
-        reason: `Approved comp-off earned on ${claim.attendanceDate}`,
-        leavePolicyAssignment: claim.leavePolicyAssignment,
-        leavePolicy: claim.leavePolicy,
-        leavePolicyVersion: claim.leavePolicyVersion,
-        compOffCreditLot: lot._id as mongoose.Types.ObjectId,
-        createdBy: actor._id,
-        session,
-      });
-      lot.creditTransaction = transaction._id as mongoose.Types.ObjectId;
-      await lot.save({ session });
-      claim.status = "approved";
-      claim.approvedUnits = claim.requestedUnits;
-      claim.expiresOn = expiresOn;
-      claim.decidedAt = new Date();
-      claim.decidedBy = actor._id;
-      claim.decisionComment = text(req.body?.comment);
-      claim.history.push(claimEvent(actor, "approved", req.body?.comment) as any);
       await claim.save({ session });
     });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
-    return res.status(200).json({ success: true, data: updated, message: "Comp-off claim approved and credited" });
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: finalApproved
+        ? "Comp-off claim approved and credited"
+        : `Approval recorded${currentStepName ? `; awaiting ${currentStepName}` : ""}`,
+    });
   } catch (error) {
     next(error);
   }
@@ -462,18 +576,32 @@ export async function rejectCompOffClaimService(req: any, res: Response, next: N
     const claimId = objectId(req.params.claimId, "comp-off claim id");
     const candidate = await CompOffClaim.findOne({ _id: claimId, company }).lean();
     if (!candidate) throw generateError("Comp-off claim not found", 404);
-    ensureCanApproveClaim(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanApproveClaim(actor, candidate);
     const comment = text(req.body?.comment);
     if (comment.length < 3) throw generateError("A rejection reason is required", 422);
-    const claim = await CompOffClaim.findOneAndUpdate(
-      { _id: claimId, company, status: "submitted" },
-      {
-        $set: { status: "rejected", decidedAt: new Date(), decidedBy: actor._id, decisionComment: comment },
-        $push: { history: claimEvent(actor, "rejected", comment) },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!claim) throw generateError("Only a submitted comp-off claim can be rejected", 409);
+    await mongoose.connection.transaction(async (session) => {
+      const claim = await CompOffClaim.findOne({ _id: claimId, company, status: "submitted" }).session(session);
+      if (!claim) throw generateError("Only a submitted comp-off claim can be rejected", 409);
+      if (claim.approvalInstance) {
+        await rejectApprovalInstance({
+          company,
+          requestModel: "CompOffClaim",
+          requestId: claimId,
+          actor,
+          comment,
+          session,
+        });
+      }
+      claim.status = "rejected";
+      claim.currentApprovers = [];
+      claim.approver = null;
+      claim.approverNameSnapshot = "";
+      claim.decidedAt = new Date();
+      claim.decidedBy = actor._id;
+      claim.decisionComment = comment;
+      claim.history.push(claimEvent(actor, "rejected", comment) as any);
+      await claim.save({ session });
+    });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({ success: true, data: updated, message: "Comp-off claim rejected" });
   } catch (error) {
@@ -486,15 +614,31 @@ export async function withdrawCompOffClaimService(req: any, res: Response, next:
     const actor = getLeaveActor(req);
     const company = resolveLeaveCompanyId(actor, req.body?.companyId || req.query?.companyId);
     const claimId = objectId(req.params.claimId, "comp-off claim id");
-    const claim = await CompOffClaim.findOneAndUpdate(
-      { _id: claimId, company, employee: actor._id, status: "submitted" },
-      {
-        $set: { status: "withdrawn" },
-        $push: { history: claimEvent(actor, "withdrawn", req.body?.comment) },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!claim) throw generateError("Only your submitted comp-off claim can be withdrawn", 409);
+    await mongoose.connection.transaction(async (session) => {
+      const claim = await CompOffClaim.findOne({
+        _id: claimId,
+        company,
+        employee: actor._id,
+        status: "submitted",
+      }).session(session);
+      if (!claim) throw generateError("Only your submitted comp-off claim can be withdrawn", 409);
+      if (claim.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "CompOffClaim",
+          requestId: claimId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+      }
+      claim.status = "withdrawn";
+      claim.currentApprovers = [];
+      claim.approver = null;
+      claim.approverNameSnapshot = "";
+      claim.history.push(claimEvent(actor, "withdrawn", req.body?.comment) as any);
+      await claim.save({ session });
+    });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({ success: true, data: updated, message: "Comp-off claim withdrawn" });
   } catch (error) {
@@ -516,6 +660,16 @@ export async function revokeCompOffClaimService(req: any, res: Response, next: N
     await mongoose.connection.transaction(async (session) => {
       const claim = await CompOffClaim.findOne({ _id: claimId, company, status: "approved" }).session(session);
       if (!claim) throw generateError("Only an approved comp-off claim can be revoked", 409);
+      if (claim.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "CompOffClaim",
+          requestId: claimId,
+          actor,
+          comment,
+          session,
+        });
+      }
       const lot = await CompOffCreditLot.findOne({ company, claim: claim._id }).session(session);
       if (!lot) throw generateError("The approved comp-off credit lot is missing", 409);
       if (Number(lot.reservedUnits || 0) > 0) {

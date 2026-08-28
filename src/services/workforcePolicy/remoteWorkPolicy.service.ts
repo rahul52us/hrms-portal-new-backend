@@ -8,6 +8,7 @@ import RemoteWorkPolicyVersion, {
   RemoteWorkRules,
 } from "../../schemas/WorkforcePolicy/RemoteWorkPolicyVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -34,6 +35,13 @@ const DEFAULT_RULES: RemoteWorkRules = {
   minimumReasonLength: 10,
   probationEligibility: "allowed",
 };
+
+function optionalReference(value: unknown, current: unknown, label: string) {
+  const source = value === undefined ? current : value;
+  const normalized = normalizeText((source as any)?._id || source);
+  if (!normalized) return null;
+  return new mongoose.Types.ObjectId(validateObjectId(normalized, label));
+}
 
 function integer(value: unknown, fallback: number, label: string, minimum: number, maximum: number) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -78,6 +86,18 @@ function normalizeRules(input: any = {}, current?: any): RemoteWorkRules {
   }
   return {
     approvalMode,
+    approvalWorkflow: optionalReference(
+      input.approvalWorkflow,
+      base.approvalWorkflow,
+      "approval workflow"
+    ),
+    approvalWorkflowVersion: optionalReference(
+      input.approvalWorkflowVersion,
+      base.approvalWorkflowVersion,
+      "approval workflow version"
+    ),
+    approvalWorkflowVersionNumber:
+      Number(input.approvalWorkflowVersionNumber || base.approvalWorkflowVersionNumber || 0) || null,
     allowedWeekdays,
     maxDaysPerWeek: integer(input.maxDaysPerWeek, base.maxDaysPerWeek, "Weekly WFH limit", 0, 7),
     maxDaysPerMonth: integer(input.maxDaysPerMonth, base.maxDaysPerMonth, "Monthly WFH limit", 0, 31),
@@ -283,7 +303,17 @@ export async function publishRemoteWorkPolicyVersionService(req: any, res: Respo
     if (await RemoteWorkPolicyVersion.exists({ company: companyObjectId, policy: policy._id, status: "published", effectiveFrom, _id: { $ne: version._id } })) {
       throw generateError("Another published version already starts on this date", 409);
     }
-    version.rules = normalizeRules({}, version.rules) as any;
+    const normalizedRules = normalizeRules({}, version.rules);
+    if (normalizedRules.approvalWorkflow || normalizedRules.approvalWorkflowVersion) {
+      const reference = await validatePublishedApprovalWorkflowReference({
+        company: companyObjectId,
+        workflowId: normalizedRules.approvalWorkflow,
+        versionId: normalizedRules.approvalWorkflowVersion,
+        requestType: "remote_work_request",
+      });
+      normalizedRules.approvalWorkflowVersionNumber = reference.versionNumber;
+    }
+    version.rules = normalizedRules as any;
     version.effectiveFrom = effectiveFrom;
     version.changeReason = changeReason || "Initial remote-work policy publication";
     version.status = "published";
@@ -319,4 +349,3 @@ export async function archiveRemoteWorkPolicyService(req: any, res: Response, ne
     next(error);
   }
 }
-

@@ -20,6 +20,12 @@ import {
   applyApprovedRemoteWorkToAttendance,
   removeCancelledRemoteWorkFromAttendance,
 } from "./remoteWorkAttendance.service";
+import {
+  approveApprovalInstance,
+  cancelApprovalInstance,
+  createApprovalInstance,
+  rejectApprovalInstance,
+} from "../approval/approvalEngine.service";
 
 const ACTIVE_STATUSES = ["submitted", "manager_approved", "approved"];
 const DAY_MS = 86400000;
@@ -103,7 +109,19 @@ function requestScopeEmployee(request: any) {
   };
 }
 
+function isApprovalParticipant(actor: any, request: any) {
+  if ((request.currentApprovers || []).some((item: any) => String(item?._id || item) === String(actor._id))) {
+    return true;
+  }
+  return Boolean(
+    request.approvalInstance?.steps?.some((step: any) =>
+      (step.approvers || []).some((approver: any) => String(approver.user?._id || approver.user) === String(actor._id))
+    )
+  );
+}
+
 function ensureCanView(actor: any, request: any) {
+  if (isApprovalParticipant(actor, request)) return;
   if (!isEmployeeInActorScope(actor, requestScopeEmployee(request), PERMISSION_KEYS.VIEW_REMOTE_WORK_REQUESTS)) {
     throw generateError("You cannot view this WFH request", 403);
   }
@@ -126,9 +144,26 @@ function populateRequest(query: any) {
   return query
     .populate("employee", "name username code role department team officeLocation")
     .populate("approver", "name username code role")
+    .populate("currentApprovers", "name username code role")
     .populate("reportingManager", "name username code role")
     .populate("remoteWorkPolicy", "name code")
+    .populate({
+      path: "approvalInstance",
+      populate: [
+        { path: "steps.approvers.user", select: "name username code role designation" },
+        { path: "history.actor", select: "name username code role" },
+      ],
+    })
     .populate("history.actor", "name username role");
+}
+
+function syncRequestApprovalState(request: any, approval: any) {
+  request.approvalInstance = approval.instance._id;
+  request.currentApprovers = approval.currentApprovers;
+  request.approver = approval.currentApprovers[0] || null;
+  const current = approval.instance.steps?.find((step: any) => step.order === approval.instance.currentStepOrder);
+  const currentApprover = current?.approvers?.find((item: any) => item.status === "pending");
+  request.approverNameSnapshot = currentApprover?.nameSnapshot || "";
 }
 
 function sameReference(left: any, right: any) {
@@ -286,7 +321,8 @@ async function calculateRequest(options: {
   const managerId = optionalObjectId(
     eligible[0].organizationAssignment?.reportingManager || options.employee.reportingManager
   );
-  if (["reporting_manager", "manager_then_hr"].includes(rules.approvalMode) && !managerId) {
+  const hasApprovalWorkflow = Boolean(rules.approvalWorkflow && rules.approvalWorkflowVersion);
+  if (!hasApprovalWorkflow && ["reporting_manager", "manager_then_hr"].includes(rules.approvalMode) && !managerId) {
     throw generateError("Assign a reporting manager before requesting WFH under this policy", 422);
   }
   const manager = managerId
@@ -395,7 +431,10 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
     const company = resolveEmployeeRequestCompanyId(actor, req.body?.companyId, "remote-work");
     const employee = await resolveEmployeeForRequest(actor, company, req.body?.employeeId);
     const result = await calculateRequest({ company, employee, ...req.body });
-    const autoApproved = result.rules.approvalMode === "auto_approve";
+    const usesApprovalWorkflow = Boolean(
+      result.rules.approvalWorkflow && result.rules.approvalWorkflowVersion
+    );
+    let autoApproved = !usesApprovalWorkflow && result.rules.approvalMode === "auto_approve";
     const request = new RemoteWorkRequest({
       company,
       employee: employee._id,
@@ -444,6 +483,34 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
         })),
         { session }
       );
+      if (usesApprovalWorkflow) {
+        const approval = await createApprovalInstance({
+          company,
+          requestType: "remote_work_request",
+          requestModel: "RemoteWorkRequest",
+          requestId: request._id,
+          employee: {
+            ...employee,
+            departmentId: result.organization.department,
+            departmentNameSnapshot: result.organization.departmentNameSnapshot || employee.department || "",
+            teamNameSnapshot: result.organization.teamNameSnapshot || employee.team || "",
+            officeLocation: result.organization.officeLocation || employee.officeLocation || null,
+            reportingManager: result.organization.reportingManager || employee.reportingManager || null,
+          },
+          workflowId: result.rules.approvalWorkflow,
+          workflowVersionId: result.rules.approvalWorkflowVersion,
+          actorId: actor._id,
+          session,
+        });
+        syncRequestApprovalState(request, approval);
+        autoApproved = approval.finalApproved;
+        if (autoApproved) {
+          request.status = "approved";
+          request.decidedAt = new Date();
+          request.decidedBy = actor._id;
+          request.history.push(event(actor, "auto_approved") as any);
+        }
+      }
       await request.save({ session });
       if (autoApproved) await applyApprovedRemoteWorkToAttendance({ request, actor: actor._id, session });
     });
@@ -467,7 +534,11 @@ export async function listRemoteWorkRequestsService(req: any, res: Response, nex
     if (scope === "mine") {
       match.employee = actor._id;
     } else if (scope === "approvals") {
-      Object.assign(match, buildEmployeeRequestScope(actor, PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS, false));
+      const legacyScope = buildEmployeeRequestScope(actor, PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS, false);
+      match.$or = [
+        { currentApprovers: actor._id },
+        { approvalInstance: null, ...legacyScope },
+      ];
       match.status = { $in: ["submitted", "manager_approved"] };
     } else if (scope === "company") {
       if (!hasPermission(actor, PERMISSION_KEYS.VIEW_REMOTE_WORK_REQUESTS)) {
@@ -525,33 +596,68 @@ export async function approveRemoteWorkRequestService(req: any, res: Response, n
     const requestId = objectId(req.params.requestId, "WFH request id");
     const candidate = await RemoteWorkRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("WFH request not found", 404);
-    ensureCanReview(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanReview(actor, candidate);
+    let finalApproved = true;
+    let currentStepName: string | null = null;
     await mongoose.connection.transaction(async (session) => {
       const request = await RemoteWorkRequest.findOne({ _id: requestId, company, status: { $in: ["submitted", "manager_approved"] } }).session(session);
       if (!request) throw generateError("Only a pending WFH request can be approved", 409);
-      const managerStage = request.approvalModeSnapshot === "manager_then_hr" && request.status === "submitted";
-      if (managerStage) {
-        request.status = "manager_approved";
-        request.approver = null;
-        request.approverNameSnapshot = "HR approval queue";
-        request.history.push(event(actor, "manager_approved", req.body?.comment) as any);
-      } else {
-        if (request.approvalModeSnapshot === "hr" || request.status === "manager_approved") {
-          if (!hasPermission(actor, PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS)) {
-            throw generateError("HR approval permission is required for this stage", 403);
-          }
+      if (request.approvalInstance) {
+        const approval = await approveApprovalInstance({
+          company,
+          requestModel: "RemoteWorkRequest",
+          requestId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+        syncRequestApprovalState(request, approval);
+        finalApproved = approval.finalApproved;
+        currentStepName = approval.currentStepName;
+        if (finalApproved) {
+          await applyApprovedRemoteWorkToAttendance({ request, actor: actor._id, session });
+          request.status = "approved";
+          request.currentApprovers = [];
+          request.approver = null;
+          request.approverNameSnapshot = "";
+          request.decidedAt = new Date();
+          request.decidedBy = actor._id;
+          request.decisionComment = text(req.body?.comment);
+          request.history.push(event(actor, "approved", req.body?.comment) as any);
         }
-        await applyApprovedRemoteWorkToAttendance({ request, actor: actor._id, session });
-        request.status = "approved";
-        request.decidedAt = new Date();
-        request.decidedBy = actor._id;
-        request.decisionComment = text(req.body?.comment);
-        request.history.push(event(actor, "approved", req.body?.comment) as any);
+      } else {
+        const managerStage = request.approvalModeSnapshot === "manager_then_hr" && request.status === "submitted";
+        if (managerStage) {
+          finalApproved = false;
+          currentStepName = "HR approval";
+          request.status = "manager_approved";
+          request.approver = null;
+          request.approverNameSnapshot = "HR approval queue";
+          request.history.push(event(actor, "manager_approved", req.body?.comment) as any);
+        } else {
+          if (request.approvalModeSnapshot === "hr" || request.status === "manager_approved") {
+            if (!hasPermission(actor, PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS)) {
+              throw generateError("HR approval permission is required for this stage", 403);
+            }
+          }
+          await applyApprovedRemoteWorkToAttendance({ request, actor: actor._id, session });
+          request.status = "approved";
+          request.decidedAt = new Date();
+          request.decidedBy = actor._id;
+          request.decisionComment = text(req.body?.comment);
+          request.history.push(event(actor, "approved", req.body?.comment) as any);
+        }
       }
       await request.save({ session });
     });
     const updated = await populateRequest(RemoteWorkRequest.findById(requestId));
-    return res.status(200).json({ success: true, data: updated, message: updated.status === "manager_approved" ? "Manager approved; awaiting HR" : "WFH request approved" });
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: finalApproved
+        ? "WFH request approved"
+        : `Approval recorded${currentStepName ? `; awaiting ${currentStepName}` : ""}`,
+    });
   } catch (error) {
     next(error);
   }
@@ -564,13 +670,26 @@ export async function rejectRemoteWorkRequestService(req: any, res: Response, ne
     const requestId = objectId(req.params.requestId, "WFH request id");
     const candidate = await RemoteWorkRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("WFH request not found", 404);
-    ensureCanReview(actor, candidate);
+    if (!candidate.approvalInstance) ensureCanReview(actor, candidate);
     const comment = text(req.body?.comment);
     if (!comment) throw generateError("A rejection reason is required", 422);
     await mongoose.connection.transaction(async (session) => {
       const request = await RemoteWorkRequest.findOne({ _id: requestId, company, status: { $in: ["submitted", "manager_approved"] } }).session(session);
       if (!request) throw generateError("Only a pending WFH request can be rejected", 409);
+      if (request.approvalInstance) {
+        await rejectApprovalInstance({
+          company,
+          requestModel: "RemoteWorkRequest",
+          requestId,
+          actor,
+          comment,
+          session,
+        });
+      }
       request.status = "rejected";
+      request.currentApprovers = [];
+      request.approver = null;
+      request.approverNameSnapshot = "";
       request.decidedAt = new Date();
       request.decidedBy = actor._id;
       request.decisionComment = comment;
@@ -593,7 +712,20 @@ export async function withdrawRemoteWorkRequestService(req: any, res: Response, 
     await mongoose.connection.transaction(async (session) => {
       const request = await RemoteWorkRequest.findOne({ _id: requestId, company, employee: actor._id, status: { $in: ["submitted", "manager_approved"] } }).session(session);
       if (!request) throw generateError("Only your pending WFH request can be withdrawn", 409);
+      if (request.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "RemoteWorkRequest",
+          requestId,
+          actor,
+          comment: req.body?.comment,
+          session,
+        });
+      }
       request.status = "withdrawn";
+      request.currentApprovers = [];
+      request.approver = null;
+      request.approverNameSnapshot = "";
       request.history.push(event(actor, "withdrawn", req.body?.comment) as any);
       await releaseLocks(request, session);
       await request.save({ session });
@@ -621,6 +753,16 @@ export async function cancelRemoteWorkRequestService(req: any, res: Response, ne
     await mongoose.connection.transaction(async (session) => {
       const request = await RemoteWorkRequest.findOne({ _id: requestId, company, status: "approved" }).session(session);
       if (!request) throw generateError("Only an approved WFH request can be cancelled", 409);
+      if (request.approvalInstance) {
+        await cancelApprovalInstance({
+          company,
+          requestModel: "RemoteWorkRequest",
+          requestId,
+          actor,
+          comment: reason,
+          session,
+        });
+      }
       await removeCancelledRemoteWorkFromAttendance({ request, actor: actor._id, session });
       request.status = "cancelled";
       request.cancelledAt = new Date();

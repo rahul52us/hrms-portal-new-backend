@@ -23,6 +23,8 @@ export interface CompOffClaimI extends Document {
   reason: string;
   status: (typeof COMP_OFF_CLAIM_STATUSES)[number];
   approver?: mongoose.Types.ObjectId | null;
+  currentApprovers: mongoose.Types.ObjectId[];
+  approvalInstance?: mongoose.Types.ObjectId | null;
   approverNameSnapshot?: string;
   departmentNameSnapshot?: string;
   teamNameSnapshot?: string;
@@ -78,6 +80,8 @@ const CompOffClaimSchema = new Schema<CompOffClaimI>(
     reason: { type: String, required: true, trim: true, maxlength: 2000 },
     status: { type: String, enum: COMP_OFF_CLAIM_STATUSES, default: "submitted", index: true },
     approver: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+    currentApprovers: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    approvalInstance: { type: Schema.Types.ObjectId, ref: "ApprovalInstance", default: null, index: true },
     approverNameSnapshot: { type: String, trim: true },
     departmentNameSnapshot: { type: String, trim: true, index: true },
     teamNameSnapshot: { type: String, trim: true, index: true },
@@ -106,6 +110,7 @@ CompOffClaimSchema.index(
   }
 );
 CompOffClaimSchema.index({ company: 1, approver: 1, status: 1, submittedAt: -1 });
+CompOffClaimSchema.index({ company: 1, currentApprovers: 1, status: 1, submittedAt: -1 });
 
 const CompOffClaim =
   (mongoose.models.CompOffClaim as mongoose.Model<CompOffClaimI>) ||

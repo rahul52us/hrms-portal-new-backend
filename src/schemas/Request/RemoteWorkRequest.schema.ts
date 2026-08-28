@@ -52,6 +52,8 @@ export interface RemoteWorkRequestI extends Document {
   status: (typeof REMOTE_WORK_REQUEST_STATUSES)[number];
   approvalModeSnapshot: "reporting_manager" | "hr" | "manager_then_hr" | "auto_approve";
   approver?: mongoose.Types.ObjectId | null;
+  currentApprovers: mongoose.Types.ObjectId[];
+  approvalInstance?: mongoose.Types.ObjectId | null;
   approverNameSnapshot?: string;
   reportingManager?: mongoose.Types.ObjectId | null;
   reportingManagerNameSnapshot?: string;
@@ -127,6 +129,8 @@ const RemoteWorkRequestSchema = new Schema<RemoteWorkRequestI>(
       required: true,
     },
     approver: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+    currentApprovers: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    approvalInstance: { type: Schema.Types.ObjectId, ref: "ApprovalInstance", default: null, index: true },
     approverNameSnapshot: { type: String, trim: true },
     reportingManager: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     reportingManagerNameSnapshot: { type: String, trim: true },
@@ -150,6 +154,7 @@ const RemoteWorkRequestSchema = new Schema<RemoteWorkRequestI>(
 
 RemoteWorkRequestSchema.index({ company: 1, employee: 1, fromDate: -1, status: 1 });
 RemoteWorkRequestSchema.index({ company: 1, approver: 1, status: 1, submittedAt: -1 });
+RemoteWorkRequestSchema.index({ company: 1, currentApprovers: 1, status: 1, submittedAt: -1 });
 RemoteWorkRequestSchema.index({ company: 1, "dates.attendanceDate": 1, status: 1 });
 RemoteWorkRequestSchema.index({ company: 1, department: 1, status: 1 });
 

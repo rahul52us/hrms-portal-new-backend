@@ -19,6 +19,9 @@ export const REMOTE_WORK_WEEKDAYS = [
 
 export interface RemoteWorkRules {
   approvalMode: (typeof REMOTE_WORK_APPROVAL_MODES)[number];
+  approvalWorkflow?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersionNumber?: number | null;
   allowedWeekdays: string[];
   maxDaysPerWeek: number;
   maxDaysPerMonth: number;
@@ -54,6 +57,9 @@ const RemoteWorkRulesSchema = new Schema<RemoteWorkRules>(
       required: true,
       default: "reporting_manager",
     },
+    approvalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+    approvalWorkflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", default: null },
+    approvalWorkflowVersionNumber: { type: Number, min: 1, default: null },
     allowedWeekdays: {
       type: [String],
       enum: REMOTE_WORK_WEEKDAYS,
@@ -111,4 +117,3 @@ const RemoteWorkPolicyVersion =
   );
 
 export default RemoteWorkPolicyVersion;
-

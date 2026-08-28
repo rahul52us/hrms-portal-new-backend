@@ -21,6 +21,7 @@ import certificateRouting from "./certificate.routing";
 import organizationRouting from "./organization.routing";
 import workforcePoliciesRouting from "./workforcePolicies.routing";
 import leaveRouting from "./leave.routing";
+import approvalWorkflowsRouting from "./approvalWorkflows.routing";
 import attendanceRouting from "./attendance.routing";
 import remoteWorkRouting from "./remoteWork.routing";
 import compOffRouting from "./compOff.routing";
@@ -49,6 +50,7 @@ const importRoutings = (app: any) => {
   app.use('/api/department', departmentRouting);
   app.use('/api/locations', officeLocationRouting);
   app.use('/api/workforce-policies', workforcePoliciesRouting);
+  app.use('/api/approval-workflows', approvalWorkflowsRouting);
   app.use('/api/leave', leaveRouting);
   app.use('/api/attendance', attendanceRouting);
   app.use('/api/remote-work', remoteWorkRouting);
