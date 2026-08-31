@@ -25,7 +25,6 @@ const DEFAULT_RULES: AttendanceRules = {
   minimumFullDayMinutes: 480,
   minimumHalfDayMinutes: 240,
   requirePunchOut: true,
-  allowMultiplePunches: false,
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,
@@ -87,10 +86,6 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
     minimumHalfDayMinutes,
     requirePunchOut:
       typeof input.requirePunchOut === "boolean" ? input.requirePunchOut : base.requirePunchOut,
-    allowMultiplePunches:
-      typeof input.allowMultiplePunches === "boolean"
-        ? input.allowMultiplePunches
-        : base.allowMultiplePunches,
     missingPunchTreatment,
     overtimeEnabled:
       typeof input.overtimeEnabled === "boolean" ? input.overtimeEnabled : base.overtimeEnabled,

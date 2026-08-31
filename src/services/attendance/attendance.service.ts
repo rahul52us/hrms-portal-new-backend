@@ -6,6 +6,7 @@ import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordR
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import { calculateAttendance } from "./attendanceCalculator.utils";
+import { buildFinalPunchSession } from "./attendancePunch.utils";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
 
@@ -278,6 +279,7 @@ async function appendPunchRevision(options: {
   actorId: mongoose.Types.ObjectId;
   operation: "punch_in" | "punch_out";
   occurredAt: Date;
+  previousPunchOut?: Date | null;
 }) {
   try {
     await AttendanceRecordRevision.updateOne(
@@ -290,8 +292,19 @@ async function appendPunchRevision(options: {
         $setOnInsert: {
           employee: options.record.employee,
           action: "punch_recorded",
-          reason: options.operation === "punch_in" ? "Employee punched in" : "Employee punched out",
-          changes: { operation: options.operation, occurredAt: options.occurredAt },
+          reason:
+            options.operation === "punch_in"
+              ? "Employee punched in"
+              : options.previousPunchOut
+                ? "Employee updated final punch-out"
+                : "Employee punched out",
+          changes: {
+            operation: options.operation,
+            occurredAt: options.occurredAt,
+            ...(options.previousPunchOut
+              ? { previousPunchOut: options.previousPunchOut }
+              : {}),
+          },
           snapshot: options.record.toObject ? options.record.toObject() : options.record,
           actor: options.actorId,
           source: "punch",
@@ -337,6 +350,12 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
       approvedRemoteWorkAuthorization({ ...actor, attendanceDate }),
     ]);
     const effectiveRecord = activeRecord || record;
+    const effectivePunchIn = effectiveRecord?.punchSessions?.find(
+      (session: any) => Boolean(session?.punchIn)
+    );
+    const todayHasPunchIn = record?.punchSessions?.some(
+      (session: any) => Boolean(session?.punchIn)
+    );
     return res.status(200).json({
       success: true,
       data: {
@@ -357,12 +376,17 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
         actions: {
           canPunchIn: Boolean(
             !activeRecord &&
+              !todayHasPunchIn &&
               record?.state !== "finalized" &&
               !record?.leaveRequest &&
               context.policies?.attendancePolicy?.version &&
               context.policies?.workSchedule?.version
           ),
-          canPunchOut: Boolean(activeRecord),
+          canPunchOut: Boolean(
+            effectivePunchIn &&
+              effectiveRecord?.state !== "finalized" &&
+              !effectiveRecord?.leaveRequest
+          ),
         },
       },
     });
@@ -390,7 +414,6 @@ export async function punchInService(req: any, res: Response, next: NextFunction
       );
     }
 
-    const rules = context.policies.attendancePolicy?.version?.rules || {};
     const remoteWorkAuthorization = await approvedRemoteWorkAuthorization({
       ...actor,
       attendanceDate,
@@ -406,8 +429,11 @@ export async function punchInService(req: any, res: Response, next: NextFunction
     if (existing?.leaveRequest) {
       throw generateError("Approved leave exists for today. Cancel the leave before punching in", 409);
     }
-    if (existing?.punchSessions?.length && rules.allowMultiplePunches !== true) {
-      throw generateError("Multiple punch sessions are disabled by your attendance policy", 409);
+    if (existing?.punchSessions?.length) {
+      throw generateError(
+        "You have already punched in today. Use punch out to update your final punch-out time",
+        409
+      );
     }
 
     const session = sessionPayload(req, now);
@@ -420,11 +446,11 @@ export async function punchInService(req: any, res: Response, next: NextFunction
           employee: actor.employeeId,
           revisionNumber: existing.revisionNumber,
           state: { $ne: "finalized" },
-          punchSessions: { $not: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } } },
+          punchSessions: { $size: 0 },
         },
         {
-          $push: { punchSessions: session },
           $set: {
+            punchSessions: [session],
             state: "open",
             status: "pending",
             source: "punch",
@@ -475,13 +501,27 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
   try {
     const actor = actorDetails(req);
     const now = new Date();
-    const record = await AttendanceRecord.findOne({
+    const { attendanceDate } = await resolveCurrentContext({ ...actor, now });
+    const openRecord = await AttendanceRecord.findOne({
       company: actor.companyId,
       employee: actor.employeeId,
       state: { $ne: "finalized" },
       punchSessions: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } },
     }).sort({ attendanceDate: -1 });
-    if (!record) throw generateError("No open punch session was found", 409);
+    const record = openRecord || await AttendanceRecord.findOne({
+      company: actor.companyId,
+      employee: actor.employeeId,
+      attendanceDate,
+      state: { $ne: "finalized" },
+      punchSessions: { $elemMatch: { punchIn: { $ne: null } } },
+    });
+    if (!record) throw generateError("Punch in before recording punch-out", 409);
+
+    const punchUpdate = buildFinalPunchSession(record.punchSessions || [], now);
+    if (!punchUpdate) throw generateError("Punch in before recording punch-out", 409);
+    if (now.getTime() < punchUpdate.session.punchIn.getTime()) {
+      throw generateError("Punch-out cannot be earlier than punch-in", 409);
+    }
 
     const context = await resolveEmployeeDayContext({
       companyId: actor.companyId,
@@ -495,11 +535,10 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
         employee: actor.employeeId,
         revisionNumber: record.revisionNumber,
         state: { $ne: "finalized" },
-        punchSessions: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } },
       },
       {
         $set: {
-          "punchSessions.$[openSession].punchOut": now,
+          punchSessions: [punchUpdate.session],
           source: "punch",
           updatedBy: actor.employeeId,
         },
@@ -508,13 +547,22 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
       {
         new: true,
         runValidators: true,
-        arrayFilters: [{ "openSession.punchIn": { $ne: null }, "openSession.punchOut": null }],
       }
     );
     if (!mutated) throw generateError("Attendance changed while punching out. Refresh and try again", 409);
     const calculated = await calculateAndPersist(mutated, context);
-    await appendPunchRevision({ record: calculated, actorId: actor.employeeId, operation: "punch_out", occurredAt: now });
-    return res.status(200).json({ success: true, data: calculated, message: "Punched out" });
+    await appendPunchRevision({
+      record: calculated,
+      actorId: actor.employeeId,
+      operation: "punch_out",
+      occurredAt: now,
+      previousPunchOut: punchUpdate.previousPunchOut,
+    });
+    return res.status(200).json({
+      success: true,
+      data: calculated,
+      message: punchUpdate.previousPunchOut ? "Final punch-out updated" : "Punched out",
+    });
   } catch (error) {
     next(error);
   }

@@ -10,7 +10,6 @@ const base = {
     minimumFullDayMinutes: 480,
     minimumHalfDayMinutes: 240,
     requirePunchOut: true,
-    allowMultiplePunches: true,
     missingPunchTreatment: "flag_incomplete" as const,
     overtimeEnabled: true,
     overtimeStartsAfterMinutes: 480,

@@ -48,7 +48,6 @@ const DEFAULT_RULES: AttendanceRules = {
   minimumFullDayMinutes: 480,
   minimumHalfDayMinutes: 240,
   requirePunchOut: true,
-  allowMultiplePunches: false,
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,

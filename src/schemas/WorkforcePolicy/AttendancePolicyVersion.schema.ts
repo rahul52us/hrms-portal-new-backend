@@ -6,7 +6,6 @@ export interface AttendanceRules {
   minimumFullDayMinutes: number;
   minimumHalfDayMinutes: number;
   requirePunchOut: boolean;
-  allowMultiplePunches: boolean;
   missingPunchTreatment: "flag_incomplete" | "half_day" | "absent";
   overtimeEnabled: boolean;
   overtimeStartsAfterMinutes: number;
@@ -34,7 +33,6 @@ const AttendanceRulesSchema = new Schema<AttendanceRules>(
     minimumFullDayMinutes: { type: Number, min: 1, default: 480 },
     minimumHalfDayMinutes: { type: Number, min: 1, default: 240 },
     requirePunchOut: { type: Boolean, default: true },
-    allowMultiplePunches: { type: Boolean, default: false },
     missingPunchTreatment: {
       type: String,
       enum: ["flag_incomplete", "half_day", "absent"],
