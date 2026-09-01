@@ -8,7 +8,7 @@ import RemoteWorkPolicyVersion, {
   RemoteWorkRules,
 } from "../../schemas/WorkforcePolicy/RemoteWorkPolicyVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
-import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -304,15 +304,16 @@ export async function publishRemoteWorkPolicyVersionService(req: any, res: Respo
       throw generateError("Another published version already starts on this date", 409);
     }
     const normalizedRules = normalizeRules({}, version.rules);
-    if (normalizedRules.approvalWorkflow || normalizedRules.approvalWorkflowVersion) {
-      const reference = await validatePublishedApprovalWorkflowReference({
-        company: companyObjectId,
-        workflowId: normalizedRules.approvalWorkflow,
-        versionId: normalizedRules.approvalWorkflowVersion,
-        requestType: "remote_work_request",
-      });
-      normalizedRules.approvalWorkflowVersionNumber = reference.versionNumber;
-    }
+    const reference = await resolveEffectiveApprovalWorkflowReference({
+      company: companyObjectId,
+      workflowId: normalizedRules.approvalWorkflow,
+      requestType: "remote_work_request",
+      at: effectiveFrom,
+      setupLabel: "WFH requests",
+    });
+    normalizedRules.approvalWorkflow = reference.workflow;
+    normalizedRules.approvalWorkflowVersion = reference.version;
+    normalizedRules.approvalWorkflowVersionNumber = reference.versionNumber;
     version.rules = normalizedRules as any;
     version.effectiveFrom = effectiveFrom;
     version.changeReason = changeReason || "Initial remote-work policy publication";

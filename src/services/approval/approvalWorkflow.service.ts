@@ -9,12 +9,14 @@ import ApprovalWorkflowVersion, {
   ApprovalWorkflowStepI,
 } from "../../schemas/Approval/ApprovalWorkflowVersion.schema";
 import User from "../../schemas/User/User";
+import { selectEffectiveApprovalWorkflowVersion } from "./approvalWorkflowVersion.utils";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
   escapeRegex,
   getPolicyActorId,
   normalizeText,
+  parseEffectiveDate,
   resolvePolicyCompany,
   validateObjectId,
   writePolicyAudit,
@@ -143,6 +145,48 @@ export async function validatePublishedApprovalWorkflowReference(options: {
   };
 }
 
+export async function resolveEffectiveApprovalWorkflowReference(options: {
+  company: mongoose.Types.ObjectId;
+  workflowId: unknown;
+  requestType: (typeof APPROVAL_REQUEST_TYPES)[number];
+  at?: Date;
+  setupLabel?: string;
+}) {
+  const workflowId = objectIdOrNull(options.workflowId);
+  const setupLabel = normalizeText(options.setupLabel) || options.requestType.replace(/_/g, " ");
+  if (!workflowId) {
+    throw generateError(`Approval workflow setup is incomplete for ${setupLabel}`, 409);
+  }
+
+  const workflow = await ApprovalWorkflow.findOne({
+    _id: workflowId,
+    company: options.company,
+    status: "active",
+    applicableTo: options.requestType,
+  }).lean();
+  if (!workflow) {
+    throw generateError(`The configured approval workflow is unavailable for ${setupLabel}`, 409);
+  }
+
+  const versions = await ApprovalWorkflowVersion.find({
+    company: options.company,
+    workflow: workflowId,
+    status: "published",
+  }).lean();
+  const version = selectEffectiveApprovalWorkflowVersion(versions, options.at || new Date());
+  if (!version) {
+    throw generateError(`No published approval workflow version is effective for ${setupLabel}`, 409);
+  }
+
+  return {
+    workflow: workflowId,
+    version: version._id as mongoose.Types.ObjectId,
+    versionNumber: version.versionNumber,
+    autoApprove: Boolean(version.autoApprove),
+    effectiveFrom: version.effectiveFrom || version.publishedAt || version.createdAt,
+  };
+}
+
 async function listWithVersions(company: mongoose.Types.ObjectId, match: any, page: number, limit: number) {
   const [workflows, total] = await Promise.all([
     ApprovalWorkflow.find(match).sort({ status: 1, name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
@@ -165,6 +209,7 @@ async function listWithVersions(company: mongoose.Types.ObjectId, match: any, pa
         ...workflow,
         draftVersion: items.find((item) => item.status === "draft") || null,
         latestPublishedVersion: items.find((item) => item.status === "published") || null,
+        effectivePublishedVersion: selectEffectiveApprovalWorkflowVersion(items, new Date()),
       };
     }),
     pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
@@ -223,6 +268,10 @@ export async function createApprovalWorkflowService(req: any, res: Response, nex
     if (code.length < 2) throw generateError("Approval workflow code must be at least 2 characters", 422);
     const applicableTo = normalizeApplicableTo(req.body?.applicableTo);
     const autoApprove = Boolean(req.body?.autoApprove);
+    const effectiveFrom = parseEffectiveDate(
+      req.body?.effectiveFrom || new Date(),
+      "Approval workflow effective-from date"
+    ) as Date;
     const steps = await normalizeSteps({ company: companyObjectId, input: req.body?.steps });
     if (autoApprove && steps.length) throw generateError("Automatic workflows cannot contain approval steps", 422);
 
@@ -241,6 +290,7 @@ export async function createApprovalWorkflowService(req: any, res: Response, nex
       workflow: workflow._id,
       versionNumber: 1,
       status: "draft",
+      effectiveFrom,
       autoApprove,
       steps,
       changeReason: normalizeText(req.body?.changeReason),
@@ -255,7 +305,7 @@ export async function createApprovalWorkflowService(req: any, res: Response, nex
         entityId: workflow._id as mongoose.Types.ObjectId,
         action: "created",
         actor: actorId,
-        details: { code, applicableTo, versionNumber: 1 },
+        details: { code, applicableTo, versionNumber: 1, effectiveFrom },
       }, session);
     });
     return res.status(201).json({ success: true, data: { workflow, version }, message: "Approval workflow draft created" });
@@ -278,6 +328,10 @@ export async function createApprovalWorkflowVersionService(req: any, res: Respon
       .sort({ versionNumber: -1 })
       .lean();
     const autoApprove = req.body?.autoApprove === undefined ? Boolean(latest?.autoApprove) : Boolean(req.body.autoApprove);
+    const effectiveFrom = parseEffectiveDate(
+      req.body?.effectiveFrom || new Date(),
+      "Approval workflow effective-from date"
+    ) as Date;
     const steps = await normalizeSteps({
       company: companyObjectId,
       input: req.body?.steps,
@@ -290,6 +344,7 @@ export async function createApprovalWorkflowVersionService(req: any, res: Respon
       workflow: workflow._id,
       versionNumber,
       status: "draft",
+      effectiveFrom,
       autoApprove,
       steps,
       changeReason: normalizeText(req.body?.changeReason),
@@ -321,6 +376,12 @@ export async function updateApprovalWorkflowVersionService(req: any, res: Respon
     if (autoApprove && steps.length) throw generateError("Automatic workflows cannot contain approval steps", 422);
     version.autoApprove = autoApprove;
     version.steps = steps as any;
+    if (req.body?.effectiveFrom !== undefined) {
+      version.effectiveFrom = parseEffectiveDate(
+        req.body.effectiveFrom,
+        "Approval workflow effective-from date"
+      ) as Date;
+    }
     if (req.body?.changeReason !== undefined) version.changeReason = normalizeText(req.body.changeReason);
     await version.save();
     return res.status(200).json({ success: true, data: version, message: "Approval workflow draft updated" });
@@ -350,7 +411,22 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
     });
     if (version.autoApprove && steps.length) throw generateError("Automatic workflows cannot contain approval steps", 422);
     if (!version.autoApprove && !steps.length) throw generateError("Add at least one approval step before publishing", 422);
+    const effectiveFrom = parseEffectiveDate(
+      req.body?.effectiveFrom || version.effectiveFrom || version.createdAt || new Date(),
+      "Approval workflow effective-from date"
+    ) as Date;
+    const duplicateEffectiveDate = await ApprovalWorkflowVersion.exists({
+      _id: { $ne: version._id },
+      company: companyObjectId,
+      workflow: workflow._id,
+      status: "published",
+      effectiveFrom,
+    });
+    if (duplicateEffectiveDate) {
+      throw generateError("Another published approval workflow version already starts on this date", 409);
+    }
     version.steps = steps as any;
+    version.effectiveFrom = effectiveFrom;
     version.status = "published";
     version.publishedAt = new Date();
     version.publishedBy = actorId;
@@ -363,7 +439,12 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
         entityId: version._id as mongoose.Types.ObjectId,
         action: "published",
         actor: actorId,
-        details: { workflow: workflow._id, versionNumber: version.versionNumber, autoApprove: version.autoApprove },
+        details: {
+          workflow: workflow._id,
+          versionNumber: version.versionNumber,
+          autoApprove: version.autoApprove,
+          effectiveFrom,
+        },
       }, session);
     });
     return res.status(200).json({ success: true, data: version, message: "Approval workflow published" });

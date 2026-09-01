@@ -13,7 +13,7 @@ import LeavePolicyVersion, {
 } from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
-import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -990,29 +990,28 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
     });
     if (!rules.length) throw generateError("Add at least one leave type rule before publishing", 422);
     for (const rule of rules) {
-      if (rule.requestApprovalWorkflow || rule.requestApprovalWorkflowVersion) {
-        const reference = await validatePublishedApprovalWorkflowReference({
-          company: companyObjectId,
-          workflowId: rule.requestApprovalWorkflow,
-          versionId: rule.requestApprovalWorkflowVersion,
-          requestType: "leave_request",
-        });
-        rule.requestApprovalWorkflowVersionNumber = reference.versionNumber;
-      }
-      if (rule.compOffClaimApprovalWorkflow || rule.compOffClaimApprovalWorkflowVersion) {
-        if (rule.entitlementMode !== "earned") {
-          throw generateError(
-            `${rule.leaveTypeCodeSnapshot} can use a comp-off claim workflow only when its entitlement is earned`,
-            422
-          );
-        }
-        const reference = await validatePublishedApprovalWorkflowReference({
+      const requestReference = await resolveEffectiveApprovalWorkflowReference({
+        company: companyObjectId,
+        workflowId: rule.requestApprovalWorkflow,
+        requestType: "leave_request",
+        at: effectiveFrom,
+        setupLabel: `${rule.leaveTypeCodeSnapshot} leave requests`,
+      });
+      rule.requestApprovalWorkflow = requestReference.workflow;
+      rule.requestApprovalWorkflowVersion = requestReference.version;
+      rule.requestApprovalWorkflowVersionNumber = requestReference.versionNumber;
+
+      if (rule.entitlementMode === "earned") {
+        const claimReference = await resolveEffectiveApprovalWorkflowReference({
           company: companyObjectId,
           workflowId: rule.compOffClaimApprovalWorkflow,
-          versionId: rule.compOffClaimApprovalWorkflowVersion,
           requestType: "comp_off_claim",
+          at: effectiveFrom,
+          setupLabel: `${rule.leaveTypeCodeSnapshot} comp-off claims`,
         });
-        rule.compOffClaimApprovalWorkflowVersionNumber = reference.versionNumber;
+        rule.compOffClaimApprovalWorkflow = claimReference.workflow;
+        rule.compOffClaimApprovalWorkflowVersion = claimReference.version;
+        rule.compOffClaimApprovalWorkflowVersionNumber = claimReference.versionNumber;
       }
     }
     const emptyEntitlementRule = rules.find(

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { buildFinalPunchSession } from "./attendancePunch.utils";
+import {
+  buildFinalPunchSession,
+  isPunchOutAllowedForAttendanceDay,
+  previousAttendanceDate,
+} from "./attendancePunch.utils";
 
 const at = (time: string) => new Date(`2026-08-31T${time}:00+05:30`);
 
@@ -41,7 +45,55 @@ function testPunchOutRequiresPunchIn() {
   assert.equal(buildFinalPunchSession([], at("18:00")), null);
 }
 
-[testLatestPunchOutWins, testLegacySessionsCollapseToFirstInAndLastOut, testPunchOutRequiresPunchIn]
-  .forEach((test) => test());
+function testPunchOutAttendanceDayWindow() {
+  assert.equal(previousAttendanceDate("2026-05-01"), "2026-04-30");
+  assert.equal(
+    isPunchOutAllowedForAttendanceDay({
+      attendanceDate: "2026-04-25",
+      currentAttendanceDate: "2026-04-25",
+      scheduleStartTime: "09:30",
+      scheduleEndTime: "18:30",
+    }),
+    true
+  );
+  assert.equal(
+    isPunchOutAllowedForAttendanceDay({
+      attendanceDate: "2026-04-25",
+      currentAttendanceDate: "2026-04-29",
+      scheduleStartTime: "09:30",
+      scheduleEndTime: "18:30",
+    }),
+    false
+  );
+}
 
-console.log("Attendance punch tests passed (3 tests)");
+function testOvernightPunchOutWindow() {
+  assert.equal(
+    isPunchOutAllowedForAttendanceDay({
+      attendanceDate: "2026-04-25",
+      currentAttendanceDate: "2026-04-26",
+      scheduleStartTime: "22:00",
+      scheduleEndTime: "06:00",
+    }),
+    true
+  );
+  assert.equal(
+    isPunchOutAllowedForAttendanceDay({
+      attendanceDate: "2026-04-25",
+      currentAttendanceDate: "2026-04-26",
+      scheduleStartTime: "09:30",
+      scheduleEndTime: "18:30",
+    }),
+    false
+  );
+}
+
+[
+  testLatestPunchOutWins,
+  testLegacySessionsCollapseToFirstInAndLastOut,
+  testPunchOutRequiresPunchIn,
+  testPunchOutAttendanceDayWindow,
+  testOvernightPunchOutWindow,
+].forEach((test) => test());
+
+console.log("Attendance punch tests passed (5 tests)");

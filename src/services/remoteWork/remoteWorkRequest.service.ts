@@ -26,6 +26,7 @@ import {
   createApprovalInstance,
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 
 const ACTIVE_STATUSES = ["submitted", "manager_approved", "approved"];
 const DAY_MS = 86400000;
@@ -321,10 +322,6 @@ async function calculateRequest(options: {
   const managerId = optionalObjectId(
     eligible[0].organizationAssignment?.reportingManager || options.employee.reportingManager
   );
-  const hasApprovalWorkflow = Boolean(rules.approvalWorkflow && rules.approvalWorkflowVersion);
-  if (!hasApprovalWorkflow && ["reporting_manager", "manager_then_hr"].includes(rules.approvalMode) && !managerId) {
-    throw generateError("Assign a reporting manager before requesting WFH under this policy", 422);
-  }
   const manager = managerId
     ? await User.findOne({ _id: managerId, company: options.company, is_enabled: { $ne: false } }).select("_id name").lean()
     : null;
@@ -431,10 +428,14 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
     const company = resolveEmployeeRequestCompanyId(actor, req.body?.companyId, "remote-work");
     const employee = await resolveEmployeeForRequest(actor, company, req.body?.employeeId);
     const result = await calculateRequest({ company, employee, ...req.body });
-    const usesApprovalWorkflow = Boolean(
-      result.rules.approvalWorkflow && result.rules.approvalWorkflowVersion
-    );
-    let autoApproved = !usesApprovalWorkflow && result.rules.approvalMode === "auto_approve";
+    const approvalWorkflow = await resolveEffectiveApprovalWorkflowReference({
+      company,
+      workflowId: result.rules.approvalWorkflow,
+      requestType: "remote_work_request",
+      at: new Date(),
+      setupLabel: "WFH requests",
+    });
+    let autoApproved = false;
     const request = new RemoteWorkRequest({
       company,
       employee: employee._id,
@@ -451,12 +452,10 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
       requestedUnits: result.requestedUnits,
       dates: result.dates,
       reason: result.reason,
-      status: autoApproved ? "approved" : "submitted",
+      status: "submitted",
       approvalModeSnapshot: result.rules.approvalMode,
-      approver: ["reporting_manager", "manager_then_hr"].includes(result.rules.approvalMode)
-        ? result.manager?._id || null
-        : null,
-      approverNameSnapshot: result.manager?.name || "",
+      approver: null,
+      approverNameSnapshot: "",
       reportingManager: result.manager?._id || null,
       reportingManagerNameSnapshot: result.manager?.name || "",
       remoteWorkPolicyAssignment: result.policy.assignmentId,
@@ -465,10 +464,10 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
       remoteWorkPolicyVersionNumber: result.policy.versionNumber,
       policyScopeTypeSnapshot: result.policy.scopeType,
       policyScopeNameSnapshot: result.policy.scopeName,
-      history: [event(actor, "submitted"), ...(autoApproved ? [event(actor, "auto_approved")] : [])],
+      history: [event(actor, "submitted")],
       submittedAt: new Date(),
-      decidedAt: autoApproved ? new Date() : null,
-      decidedBy: autoApproved ? actor._id : null,
+      decidedAt: null,
+      decidedBy: null,
       createdBy: actor._id,
     });
     await mongoose.connection.transaction(async (session) => {
@@ -483,33 +482,31 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
         })),
         { session }
       );
-      if (usesApprovalWorkflow) {
-        const approval = await createApprovalInstance({
-          company,
-          requestType: "remote_work_request",
-          requestModel: "RemoteWorkRequest",
-          requestId: request._id,
-          employee: {
-            ...employee,
-            departmentId: result.organization.department,
-            departmentNameSnapshot: result.organization.departmentNameSnapshot || employee.department || "",
-            teamNameSnapshot: result.organization.teamNameSnapshot || employee.team || "",
-            officeLocation: result.organization.officeLocation || employee.officeLocation || null,
-            reportingManager: result.organization.reportingManager || employee.reportingManager || null,
-          },
-          workflowId: result.rules.approvalWorkflow,
-          workflowVersionId: result.rules.approvalWorkflowVersion,
-          actorId: actor._id,
-          session,
-        });
-        syncRequestApprovalState(request, approval);
-        autoApproved = approval.finalApproved;
-        if (autoApproved) {
-          request.status = "approved";
-          request.decidedAt = new Date();
-          request.decidedBy = actor._id;
-          request.history.push(event(actor, "auto_approved") as any);
-        }
+      const approval = await createApprovalInstance({
+        company,
+        requestType: "remote_work_request",
+        requestModel: "RemoteWorkRequest",
+        requestId: request._id,
+        employee: {
+          ...employee,
+          departmentId: result.organization.department,
+          departmentNameSnapshot: result.organization.departmentNameSnapshot || employee.department || "",
+          teamNameSnapshot: result.organization.teamNameSnapshot || employee.team || "",
+          officeLocation: result.organization.officeLocation || employee.officeLocation || null,
+          reportingManager: result.organization.reportingManager || employee.reportingManager || null,
+        },
+        workflowId: approvalWorkflow.workflow,
+        workflowVersionId: approvalWorkflow.version,
+        actorId: actor._id,
+        session,
+      });
+      syncRequestApprovalState(request, approval);
+      autoApproved = approval.finalApproved;
+      if (autoApproved) {
+        request.status = "approved";
+        request.decidedAt = new Date();
+        request.decidedBy = actor._id;
+        request.history.push(event(actor, "auto_approved") as any);
       }
       await request.save({ session });
       if (autoApproved) await applyApprovedRemoteWorkToAttendance({ request, actor: actor._id, session });

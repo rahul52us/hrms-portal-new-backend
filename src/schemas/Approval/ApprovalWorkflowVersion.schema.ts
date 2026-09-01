@@ -22,6 +22,7 @@ export interface ApprovalWorkflowVersionI extends Document {
   workflow: mongoose.Types.ObjectId;
   versionNumber: number;
   status: "draft" | "published" | "cancelled";
+  effectiveFrom: Date;
   autoApprove: boolean;
   steps: ApprovalWorkflowStepI[];
   changeReason?: string;
@@ -56,6 +57,7 @@ const ApprovalWorkflowVersionSchema = new Schema<ApprovalWorkflowVersionI>(
       required: true,
       index: true,
     },
+    effectiveFrom: { type: Date, required: true, default: Date.now, index: true },
     autoApprove: { type: Boolean, default: false },
     steps: {
       type: [ApprovalWorkflowStepSchema],
@@ -81,6 +83,7 @@ ApprovalWorkflowVersionSchema.index(
   { unique: true }
 );
 ApprovalWorkflowVersionSchema.index({ company: 1, workflow: 1, status: 1 });
+ApprovalWorkflowVersionSchema.index({ company: 1, workflow: 1, status: 1, effectiveFrom: -1 });
 
 const ApprovalWorkflowVersion =
   (mongoose.models.ApprovalWorkflowVersion as mongoose.Model<ApprovalWorkflowVersionI>) ||

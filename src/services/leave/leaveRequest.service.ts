@@ -51,6 +51,7 @@ import {
   createApprovalInstance,
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -254,7 +255,9 @@ async function resolveLeaveApprovalWorkflow(company: mongoose.Types.ObjectId, ca
         .filter(mongoose.Types.ObjectId.isValid)
     )
   ).map((id) => new mongoose.Types.ObjectId(String(id)));
-  if (!versionIds.length) return null;
+  if (!versionIds.length) {
+    throw generateError("Approval workflow setup is incomplete because no leave policy version was resolved", 409);
+  }
 
   const versions = await LeavePolicyVersion.find({
     _id: { $in: versionIds },
@@ -271,23 +274,37 @@ async function resolveLeaveApprovalWorkflow(company: mongoose.Types.ObjectId, ca
     const rule = (version.rules || []).find((item: any) => String(item.leaveType) === String(leaveTypeId));
     if (!rule) throw generateError("The selected leave type is missing from its resolved policy version", 409);
     const workflowId = text(rule.requestApprovalWorkflow);
-    const workflowVersionId = text(rule.requestApprovalWorkflowVersion);
-    if (!workflowId && !workflowVersionId) return null;
-    if (!mongoose.Types.ObjectId.isValid(workflowId) || !mongoose.Types.ObjectId.isValid(workflowVersionId)) {
-      throw generateError("The leave policy has an incomplete approval workflow reference", 409);
+    if (!mongoose.Types.ObjectId.isValid(workflowId)) {
+      throw generateError(
+        `Approval workflow setup is incomplete for ${rule.leaveTypeCodeSnapshot || "this leave type"}`,
+        409
+      );
     }
-    return { workflowId, workflowVersionId };
+    return {
+      workflowId,
+      setupLabel: `${rule.leaveTypeCodeSnapshot || "Leave"} requests`,
+    };
   });
-  const keys = new Set(references.map((reference) => reference
-    ? `${reference.workflowId}:${reference.workflowVersionId}`
-    : "legacy"));
+  const keys = new Set(references.map((reference) => reference.workflowId));
   if (keys.size > 1) {
     throw generateError(
-      "The selected dates use different leave approval workflows. Submit separate requests for each policy period",
+      "The selected dates use different leave approval workflows. Submit separate requests for each workflow period",
       422
     );
   }
-  return references[0];
+  const reference = references[0];
+  const effective = await resolveEffectiveApprovalWorkflowReference({
+    company,
+    workflowId: reference.workflowId,
+    requestType: "leave_request",
+    at: new Date(),
+    setupLabel: reference.setupLabel,
+  });
+  return {
+    workflowId: effective.workflow,
+    workflowVersionId: effective.version,
+    workflowVersionNumber: effective.versionNumber,
+  };
 }
 
 function syncRequestApprovalState(request: any, approval: any) {
@@ -482,34 +499,32 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
           }
         }
       }
-      if (approvalWorkflow) {
-        const approval = await createApprovalInstance({
-          company,
-          requestType: "leave_request",
-          requestModel: "LeaveRequest",
-          requestId: request._id,
-          employee: {
-            ...employee,
-            departmentId: firstDay.department,
-            departmentNameSnapshot: firstDay.departmentNameSnapshot || employee.department || "",
-            teamNameSnapshot: firstDay.teamNameSnapshot || employee.team || "",
-            officeLocation: firstDay.officeLocation || employee.officeLocation || null,
-            reportingManager: firstDay.reportingManager || employee.reportingManager || null,
-          },
-          workflowId: approvalWorkflow.workflowId,
-          workflowVersionId: approvalWorkflow.workflowVersionId,
-          actorId: actor._id,
-          session,
-        });
-        syncRequestApprovalState(request, approval);
-        if (approval.finalApproved) {
-          await finalizeLeaveApproval(request, actor._id, session);
-          request.status = "approved";
-          request.decidedAt = new Date();
-          request.decidedBy = actor._id;
-          request.decisionComment = "Auto-approved by approval workflow";
-          request.history.push(event(actor, "approved", "Auto-approved by approval workflow") as any);
-        }
+      const approval = await createApprovalInstance({
+        company,
+        requestType: "leave_request",
+        requestModel: "LeaveRequest",
+        requestId: request._id,
+        employee: {
+          ...employee,
+          departmentId: firstDay.department,
+          departmentNameSnapshot: firstDay.departmentNameSnapshot || employee.department || "",
+          teamNameSnapshot: firstDay.teamNameSnapshot || employee.team || "",
+          officeLocation: firstDay.officeLocation || employee.officeLocation || null,
+          reportingManager: firstDay.reportingManager || employee.reportingManager || null,
+        },
+        workflowId: approvalWorkflow.workflowId,
+        workflowVersionId: approvalWorkflow.workflowVersionId,
+        actorId: actor._id,
+        session,
+      });
+      syncRequestApprovalState(request, approval);
+      if (approval.finalApproved) {
+        await finalizeLeaveApproval(request, actor._id, session);
+        request.status = "approved";
+        request.decidedAt = new Date();
+        request.decidedBy = actor._id;
+        request.decisionComment = "Auto-approved by approval workflow";
+        request.history.push(event(actor, "approved", "Auto-approved by approval workflow") as any);
       }
       await request.save({ session });
       if (attachments.length) {

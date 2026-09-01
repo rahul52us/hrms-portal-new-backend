@@ -6,7 +6,11 @@ import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordR
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import { calculateAttendance } from "./attendanceCalculator.utils";
-import { buildFinalPunchSession } from "./attendancePunch.utils";
+import {
+  buildFinalPunchSession,
+  isPunchOutAllowedForAttendanceDay,
+  previousAttendanceDate,
+} from "./attendancePunch.utils";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
 
@@ -328,12 +332,25 @@ function parseOptionalDate(value: unknown, label: string) {
   return parseAttendanceDate(text(value)).dateKey;
 }
 
+function canPunchOutForAttendanceDate(record: any, currentAttendanceDate: string) {
+  return Boolean(
+    record &&
+      isPunchOutAllowedForAttendanceDay({
+        attendanceDate: record.attendanceDate,
+        currentAttendanceDate,
+        scheduleStartTime: record.scheduleStartTimeSnapshot,
+        scheduleEndTime: record.scheduleEndTimeSnapshot,
+      })
+  );
+}
+
 export async function getTodayAttendanceService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = actorDetails(req);
     const now = new Date();
     const { context, attendanceDate, timezone } = await resolveCurrentContext({ ...actor, now });
-    const [record, activeRecord, remoteWorkAuthorization] = await Promise.all([
+    const recentAttendanceDates = [attendanceDate, previousAttendanceDate(attendanceDate)].filter(Boolean);
+    const [record, activeRecordCandidate, remoteWorkAuthorization] = await Promise.all([
       AttendanceRecord.findOne({
         company: actor.companyId,
         employee: actor.employeeId,
@@ -342,6 +359,7 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
       AttendanceRecord.findOne({
         company: actor.companyId,
         employee: actor.employeeId,
+        attendanceDate: { $in: recentAttendanceDates },
         state: { $ne: "finalized" },
         punchSessions: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } },
       })
@@ -349,6 +367,9 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
         .lean(),
       approvedRemoteWorkAuthorization({ ...actor, attendanceDate }),
     ]);
+    const activeRecord = canPunchOutForAttendanceDate(activeRecordCandidate, attendanceDate)
+      ? activeRecordCandidate
+      : null;
     const effectiveRecord = activeRecord || record;
     const effectivePunchIn = effectiveRecord?.punchSessions?.find(
       (session: any) => Boolean(session?.punchIn)
@@ -401,12 +422,19 @@ export async function punchInService(req: any, res: Response, next: NextFunction
     const now = new Date();
     const { context, attendanceDate, timezone } = await resolveCurrentContext({ ...actor, now });
     ensurePunchPolicies(context);
-    const activeRecord = await AttendanceRecord.findOne({
+    const recentAttendanceDates = [attendanceDate, previousAttendanceDate(attendanceDate)].filter(Boolean);
+    const activeRecordCandidate = await AttendanceRecord.findOne({
       company: actor.companyId,
       employee: actor.employeeId,
+      attendanceDate: { $in: recentAttendanceDates },
       state: { $ne: "finalized" },
       punchSessions: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } },
-    }).lean();
+    })
+      .sort({ attendanceDate: -1 })
+      .lean();
+    const activeRecord = canPunchOutForAttendanceDate(activeRecordCandidate, attendanceDate)
+      ? activeRecordCandidate
+      : null;
     if (activeRecord) {
       throw generateError(
         `You are already punched in for ${activeRecord.attendanceDate}`,
@@ -502,20 +530,29 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
     const actor = actorDetails(req);
     const now = new Date();
     const { attendanceDate } = await resolveCurrentContext({ ...actor, now });
-    const openRecord = await AttendanceRecord.findOne({
+    const recentAttendanceDates = [attendanceDate, previousAttendanceDate(attendanceDate)].filter(Boolean);
+    const openRecordCandidate = await AttendanceRecord.findOne({
       company: actor.companyId,
       employee: actor.employeeId,
+      attendanceDate: { $in: recentAttendanceDates },
       state: { $ne: "finalized" },
       punchSessions: { $elemMatch: { punchIn: { $ne: null }, punchOut: null } },
     }).sort({ attendanceDate: -1 });
-    const record = openRecord || await AttendanceRecord.findOne({
-      company: actor.companyId,
-      employee: actor.employeeId,
-      attendanceDate,
-      state: { $ne: "finalized" },
-      punchSessions: { $elemMatch: { punchIn: { $ne: null } } },
-    });
-    if (!record) throw generateError("Punch in before recording punch-out", 409);
+    const openRecord = canPunchOutForAttendanceDate(openRecordCandidate, attendanceDate)
+      ? openRecordCandidate
+      : null;
+    const record =
+      openRecord ||
+      (await AttendanceRecord.findOne({
+        company: actor.companyId,
+        employee: actor.employeeId,
+        attendanceDate,
+        state: { $ne: "finalized" },
+        punchSessions: { $elemMatch: { punchIn: { $ne: null } } },
+      }));
+    if (!record) {
+      throw generateError("Punch-out is available only for the current attendance day", 409);
+    }
 
     const punchUpdate = buildFinalPunchSession(record.punchSessions || [], now);
     if (!punchUpdate) throw generateError("Punch in before recording punch-out", 409);

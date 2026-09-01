@@ -29,6 +29,7 @@ import {
   createApprovalInstance,
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -281,9 +282,13 @@ export async function createCompOffClaimService(req: any, res: Response, next: N
       : null;
     const assignment = result.context.organizationAssignment || {};
     const reference = result.context.policyReferences.leavePolicy;
-    const usesApprovalWorkflow = Boolean(
-      eligible.rule.compOffClaimApprovalWorkflow && eligible.rule.compOffClaimApprovalWorkflowVersion
-    );
+    const approvalWorkflow = await resolveEffectiveApprovalWorkflowReference({
+      company,
+      workflowId: eligible.rule.compOffClaimApprovalWorkflow,
+      requestType: "comp_off_claim",
+      at: new Date(),
+      setupLabel: `${eligible.leaveType?.code || "Comp-off"} claims`,
+    });
     const claim = new CompOffClaim({
       company,
       employee: employeeId,
@@ -315,38 +320,36 @@ export async function createCompOffClaimService(req: any, res: Response, next: N
     });
     let autoApproved = false;
     await mongoose.connection.transaction(async (session) => {
-      if (usesApprovalWorkflow) {
-        const approval = await createApprovalInstance({
-          company,
-          requestType: "comp_off_claim",
-          requestModel: "CompOffClaim",
-          requestId: claim._id,
-          employee: {
-            ...result.employee,
-            departmentId: assignment.department,
-            departmentNameSnapshot: assignment.departmentNameSnapshot || result.employee.department || "",
-            teamNameSnapshot: assignment.teamNameSnapshot || result.employee.team || "",
-            officeLocation: assignment.officeLocation || result.employee.officeLocation || null,
-            reportingManager: assignment.reportingManager || result.employee.reportingManager || null,
-          },
-          workflowId: eligible.rule.compOffClaimApprovalWorkflow,
-          workflowVersionId: eligible.rule.compOffClaimApprovalWorkflowVersion,
-          actorId: actor._id,
-          session,
-        });
-        syncClaimApprovalState(claim, approval);
-        autoApproved = approval.finalApproved;
-        if (autoApproved) {
-          await finalizeCompOffClaim(claim, actor._id, session);
-          claim.status = "approved";
-          claim.currentApprovers = [];
-          claim.approver = null;
-          claim.approverNameSnapshot = "";
-          claim.decidedAt = new Date();
-          claim.decidedBy = actor._id;
-          claim.decisionComment = "Auto-approved by approval workflow";
-          claim.history.push(claimEvent(actor, "approved", "Auto-approved by approval workflow") as any);
-        }
+      const approval = await createApprovalInstance({
+        company,
+        requestType: "comp_off_claim",
+        requestModel: "CompOffClaim",
+        requestId: claim._id,
+        employee: {
+          ...result.employee,
+          departmentId: assignment.department,
+          departmentNameSnapshot: assignment.departmentNameSnapshot || result.employee.department || "",
+          teamNameSnapshot: assignment.teamNameSnapshot || result.employee.team || "",
+          officeLocation: assignment.officeLocation || result.employee.officeLocation || null,
+          reportingManager: assignment.reportingManager || result.employee.reportingManager || null,
+        },
+        workflowId: approvalWorkflow.workflow,
+        workflowVersionId: approvalWorkflow.version,
+        actorId: actor._id,
+        session,
+      });
+      syncClaimApprovalState(claim, approval);
+      autoApproved = approval.finalApproved;
+      if (autoApproved) {
+        await finalizeCompOffClaim(claim, actor._id, session);
+        claim.status = "approved";
+        claim.currentApprovers = [];
+        claim.approver = null;
+        claim.approverNameSnapshot = "";
+        claim.decidedAt = new Date();
+        claim.decidedBy = actor._id;
+        claim.decisionComment = "Auto-approved by approval workflow";
+        claim.history.push(claimEvent(actor, "approved", "Auto-approved by approval workflow") as any);
       }
       await claim.save({ session });
     });
