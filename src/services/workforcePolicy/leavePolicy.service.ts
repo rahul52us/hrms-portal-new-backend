@@ -1216,6 +1216,58 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
   }
 }
 
+export async function cancelLeavePolicyVersionService(req: any, res: Response, next: NextFunction) {
+  try {
+    ensurePolicyManager(req);
+    const { companyObjectId } = await resolvePolicyCompany(
+      req,
+      req.body.companyId || req.query.companyId,
+      true
+    );
+    const policy = await findLeavePolicy(companyObjectId, req.params.policyId);
+    const versionId = validateObjectId(req.params.versionId, "leave policy version id");
+    const version = await LeavePolicyVersion.findOne({
+      _id: new mongoose.Types.ObjectId(versionId),
+      company: companyObjectId,
+      policy: policy._id,
+    });
+    if (!version) throw generateError("Leave policy version not found", 404);
+    if (version.status === "cancelled") {
+      return res.status(200).json({
+        success: true,
+        message: "Leave policy draft is already cancelled",
+        data: version,
+      });
+    }
+    if (version.status !== "draft") {
+      throw generateError("Only draft leave policy versions can be cancelled", 409);
+    }
+    const reason = normalizeText(req.body.reason || req.body.cancellationReason);
+    if (reason.length < 3) throw generateError("Cancellation reason must be at least 3 characters", 422);
+    const actorId = getPolicyActorId(req);
+    version.status = "cancelled";
+    version.cancelledAt = new Date();
+    version.cancelledBy = actorId;
+    version.cancellationReason = reason;
+    await version.save();
+    await writePolicyAudit({
+      company: companyObjectId,
+      entityType: "leave_version",
+      entityId: version._id as mongoose.Types.ObjectId,
+      action: "draft_cancelled",
+      actor: actorId,
+      details: { policyId: policy._id, versionNumber: version.versionNumber, reason },
+    });
+    return res.status(200).json({
+      success: true,
+      message: "Leave policy draft cancelled",
+      data: version,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function archiveLeavePolicyService(req: any, res: Response, next: NextFunction) {
   try {
     ensurePolicyManager(req);

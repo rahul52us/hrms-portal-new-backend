@@ -40,6 +40,7 @@ import {
 import {
   archiveLeavePolicyService,
   archiveLeaveTypeService,
+  cancelLeavePolicyVersionService,
   createLeavePolicyService,
   createLeavePolicyVersionService,
   createLeaveTypeService,
@@ -137,6 +138,10 @@ workforcePoliciesRouting.put(
 workforcePoliciesRouting.post(
   "/leave-policies/:policyId/versions/:versionId/publish",
   publishLeavePolicyVersionService
+);
+workforcePoliciesRouting.post(
+  "/leave-policies/:policyId/versions/:versionId/cancel",
+  cancelLeavePolicyVersionService
 );
 
 workforcePoliciesRouting.get("/remote-work-policies", listRemoteWorkPoliciesService);

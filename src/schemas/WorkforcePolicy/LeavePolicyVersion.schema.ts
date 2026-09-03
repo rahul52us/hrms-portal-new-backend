@@ -92,6 +92,9 @@ export interface LeavePolicyVersionI extends Document {
   createdBy: mongoose.Types.ObjectId;
   publishedAt?: Date | null;
   publishedBy?: mongoose.Types.ObjectId | null;
+  cancelledAt?: Date | null;
+  cancelledBy?: mongoose.Types.ObjectId | null;
+  cancellationReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -184,6 +187,9 @@ const LeavePolicyVersionSchema = new Schema<LeavePolicyVersionI>(
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     publishedAt: { type: Date, default: null },
     publishedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    cancellationReason: { type: String, trim: true, default: "" },
   },
   { timestamps: true }
 );

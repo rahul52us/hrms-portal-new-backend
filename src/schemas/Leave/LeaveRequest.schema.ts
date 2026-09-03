@@ -236,7 +236,7 @@ const LeaveDocumentRequirementSnapshotSchema = new Schema<LeaveDocumentRequireme
     thresholdUnits: { type: Number, min: 0.25, default: null },
     submissionMode: {
       type: String,
-      enum: ["with_request", "allow_later"],
+      enum: ["with_request", "allow_later", null],
       default: null,
     },
     dueDaysAfterLeaveEnd: { type: Number, min: 0, max: 365, default: null },
