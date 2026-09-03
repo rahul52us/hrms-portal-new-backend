@@ -9,6 +9,13 @@ export const LEAVE_REQUEST_STATUSES = [
 ] as const;
 
 export const LEAVE_DAY_PORTIONS = ["full", "first_half", "second_half"] as const;
+export const LEAVE_DOCUMENT_STATUSES = [
+  "not_required",
+  "pending",
+  "submitted",
+  "verified",
+  "waived",
+] as const;
 
 export interface LeaveRequestDayI {
   attendanceDate: string;
@@ -51,7 +58,15 @@ export interface LeaveRequestDayI {
 }
 
 export interface LeaveRequestEventI {
-  action: "submitted" | "approved" | "rejected" | "withdrawn" | "cancelled";
+  action:
+    | "submitted"
+    | "approved"
+    | "rejected"
+    | "withdrawn"
+    | "cancelled"
+    | "documents_uploaded"
+    | "documents_verified"
+    | "documents_waived";
   actor: mongoose.Types.ObjectId;
   actorRole: string;
   comment?: string;
@@ -64,6 +79,14 @@ export interface LeaveRequestAttachmentI {
   url: string;
   type: string;
   size: number;
+}
+
+export interface LeaveDocumentRequirementSnapshotI {
+  required: boolean;
+  thresholdUnits?: number | null;
+  submissionMode?: "with_request" | "allow_later" | null;
+  dueDaysAfterLeaveEnd?: number | null;
+  dueDate?: string | null;
 }
 
 export interface CompOffAllocationI {
@@ -100,6 +123,14 @@ export interface LeaveRequestI extends Document {
   dayBreakdown: LeaveRequestDayI[];
   reason: string;
   attachments: LeaveRequestAttachmentI[];
+  documentRequirementSnapshot: LeaveDocumentRequirementSnapshotI;
+  documentStatus: (typeof LEAVE_DOCUMENT_STATUSES)[number];
+  documentSubmittedAt?: Date | null;
+  documentVerifiedAt?: Date | null;
+  documentVerifiedBy?: mongoose.Types.ObjectId | null;
+  documentWaivedAt?: Date | null;
+  documentWaivedBy?: mongoose.Types.ObjectId | null;
+  documentDecisionComment?: string;
   status: (typeof LEAVE_REQUEST_STATUSES)[number];
   approver?: mongoose.Types.ObjectId | null;
   currentApprovers: mongoose.Types.ObjectId[];
@@ -166,7 +197,20 @@ const LeaveRequestDaySchema = new Schema<LeaveRequestDayI>(
 
 const LeaveRequestEventSchema = new Schema<LeaveRequestEventI>(
   {
-    action: { type: String, enum: ["submitted", "approved", "rejected", "withdrawn", "cancelled"], required: true },
+    action: {
+      type: String,
+      enum: [
+        "submitted",
+        "approved",
+        "rejected",
+        "withdrawn",
+        "cancelled",
+        "documents_uploaded",
+        "documents_verified",
+        "documents_waived",
+      ],
+      required: true,
+    },
     actor: { type: Schema.Types.ObjectId, ref: "User", required: true },
     actorRole: { type: String, required: true, trim: true },
     comment: { type: String, trim: true },
@@ -182,6 +226,21 @@ const LeaveRequestAttachmentSchema = new Schema<LeaveRequestAttachmentI>(
     url: { type: String, required: true, trim: true },
     type: { type: String, required: true, trim: true },
     size: { type: Number, min: 0, required: true },
+  },
+  { _id: false }
+);
+
+const LeaveDocumentRequirementSnapshotSchema = new Schema<LeaveDocumentRequirementSnapshotI>(
+  {
+    required: { type: Boolean, default: false, required: true },
+    thresholdUnits: { type: Number, min: 0.25, default: null },
+    submissionMode: {
+      type: String,
+      enum: ["with_request", "allow_later"],
+      default: null,
+    },
+    dueDaysAfterLeaveEnd: { type: Number, min: 0, max: 365, default: null },
+    dueDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/, default: null },
   },
   { _id: false }
 );
@@ -234,6 +293,23 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
     dayBreakdown: { type: [LeaveRequestDaySchema], required: true },
     reason: { type: String, required: true, trim: true, maxlength: 2000 },
     attachments: { type: [LeaveRequestAttachmentSchema], default: [] },
+    documentRequirementSnapshot: {
+      type: LeaveDocumentRequirementSnapshotSchema,
+      default: () => ({ required: false }),
+    },
+    documentStatus: {
+      type: String,
+      enum: LEAVE_DOCUMENT_STATUSES,
+      default: "not_required",
+      required: true,
+      index: true,
+    },
+    documentSubmittedAt: { type: Date, default: null },
+    documentVerifiedAt: { type: Date, default: null },
+    documentVerifiedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    documentWaivedAt: { type: Date, default: null },
+    documentWaivedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    documentDecisionComment: { type: String, trim: true },
     status: { type: String, enum: LEAVE_REQUEST_STATUSES, default: "submitted", required: true, index: true },
     approver: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     currentApprovers: [{ type: Schema.Types.ObjectId, ref: "User" }],
@@ -256,6 +332,7 @@ LeaveRequestSchema.index({ company: 1, approver: 1, status: 1, submittedAt: -1 }
 LeaveRequestSchema.index({ company: 1, currentApprovers: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, departmentNameSnapshot: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, leaveType: 1, status: 1, fromDate: -1 });
+LeaveRequestSchema.index({ company: 1, documentStatus: 1, submittedAt: -1 });
 
 const LeaveRequest =
   (mongoose.models.LeaveRequest as mongoose.Model<LeaveRequestI>) ||

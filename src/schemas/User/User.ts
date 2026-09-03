@@ -126,7 +126,7 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     lowercase: true,
     index: true,
   },
-  department: { type: String, trim: true, ref: "Department" },
+  department: { type: String, trim: true },
   team: { type: String, trim: true },
   hrScope: {
     departments: {

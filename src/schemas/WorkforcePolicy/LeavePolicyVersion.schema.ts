@@ -5,6 +5,7 @@ export const LEAVE_PROBATION_RULES = ["allowed", "after_confirmation", "not_allo
 export const LEAVE_CREDIT_COMPONENT_FREQUENCIES = ["upfront", "monthly", "quarterly"] as const;
 export const LEAVE_UPFRONT_CREDIT_TIMINGS = ["leave_year_start", "first_eligibility"] as const;
 export const LEAVE_ENTITLEMENT_MODES = ["fixed", "earned", "manual", "untracked"] as const;
+export const LEAVE_DOCUMENT_SUBMISSION_MODES = ["with_request", "allow_later"] as const;
 
 export interface LeaveCreditComponent {
   componentId: string;
@@ -39,6 +40,9 @@ export interface LeavePolicyRule {
   minimumRequestDays: number;
   maximumRequestDays?: number | null;
   minimumNoticeDays: number;
+  documentRequiredFromUnits?: number | null;
+  documentSubmissionMode: (typeof LEAVE_DOCUMENT_SUBMISSION_MODES)[number];
+  documentDueDaysAfterLeaveEnd: number;
   documentRequiredAfterDays?: number | null;
   probationEligibility: (typeof LEAVE_PROBATION_RULES)[number];
   sandwichRuleEnabled: boolean;
@@ -132,6 +136,14 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     minimumRequestDays: { type: Number, min: 0.25, default: 1 },
     maximumRequestDays: { type: Number, min: 0.25, default: null },
     minimumNoticeDays: { type: Number, min: 0, default: 0 },
+    documentRequiredFromUnits: { type: Number, min: 0.25, default: null },
+    documentSubmissionMode: {
+      type: String,
+      enum: LEAVE_DOCUMENT_SUBMISSION_MODES,
+      default: "allow_later",
+    },
+    documentDueDaysAfterLeaveEnd: { type: Number, min: 0, max: 365, default: 2 },
+    // Retained only so existing published policy versions continue to resolve.
     documentRequiredAfterDays: { type: Number, min: 0.25, default: null },
     probationEligibility: { type: String, enum: LEAVE_PROBATION_RULES, default: "allowed" },
     sandwichRuleEnabled: { type: Boolean, default: false },

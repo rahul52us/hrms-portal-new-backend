@@ -42,6 +42,7 @@
     "test:comp-off": "ts-node src/services/compOff/compOffClaim.test.ts",
     "test:approval-workflow": "ts-node src/services/approval/approvalDecision.test.ts",
     "test:approval-workflow-version": "ts-node src/services/approval/approvalWorkflowVersion.test.ts",
+    "test:user-schema": "ts-node src/schemas/User/User.schema.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

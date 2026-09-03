@@ -324,22 +324,45 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
     }
   }
 
-  const documentThresholds = rules
-    .map((rule) => Number(rule.documentRequiredAfterDays))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  const documentRequiredAfter = documentThresholds.length
-    ? Math.min(...documentThresholds)
+  const documentRules = rules
+    .map((rule) => ({
+      thresholdUnits: Number(
+        rule.documentRequiredFromUnits ?? rule.documentRequiredAfterDays
+      ),
+      submissionMode:
+        rule.documentSubmissionMode === "with_request"
+          ? "with_request"
+          : "allow_later",
+      dueDaysAfterLeaveEnd: Number(rule.documentDueDaysAfterLeaveEnd ?? 2),
+    }))
+    .filter((rule) => Number.isFinite(rule.thresholdUnits) && rule.thresholdUnits > 0);
+  const documentRequiredFrom = documentRules.length
+    ? Math.min(...documentRules.map((rule) => rule.thresholdUnits))
     : null;
-  if (
-    documentRequiredAfter !== null &&
-    chargedUnits > documentRequiredAfter &&
-    Number(input.attachmentCount || 0) === 0
-  ) {
-    throw generateError(
-      `A supporting document is required for leave longer than ${documentRequiredAfter} ${input.leaveUnit}`,
-      422
-    );
-  }
+  const documentRequired =
+    documentRequiredFrom !== null && chargedUnits >= documentRequiredFrom;
+  const documentSubmissionMode = documentRequired
+    ? documentRules.some((rule) => rule.submissionMode === "with_request")
+      ? "with_request"
+      : "allow_later"
+    : null;
+  const documentDueDaysAfterLeaveEnd = documentRequired && documentSubmissionMode === "allow_later"
+    ? Math.max(
+        0,
+        Math.min(
+          ...documentRules.map((rule) =>
+            Number.isFinite(rule.dueDaysAfterLeaveEnd)
+              ? rule.dueDaysAfterLeaveEnd
+              : 2
+          )
+        )
+      )
+    : null;
+  const documentDueDate = documentDueDaysAfterLeaveEnd === null
+    ? null
+    : formatUtcDate(
+        addUtcDays(parseAttendanceDate(input.toDate).date, documentDueDaysAfterLeaveEnd)
+      );
 
   const balanceRulesByYear = new Map<string, any>();
   days.forEach((day, index) => {
@@ -381,7 +404,15 @@ export function calculateLeaveRequest(input: LeaveCalculationInput) {
       minimumRequest,
       maximumRequest,
       minimumNoticeDays,
-      documentRequiredAfter,
+      documentRequiredFrom,
+    },
+    documentRequirement: {
+      required: documentRequired,
+      thresholdUnits: documentRequiredFrom,
+      submissionMode: documentSubmissionMode,
+      dueDaysAfterLeaveEnd: documentDueDaysAfterLeaveEnd,
+      dueDate: documentDueDate,
+      provided: Number(input.attachmentCount || 0) > 0,
     },
     entitlementMode: days[0]?.entitlementMode || "fixed",
   };

@@ -79,10 +79,13 @@ function currentDateKey() {
 async function resolveAttachments(
   value: unknown,
   company: mongoose.Types.ObjectId,
-  actorId: mongoose.Types.ObjectId
+  actorId: mongoose.Types.ObjectId,
+  maximum = 5
 ) {
   if (!Array.isArray(value)) return [];
-  if (value.length > 5) throw generateError("A leave request can include at most 5 attachments", 422);
+  if (value.length > maximum) {
+    throw generateError(`A leave request can include at most ${maximum} additional attachment${maximum === 1 ? "" : "s"}`, 422);
+  }
   const ids = value.map((item: any) => objectId(item?._id || item?.attachment || item, "leave attachment id"));
   if (new Set(ids.map(String)).size !== ids.length) {
     throw generateError("A leave attachment can be included only once", 422);
@@ -236,6 +239,8 @@ function populateRequest(query: any) {
     .populate("leaveType", "name code color unit paid balanceTracked")
     .populate("approver", "name username code role designation")
     .populate("currentApprovers", "name username code role designation")
+    .populate("documentVerifiedBy", "name username code role")
+    .populate("documentWaivedBy", "name username code role")
     .populate({
       path: "approvalInstance",
       populate: [
@@ -244,6 +249,27 @@ function populateRequest(query: any) {
       ],
     })
     .populate("history.actor", "name username role");
+}
+
+function ensureCanManageLeaveDocuments(actor: any, request: any) {
+  if (!['superadmin', 'admin', 'hradmin', 'hr'].includes(actor.role)) {
+    throw generateError("Only HR or a company administrator can verify or waive leave documents", 403);
+  }
+  if (
+    !hasPermission(actor, PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS) ||
+    !isEmployeeInActorScope(
+      actor,
+      requestScopeEmployee(request),
+      PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS
+    )
+  ) {
+    throw generateError("You cannot manage leave documents for this employee", 403);
+  }
+}
+
+function ensureCanAddLeaveDocuments(actor: any, request: any) {
+  if (String(request.employee?._id || request.employee) === String(actor._id)) return;
+  ensureCanManageLeaveDocuments(actor, request);
 }
 
 async function resolveLeaveApprovalWorkflow(company: mongoose.Types.ObjectId, calculation: any, leaveTypeId: any) {
@@ -385,6 +411,23 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       requestedHours: req.body?.requestedHours,
       attachmentCount: attachments.length,
     });
+    const documentRequirement = result.calculation.documentRequirement || {
+      required: false,
+      thresholdUnits: null,
+      submissionMode: null,
+      dueDaysAfterLeaveEnd: null,
+      dueDate: null,
+    };
+    if (
+      documentRequirement.required &&
+      documentRequirement.submissionMode === "with_request" &&
+      attachments.length === 0
+    ) {
+      throw generateError(
+        `A supporting document is required for ${result.calculation.chargedUnits} ${result.leaveType.unit} of ${result.leaveType.name}`,
+        422
+      );
+    }
     const overlap = await LeaveRequest.exists({
       company,
       employee: employee._id,
@@ -434,6 +477,19 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       dayBreakdown: result.calculation.dayBreakdown,
       reason,
       attachments,
+      documentRequirementSnapshot: {
+        required: Boolean(documentRequirement.required),
+        thresholdUnits: documentRequirement.thresholdUnits,
+        submissionMode: documentRequirement.submissionMode,
+        dueDaysAfterLeaveEnd: documentRequirement.dueDaysAfterLeaveEnd,
+        dueDate: documentRequirement.dueDate,
+      },
+      documentStatus: documentRequirement.required
+        ? attachments.length
+          ? "submitted"
+          : "pending"
+        : "not_required",
+      documentSubmittedAt: documentRequirement.required && attachments.length ? new Date() : null,
       status: "submitted",
       approver: manager?._id || null,
       approverNameSnapshot: manager?.name || "",
@@ -592,6 +648,159 @@ export async function uploadLeaveAttachmentService(req: any, res: Response, next
       },
       message: "Leave attachment uploaded",
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function addLeaveRequestDocumentsService(req: any, res: Response, next: NextFunction) {
+  try {
+    const actor = getLeaveActor(req);
+    const company = resolveLeaveCompanyId(actor, req.body?.companyId || req.query?.companyId);
+    const requestId = objectId(req.params.requestId, "leave request id");
+    const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
+    if (!candidate) throw generateError("Leave request not found", 404);
+    ensureCanAddLeaveDocuments(actor, candidate);
+    if (!candidate.documentRequirementSnapshot?.required) {
+      throw generateError("This leave request does not require supporting documents", 409);
+    }
+    if (["rejected", "withdrawn", "cancelled"].includes(candidate.status)) {
+      throw generateError("Documents cannot be added to a closed leave request", 409);
+    }
+    if (["verified", "waived"].includes(candidate.documentStatus)) {
+      throw generateError("Document compliance is already complete for this request", 409);
+    }
+
+    const existingCount = Array.isArray(candidate.attachments) ? candidate.attachments.length : 0;
+    const remaining = 5 - existingCount;
+    if (remaining <= 0) throw generateError("A leave request can include at most 5 attachments", 422);
+    const attachments = await resolveAttachments(
+      req.body?.attachments,
+      company,
+      actor._id,
+      remaining
+    );
+    if (!attachments.length) throw generateError("Add at least one supporting document", 422);
+
+    await mongoose.connection.transaction(async (session) => {
+      const request = await LeaveRequest.findOne({ _id: requestId, company }).session(session);
+      if (!request) throw generateError("Leave request not found", 404);
+      if (["rejected", "withdrawn", "cancelled"].includes(request.status)) {
+        throw generateError("Documents cannot be added to a closed leave request", 409);
+      }
+      if (["verified", "waived"].includes(request.documentStatus)) {
+        throw generateError("Document compliance is already complete for this request", 409);
+      }
+      if (request.attachments.length + attachments.length > 5) {
+        throw generateError("A leave request can include at most 5 attachments", 422);
+      }
+
+      const attachmentIds = attachments.map((item) => item.attachment);
+      const linked = await LeaveAttachment.updateMany(
+        { _id: { $in: attachmentIds }, company, uploadedBy: actor._id, linkedRequest: null },
+        { $set: { linkedRequest: request._id } },
+        { session }
+      );
+      if (linked.modifiedCount !== attachmentIds.length) {
+        throw generateError("One or more leave attachments were already used", 409);
+      }
+      request.attachments.push(...(attachments as any));
+      request.documentStatus = "submitted";
+      request.documentSubmittedAt = new Date();
+      request.documentVerifiedAt = null;
+      request.documentVerifiedBy = null;
+      request.documentDecisionComment = "";
+      request.history.push(
+        event(actor, "documents_uploaded", `${attachments.length} supporting document${attachments.length === 1 ? "" : "s"} uploaded`) as any
+      );
+      await request.save({ session });
+    });
+
+    const updated = await populateRequest(LeaveRequest.findById(requestId));
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: "Supporting documents added",
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function verifyLeaveRequestDocumentsService(req: any, res: Response, next: NextFunction) {
+  try {
+    const actor = getLeaveActor(req);
+    const company = resolveLeaveCompanyId(actor, req.body?.companyId || req.query?.companyId);
+    const requestId = objectId(req.params.requestId, "leave request id");
+    const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
+    if (!candidate) throw generateError("Leave request not found", 404);
+    ensureCanManageLeaveDocuments(actor, candidate);
+    if (!candidate.documentRequirementSnapshot?.required) {
+      throw generateError("This leave request does not require supporting documents", 409);
+    }
+    if (candidate.documentStatus !== "submitted" || !candidate.attachments.length) {
+      throw generateError("Submitted supporting documents are required before verification", 409);
+    }
+    const comment = text(req.body?.comment);
+
+    const request = await LeaveRequest.findOneAndUpdate(
+      { _id: requestId, company, documentStatus: "submitted" },
+      {
+        $set: {
+          documentStatus: "verified",
+          documentVerifiedAt: new Date(),
+          documentVerifiedBy: actor._id,
+          documentWaivedAt: null,
+          documentWaivedBy: null,
+          documentDecisionComment: comment,
+        },
+        $push: { history: event(actor, "documents_verified", comment || undefined) },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!request) throw generateError("Document status changed; refresh and try again", 409);
+    const updated = await populateRequest(LeaveRequest.findById(requestId));
+    return res.status(200).json({ success: true, data: updated, message: "Supporting documents verified" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function waiveLeaveRequestDocumentsService(req: any, res: Response, next: NextFunction) {
+  try {
+    const actor = getLeaveActor(req);
+    const company = resolveLeaveCompanyId(actor, req.body?.companyId || req.query?.companyId);
+    const requestId = objectId(req.params.requestId, "leave request id");
+    const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
+    if (!candidate) throw generateError("Leave request not found", 404);
+    ensureCanManageLeaveDocuments(actor, candidate);
+    if (!candidate.documentRequirementSnapshot?.required) {
+      throw generateError("This leave request does not require supporting documents", 409);
+    }
+    if (!["pending", "submitted"].includes(candidate.documentStatus)) {
+      throw generateError("Only pending or submitted document requirements can be waived", 409);
+    }
+    const comment = text(req.body?.comment);
+    if (comment.length < 3) throw generateError("A document waiver reason is required", 422);
+
+    const request = await LeaveRequest.findOneAndUpdate(
+      { _id: requestId, company, documentStatus: { $in: ["pending", "submitted"] } },
+      {
+        $set: {
+          documentStatus: "waived",
+          documentWaivedAt: new Date(),
+          documentWaivedBy: actor._id,
+          documentVerifiedAt: null,
+          documentVerifiedBy: null,
+          documentDecisionComment: comment,
+        },
+        $push: { history: event(actor, "documents_waived", comment) },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!request) throw generateError("Document status changed; refresh and try again", 409);
+    const updated = await populateRequest(LeaveRequest.findById(requestId));
+    return res.status(200).json({ success: true, data: updated, message: "Document requirement waived" });
   } catch (error) {
     next(error);
   }

@@ -2,6 +2,7 @@ import express from "express";
 import authenticate from "../modules/config/authenticate";
 import {
   adjustLeaveBalanceService,
+  addLeaveRequestDocumentsService,
   approveLeaveRequestService,
   cancelLeaveRequestService,
   createLeaveRequestService,
@@ -16,6 +17,8 @@ import {
   rejectLeaveRequestService,
   withdrawLeaveRequestService,
   uploadLeaveAttachmentService,
+  verifyLeaveRequestDocumentsService,
+  waiveLeaveRequestDocumentsService,
 } from "../services/leave/leaveRequest.service";
 
 const leaveRouting = express.Router();
@@ -32,6 +35,9 @@ leaveRouting.post("/requests/preview", previewLeaveRequestService);
 leaveRouting.post("/requests", createLeaveRequestService);
 leaveRouting.get("/requests", listLeaveRequestsService);
 leaveRouting.get("/requests/:requestId", getLeaveRequestService);
+leaveRouting.post("/requests/:requestId/documents", addLeaveRequestDocumentsService);
+leaveRouting.post("/requests/:requestId/documents/verify", verifyLeaveRequestDocumentsService);
+leaveRouting.post("/requests/:requestId/documents/waive", waiveLeaveRequestDocumentsService);
 leaveRouting.post("/requests/:requestId/approve", approveLeaveRequestService);
 leaveRouting.post("/requests/:requestId/reject", rejectLeaveRequestService);
 leaveRouting.post("/requests/:requestId/withdraw", withdrawLeaveRequestService);

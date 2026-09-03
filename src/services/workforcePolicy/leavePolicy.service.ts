@@ -5,6 +5,7 @@ import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
 import LeavePolicyVersion, {
   LEAVE_ACCRUAL_FREQUENCIES,
   LEAVE_CREDIT_COMPONENT_FREQUENCIES,
+  LEAVE_DOCUMENT_SUBMISSION_MODES,
   LEAVE_ENTITLEMENT_MODES,
   LEAVE_PROBATION_RULES,
   LEAVE_UPFRONT_CREDIT_TIMINGS,
@@ -358,6 +359,36 @@ async function normalizeLeaveRules(options: {
         422
       );
     }
+    const hasDocumentThreshold = Object.prototype.hasOwnProperty.call(
+      inputRule,
+      "documentRequiredFromUnits"
+    );
+    const hasLegacyDocumentThreshold = Object.prototype.hasOwnProperty.call(
+      inputRule,
+      "documentRequiredAfterDays"
+    );
+    const documentRequiredFromUnits = normalizeOptionalNumber(
+      hasDocumentThreshold
+        ? inputRule.documentRequiredFromUnits
+        : hasLegacyDocumentThreshold
+          ? inputRule.documentRequiredAfterDays
+          : undefined,
+      current.documentRequiredFromUnits ?? current.documentRequiredAfterDays ?? null,
+      `${leaveType.code} document threshold`
+    );
+    const documentSubmissionMode = normalizeText(
+      inputRule.documentSubmissionMode || current.documentSubmissionMode || "allow_later"
+    ) as LeavePolicyRule["documentSubmissionMode"];
+    if (!LEAVE_DOCUMENT_SUBMISSION_MODES.includes(documentSubmissionMode as any)) {
+      throw generateError(`Invalid document submission mode for ${leaveType.code}`, 400);
+    }
+    const documentDueDaysAfterLeaveEnd = normalizeNumber(
+      inputRule.documentDueDaysAfterLeaveEnd,
+      Number(current.documentDueDaysAfterLeaveEnd ?? 2),
+      `${leaveType.code} document due period`,
+      0,
+      365
+    );
 
     return {
       leaveType: new mongoose.Types.ObjectId(leaveTypeId),
@@ -412,11 +443,10 @@ async function normalizeLeaveRules(options: {
         Number(current.minimumNoticeDays || 0),
         `${leaveType.code} notice days`
       ),
-      documentRequiredAfterDays: normalizeOptionalNumber(
-        inputRule.documentRequiredAfterDays,
-        current.documentRequiredAfterDays ?? null,
-        `${leaveType.code} document threshold`
-      ),
+      documentRequiredFromUnits,
+      documentSubmissionMode,
+      documentDueDaysAfterLeaveEnd,
+      documentRequiredAfterDays: null,
       probationEligibility,
       sandwichRuleEnabled: normalizeBoolean(
         inputRule.sandwichRuleEnabled,
@@ -1073,6 +1103,24 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
     );
     for (const rule of rules) {
       const unit = leaveTypeUnitById.get(String(rule.leaveType)) || "days";
+      if (rule.documentRequiredFromUnits !== null && rule.documentRequiredFromUnits !== undefined) {
+        const documentIncrement = unit === "hours" ? 0.25 : rule.allowHalfDay ? 0.5 : 1;
+        if (!usesIncrement(rule.documentRequiredFromUnits, documentIncrement)) {
+          throw generateError(
+            `${rule.leaveTypeCodeSnapshot} document threshold must use valid ${unit} increments`,
+            422
+          );
+        }
+        if (
+          rule.documentSubmissionMode === "allow_later" &&
+          !Number.isInteger(rule.documentDueDaysAfterLeaveEnd)
+        ) {
+          throw generateError(
+            `${rule.leaveTypeCodeSnapshot} document due period must use whole calendar days`,
+            422
+          );
+        }
+      }
       if (unit === "hours") {
         if (!usesIncrement(rule.minimumRequestDays, 0.25)) {
           throw generateError(

@@ -69,6 +69,50 @@ function run() {
   assert.equal(ordinary.requestedUnits, 3);
   assert.equal(ordinary.chargedUnits, 2);
 
+  const documentRequired = calculateLeaveRequest({
+    leaveTypeId,
+    leaveUnit: "days",
+    fromDate: "2026-08-24",
+    toDate: "2026-08-25",
+    contexts: [
+      context("2026-08-24", "working_day", {
+        rule: {
+          documentRequiredFromUnits: 2,
+          documentSubmissionMode: "allow_later",
+          documentDueDaysAfterLeaveEnd: 2,
+        },
+      }),
+      context("2026-08-25", "working_day", {
+        rule: {
+          documentRequiredFromUnits: 2,
+          documentSubmissionMode: "allow_later",
+          documentDueDaysAfterLeaveEnd: 2,
+        },
+      }),
+    ],
+    currentDate: "2026-08-21",
+  });
+  assert.deepEqual(documentRequired.documentRequirement, {
+    required: true,
+    thresholdUnits: 2,
+    submissionMode: "allow_later",
+    dueDaysAfterLeaveEnd: 2,
+    dueDate: "2026-08-27",
+    provided: false,
+  });
+
+  const documentNotRequired = calculateLeaveRequest({
+    leaveTypeId,
+    leaveUnit: "days",
+    fromDate: "2026-08-24",
+    toDate: "2026-08-24",
+    contexts: [context("2026-08-24", "working_day", {
+      rule: { documentRequiredFromUnits: 2 },
+    })],
+    currentDate: "2026-08-21",
+  });
+  assert.equal(documentNotRequired.documentRequirement.required, false);
+
   const sandwich = calculateLeaveRequest({
     leaveTypeId,
     leaveUnit: "days",
