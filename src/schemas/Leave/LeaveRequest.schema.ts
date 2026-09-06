@@ -64,6 +64,9 @@ export interface LeaveRequestEventI {
     | "rejected"
     | "withdrawn"
     | "cancelled"
+    | "cancellation_requested"
+    | "cancellation_rejected"
+    | "cancellation_withdrawn"
     | "documents_uploaded"
     | "documents_verified"
     | "documents_waived";
@@ -141,6 +144,9 @@ export interface LeaveRequestI extends Document {
   decidedAt?: Date | null;
   decidedBy?: mongoose.Types.ObjectId | null;
   decisionComment?: string;
+  cancellationRequest?: mongoose.Types.ObjectId | null;
+  cancellationStatus: "none" | "submitted" | "approved" | "rejected" | "withdrawn";
+  cancellationReason?: string;
   cancelledAt?: Date | null;
   cancelledBy?: mongoose.Types.ObjectId | null;
   createdBy: mongoose.Types.ObjectId;
@@ -205,6 +211,9 @@ const LeaveRequestEventSchema = new Schema<LeaveRequestEventI>(
         "rejected",
         "withdrawn",
         "cancelled",
+        "cancellation_requested",
+        "cancellation_rejected",
+        "cancellation_withdrawn",
         "documents_uploaded",
         "documents_verified",
         "documents_waived",
@@ -320,6 +329,20 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
     decidedAt: { type: Date, default: null },
     decidedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     decisionComment: { type: String, trim: true },
+    cancellationRequest: {
+      type: Schema.Types.ObjectId,
+      ref: "LeaveCancellationRequest",
+      default: null,
+      index: true,
+    },
+    cancellationStatus: {
+      type: String,
+      enum: ["none", "submitted", "approved", "rejected", "withdrawn"],
+      default: "none",
+      required: true,
+      index: true,
+    },
+    cancellationReason: { type: String, trim: true },
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },

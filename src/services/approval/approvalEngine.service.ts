@@ -13,7 +13,7 @@ import {
 } from "./approvalDecision.utils";
 
 type RequestType = "leave_request" | "remote_work_request" | "comp_off_claim";
-type RequestModel = "LeaveRequest" | "RemoteWorkRequest" | "CompOffClaim";
+type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "RemoteWorkRequest" | "CompOffClaim";
 
 function text(value: unknown) {
   return String(value || "").trim();

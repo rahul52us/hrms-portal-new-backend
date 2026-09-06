@@ -4,6 +4,7 @@ import { generateError } from "../../config/Error/functions";
 import EmployeeLeaveBalance from "../../schemas/Leave/EmployeeLeaveBalance.schema";
 import LeaveBalanceTransaction from "../../schemas/Leave/LeaveBalanceTransaction.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
+import LeaveCancellationRequest from "../../schemas/Leave/LeaveCancellationRequest.schema";
 import LeaveRequestDateLock from "../../schemas/Leave/LeaveRequestDateLock.schema";
 import EmployeeDayRequestLock from "../../schemas/Request/EmployeeDayRequestLock.schema";
 import LeaveAttachment from "../../schemas/Leave/LeaveAttachment.schema";
@@ -246,6 +247,17 @@ function populateRequest(query: any) {
       populate: [
         { path: "steps.approvers.user", select: "name username code role designation" },
         { path: "history.actor", select: "name username code role" },
+      ],
+    })
+    .populate({
+      path: "cancellationRequest",
+      select: "status reason requestedAt decidedAt decisionComment currentApprovers approvalInstance",
+      populate: [
+        { path: "currentApprovers", select: "name username code role designation" },
+        {
+          path: "approvalInstance",
+          populate: { path: "steps.approvers.user", select: "name username code role designation" },
+        },
       ],
     })
     .populate("history.actor", "name username role");
@@ -1090,6 +1102,49 @@ export async function withdrawLeaveRequestService(req: any, res: Response, next:
   }
 }
 
+export async function finalizeApprovedLeaveCancellation(options: {
+  request: any;
+  actorId: mongoose.Types.ObjectId;
+  reason: string;
+  session: mongoose.ClientSession;
+}) {
+  const { request, actorId, reason, session } = options;
+  const debits = await LeaveBalanceTransaction.find({
+    company: request.company,
+    sourceType: "leave_request",
+    sourceId: request._id,
+    transactionType: "leave_debit",
+  }).session(session);
+  for (const debit of debits) {
+    await postLeaveBalanceTransaction({
+      key: balanceKey(debit as any),
+      units: Math.abs(debit.units),
+      transactionType: "leave_reversal",
+      sourceType: "leave_request",
+      sourceId: request._id,
+      effectiveDate: currentDateKey(),
+      idempotencyKey: `${request._id}:reversal:${debit._id}`,
+      reason,
+      leavePolicyAssignment: debit.leavePolicyAssignment,
+      leavePolicy: debit.leavePolicy,
+      leavePolicyVersion: debit.leavePolicyVersion,
+      reversalOf: debit._id,
+      createdBy: actorId,
+      session,
+    });
+  }
+  if (request.entitlementModeSnapshot === "earned") {
+    await reverseConsumedCompOffCredits({
+      request,
+      actorId,
+      asOf: currentDateKey(),
+      session,
+    });
+  }
+  await removeCancelledLeaveFromAttendance({ request, actor: actorId, session });
+  await releaseRequestDateLocks(request, session);
+}
+
 export async function cancelLeaveRequestService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = getLeaveActor(req);
@@ -1100,58 +1155,31 @@ export async function cancelLeaveRequestService(req: any, res: Response, next: N
     ensureCanApproveRequest(actor, candidate);
     const comment = text(req.body?.comment);
     if (comment.length < 3) throw generateError("A cancellation reason is required", 422);
+    const pendingCancellation = await LeaveCancellationRequest.exists({
+      company,
+      leaveRequest: requestId,
+      status: "submitted",
+    });
+    if (pendingCancellation) {
+      throw generateError("Decide the pending leave cancellation request instead", 409);
+    }
 
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "approved" }).session(session);
       if (!request) throw generateError("Only an approved leave request can be cancelled", 409);
-      if (request.approvalInstance) {
-        await cancelApprovalInstance({
-          company,
-          requestModel: "LeaveRequest",
-          requestId,
-          actor,
-          comment,
-          session,
-        });
-      }
-      const debits = await LeaveBalanceTransaction.find({
+      const activeCancellation = await LeaveCancellationRequest.exists({
         company,
-        sourceType: "leave_request",
-        sourceId: request._id,
-        transactionType: "leave_debit",
+        leaveRequest: request._id,
+        status: "submitted",
       }).session(session);
-      for (const debit of debits) {
-        await postLeaveBalanceTransaction({
-          key: balanceKey(debit as any),
-          units: Math.abs(debit.units),
-          transactionType: "leave_reversal",
-          sourceType: "leave_request",
-          sourceId: request._id,
-          effectiveDate: currentDateKey(),
-          idempotencyKey: `${request._id}:reversal:${debit._id}`,
-          reason: comment,
-          leavePolicyAssignment: debit.leavePolicyAssignment,
-          leavePolicy: debit.leavePolicy,
-          leavePolicyVersion: debit.leavePolicyVersion,
-          reversalOf: debit._id,
-          createdBy: actor._id,
-          session,
-        });
+      if (activeCancellation) {
+        throw generateError("Decide the pending leave cancellation request instead", 409);
       }
-      if (request.entitlementModeSnapshot === "earned") {
-        await reverseConsumedCompOffCredits({
-          request,
-          actorId: actor._id,
-          asOf: currentDateKey(),
-          session,
-        });
-      }
-      await removeCancelledLeaveFromAttendance({ request, actor: actor._id, session });
-      await releaseRequestDateLocks(request, session);
+      await finalizeApprovedLeaveCancellation({ request, actorId: actor._id, reason: comment, session });
       request.status = "cancelled";
       request.cancelledAt = new Date();
       request.cancelledBy = actor._id;
-      request.decisionComment = comment;
+      request.cancellationReason = comment;
       request.history.push(event(actor, "cancelled", comment) as any);
       await request.save({ session });
     });

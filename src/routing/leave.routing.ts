@@ -20,6 +20,14 @@ import {
   verifyLeaveRequestDocumentsService,
   waiveLeaveRequestDocumentsService,
 } from "../services/leave/leaveRequest.service";
+import {
+  approveLeaveCancellationRequestService,
+  createLeaveCancellationRequestService,
+  getLeaveCancellationRequestService,
+  listLeaveCancellationRequestsService,
+  rejectLeaveCancellationRequestService,
+  withdrawLeaveCancellationRequestService,
+} from "../services/leave/leaveCancellationRequest.service";
 
 const leaveRouting = express.Router();
 
@@ -42,5 +50,20 @@ leaveRouting.post("/requests/:requestId/approve", approveLeaveRequestService);
 leaveRouting.post("/requests/:requestId/reject", rejectLeaveRequestService);
 leaveRouting.post("/requests/:requestId/withdraw", withdrawLeaveRequestService);
 leaveRouting.post("/requests/:requestId/cancel", cancelLeaveRequestService);
+leaveRouting.post("/requests/:requestId/cancellation-requests", createLeaveCancellationRequestService);
+leaveRouting.get("/cancellation-requests", listLeaveCancellationRequestsService);
+leaveRouting.get("/cancellation-requests/:cancellationRequestId", getLeaveCancellationRequestService);
+leaveRouting.post(
+  "/cancellation-requests/:cancellationRequestId/approve",
+  approveLeaveCancellationRequestService
+);
+leaveRouting.post(
+  "/cancellation-requests/:cancellationRequestId/reject",
+  rejectLeaveCancellationRequestService
+);
+leaveRouting.post(
+  "/cancellation-requests/:cancellationRequestId/withdraw",
+  withdrawLeaveCancellationRequestService
+);
 
 export default leaveRouting;

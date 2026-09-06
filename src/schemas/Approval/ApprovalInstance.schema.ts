@@ -5,7 +5,7 @@ import { APPROVAL_STEP_TYPES } from "./ApprovalWorkflowVersion.schema";
 export interface ApprovalInstanceI extends Document {
   company: mongoose.Types.ObjectId;
   requestType: (typeof APPROVAL_REQUEST_TYPES)[number];
-  requestModel: "LeaveRequest" | "RemoteWorkRequest" | "CompOffClaim";
+  requestModel: "LeaveRequest" | "LeaveCancellationRequest" | "RemoteWorkRequest" | "CompOffClaim";
   request: mongoose.Types.ObjectId;
   employee: mongoose.Types.ObjectId;
   workflow: mongoose.Types.ObjectId;
@@ -79,7 +79,7 @@ const ApprovalInstanceSchema = new Schema<ApprovalInstanceI>(
     requestType: { type: String, enum: APPROVAL_REQUEST_TYPES, required: true, index: true },
     requestModel: {
       type: String,
-      enum: ["LeaveRequest", "RemoteWorkRequest", "CompOffClaim"],
+      enum: ["LeaveRequest", "LeaveCancellationRequest", "RemoteWorkRequest", "CompOffClaim"],
       required: true,
     },
     request: { type: Schema.Types.ObjectId, refPath: "requestModel", required: true, index: true },
