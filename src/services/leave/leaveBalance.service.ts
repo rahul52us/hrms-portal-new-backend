@@ -5,6 +5,7 @@ import LeaveBalanceTransaction, {
   LEAVE_TRANSACTION_TYPES,
 } from "../../schemas/Leave/LeaveBalanceTransaction.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
+import LeaveEncashmentRequest from "../../schemas/Leave/LeaveEncashmentRequest.schema";
 
 export interface LeaveBalanceKey {
   company: mongoose.Types.ObjectId;
@@ -105,7 +106,7 @@ export async function postLeaveBalanceTransaction(options: {
   key: LeaveBalanceKey;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "comp_off_claim" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -190,24 +191,41 @@ export async function rebuildLeaveBalanceProjection(options: {
     },
   ]).session(options.session);
 
-  const [pendingTotals] = await LeaveRequest.aggregate([
-    {
-      $match: {
-        company: options.key.company,
-        employee: options.key.employee,
-        leaveType: options.key.leaveType,
-        status: "submitted",
+  const [pendingLeaveTotals, pendingEncashmentTotals] = await Promise.all([
+    LeaveRequest.aggregate([
+      {
+        $match: {
+          company: options.key.company,
+          employee: options.key.employee,
+          leaveType: options.key.leaveType,
+          status: "submitted",
+        },
       },
-    },
-    { $unwind: "$dayBreakdown" },
-    { $match: { "dayBreakdown.leaveYearKey": options.key.leaveYearKey } },
-    { $group: { _id: null, pendingUnits: { $sum: "$dayBreakdown.chargedUnits" } } },
-  ]).session(options.session);
+      { $unwind: "$dayBreakdown" },
+      { $match: { "dayBreakdown.leaveYearKey": options.key.leaveYearKey } },
+      { $group: { _id: null, pendingUnits: { $sum: "$dayBreakdown.chargedUnits" } } },
+    ]).session(options.session),
+    LeaveEncashmentRequest.aggregate([
+      {
+        $match: {
+          company: options.key.company,
+          employee: options.key.employee,
+          leaveType: options.key.leaveType,
+          leaveYearKey: options.key.leaveYearKey,
+          status: "submitted",
+        },
+      },
+      { $group: { _id: null, pendingUnits: { $sum: "$requestedUnits" } } },
+    ]).session(options.session),
+  ]);
 
   const creditedUnits = roundUnits(ledgerTotals?.creditedUnits || 0);
   const debitedUnits = roundUnits(ledgerTotals?.debitedUnits || 0);
   const balanceUnits = roundUnits(ledgerTotals?.balanceUnits || 0);
-  const pendingUnits = roundUnits(pendingTotals?.pendingUnits || 0);
+  const pendingUnits = roundUnits(
+    Number(pendingLeaveTotals[0]?.pendingUnits || 0) +
+    Number(pendingEncashmentTotals[0]?.pendingUnits || 0)
+  );
   return EmployeeLeaveBalance.findOneAndUpdate(
     keyFilter(options.key),
     {

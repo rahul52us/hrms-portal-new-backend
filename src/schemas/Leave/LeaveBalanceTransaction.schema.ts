@@ -10,6 +10,7 @@ export const LEAVE_TRANSACTION_TYPES = [
   "carry_forward",
   "expiry",
   "encashment",
+  "encashment_reversal",
   "comp_off_credit",
   "comp_off_reversal",
 ] as const;
@@ -23,7 +24,7 @@ export interface LeaveBalanceTransactionI extends Document {
   leaveYearEnd: string;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "comp_off_claim" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -56,7 +57,7 @@ const LeaveBalanceTransactionSchema = new Schema<LeaveBalanceTransactionI>(
     transactionType: { type: String, enum: LEAVE_TRANSACTION_TYPES, required: true, index: true },
     sourceType: {
       type: String,
-      enum: ["leave_request", "comp_off_claim", "manual", "policy", "system"],
+      enum: ["leave_request", "leave_encashment", "comp_off_claim", "manual", "policy", "system"],
       required: true,
     },
     sourceId: { type: Schema.Types.ObjectId, default: null, index: true },

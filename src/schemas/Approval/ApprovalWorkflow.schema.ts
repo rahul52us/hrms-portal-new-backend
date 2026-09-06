@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from "mongoose";
 
 export const APPROVAL_REQUEST_TYPES = [
   "leave_request",
+  "leave_encashment_request",
   "remote_work_request",
   "comp_off_claim",
 ] as const;

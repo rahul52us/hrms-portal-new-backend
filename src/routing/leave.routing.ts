@@ -28,6 +28,17 @@ import {
   rejectLeaveCancellationRequestService,
   withdrawLeaveCancellationRequestService,
 } from "../services/leave/leaveCancellationRequest.service";
+import {
+  approveLeaveEncashmentRequestService,
+  cancelApprovedLeaveEncashmentRequestService,
+  createLeaveEncashmentRequestService,
+  getLeaveEncashmentEligibilityService,
+  getLeaveEncashmentRequestService,
+  listLeaveEncashmentRequestsService,
+  rejectLeaveEncashmentRequestService,
+  settleLeaveEncashmentRequestService,
+  withdrawLeaveEncashmentRequestService,
+} from "../services/leave/leaveEncashmentRequest.service";
 
 const leaveRouting = express.Router();
 
@@ -64,6 +75,30 @@ leaveRouting.post(
 leaveRouting.post(
   "/cancellation-requests/:cancellationRequestId/withdraw",
   withdrawLeaveCancellationRequestService
+);
+leaveRouting.get("/encashments/eligible", getLeaveEncashmentEligibilityService);
+leaveRouting.post("/encashments", createLeaveEncashmentRequestService);
+leaveRouting.get("/encashments", listLeaveEncashmentRequestsService);
+leaveRouting.get("/encashments/:encashmentRequestId", getLeaveEncashmentRequestService);
+leaveRouting.post(
+  "/encashments/:encashmentRequestId/approve",
+  approveLeaveEncashmentRequestService
+);
+leaveRouting.post(
+  "/encashments/:encashmentRequestId/reject",
+  rejectLeaveEncashmentRequestService
+);
+leaveRouting.post(
+  "/encashments/:encashmentRequestId/withdraw",
+  withdrawLeaveEncashmentRequestService
+);
+leaveRouting.post(
+  "/encashments/:encashmentRequestId/settle",
+  settleLeaveEncashmentRequestService
+);
+leaveRouting.post(
+  "/encashments/:encashmentRequestId/cancel",
+  cancelApprovedLeaveEncashmentRequestService
 );
 
 export default leaveRouting;

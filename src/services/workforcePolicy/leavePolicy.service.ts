@@ -424,6 +424,27 @@ async function normalizeLeaveRules(options: {
             `${leaveType.code} encashment limit`
           )
         : 0,
+      encashmentApprovalWorkflow: encashmentEnabled
+        ? normalizeOptionalReference(
+            inputRule.encashmentApprovalWorkflow,
+            current.encashmentApprovalWorkflow,
+            `${leaveType.code} encashment approval workflow`
+          )
+        : null,
+      encashmentApprovalWorkflowVersion: encashmentEnabled
+        ? normalizeOptionalReference(
+            inputRule.encashmentApprovalWorkflowVersion,
+            current.encashmentApprovalWorkflowVersion,
+            `${leaveType.code} encashment approval workflow version`
+          )
+        : null,
+      encashmentApprovalWorkflowVersionNumber: encashmentEnabled
+        ? Number(
+            inputRule.encashmentApprovalWorkflowVersionNumber ||
+            current.encashmentApprovalWorkflowVersionNumber ||
+            0
+          ) || null
+        : null,
       negativeBalanceAllowed,
       maxNegativeBalance: negativeBalanceAllowed
         ? normalizeNumber(
@@ -1043,6 +1064,19 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
         rule.compOffClaimApprovalWorkflowVersion = claimReference.version;
         rule.compOffClaimApprovalWorkflowVersionNumber = claimReference.versionNumber;
       }
+
+      if (rule.encashmentEnabled) {
+        const encashmentReference = await resolveEffectiveApprovalWorkflowReference({
+          company: companyObjectId,
+          workflowId: rule.encashmentApprovalWorkflow,
+          requestType: "leave_encashment_request",
+          at: effectiveFrom,
+          setupLabel: `${rule.leaveTypeCodeSnapshot} leave encashment requests`,
+        });
+        rule.encashmentApprovalWorkflow = encashmentReference.workflow;
+        rule.encashmentApprovalWorkflowVersion = encashmentReference.version;
+        rule.encashmentApprovalWorkflowVersionNumber = encashmentReference.versionNumber;
+      }
     }
     const emptyEntitlementRule = rules.find(
       (rule) =>
@@ -1103,6 +1137,15 @@ export async function publishLeavePolicyVersionService(req: any, res: Response, 
     );
     for (const rule of rules) {
       const unit = leaveTypeUnitById.get(String(rule.leaveType)) || "days";
+      if (rule.encashmentEnabled) {
+        const encashmentIncrement = unit === "hours" ? 0.25 : rule.allowHalfDay ? 0.5 : 1;
+        if (!usesIncrement(rule.maxEncashmentPerYear, encashmentIncrement)) {
+          throw generateError(
+            `${rule.leaveTypeCodeSnapshot} annual encashment limit must use valid ${unit} increments`,
+            422
+          );
+        }
+      }
       if (rule.documentRequiredFromUnits !== null && rule.documentRequiredFromUnits !== undefined) {
         const documentIncrement = unit === "hours" ? 0.25 : rule.allowHalfDay ? 0.5 : 1;
         if (!usesIncrement(rule.documentRequiredFromUnits, documentIncrement)) {

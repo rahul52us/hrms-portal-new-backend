@@ -34,6 +34,9 @@ export interface LeavePolicyRule {
   carryForwardExpiryMonths: number;
   encashmentEnabled: boolean;
   maxEncashmentPerYear: number;
+  encashmentApprovalWorkflow?: mongoose.Types.ObjectId | null;
+  encashmentApprovalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  encashmentApprovalWorkflowVersionNumber?: number | null;
   negativeBalanceAllowed: boolean;
   maxNegativeBalance: number;
   allowHalfDay: boolean;
@@ -133,6 +136,9 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     carryForwardExpiryMonths: { type: Number, min: 0, max: 120, default: 0 },
     encashmentEnabled: { type: Boolean, default: false },
     maxEncashmentPerYear: { type: Number, min: 0, default: 0 },
+    encashmentApprovalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+    encashmentApprovalWorkflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", default: null },
+    encashmentApprovalWorkflowVersionNumber: { type: Number, min: 1, default: null },
     negativeBalanceAllowed: { type: Boolean, default: false },
     maxNegativeBalance: { type: Number, min: 0, default: 0 },
     allowHalfDay: { type: Boolean, default: true },

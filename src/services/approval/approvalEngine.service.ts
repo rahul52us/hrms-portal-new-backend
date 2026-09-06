@@ -12,8 +12,8 @@ import {
   rejectCurrentApprovalStep,
 } from "./approvalDecision.utils";
 
-type RequestType = "leave_request" | "remote_work_request" | "comp_off_claim";
-type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "RemoteWorkRequest" | "CompOffClaim";
+type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim";
+type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim";
 
 function text(value: unknown) {
   return String(value || "").trim();
