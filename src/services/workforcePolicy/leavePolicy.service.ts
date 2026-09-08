@@ -413,7 +413,7 @@ async function normalizeLeaveRules(options: {
             Number(current.carryForwardExpiryMonths || 0),
             `${leaveType.code} carry-forward expiry`,
             0,
-            120
+            12
           )
         : 0,
       encashmentEnabled,

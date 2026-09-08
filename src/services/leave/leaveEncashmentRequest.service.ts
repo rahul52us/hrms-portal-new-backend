@@ -35,6 +35,7 @@ import {
   reserveLeaveBalance,
 } from "./leaveBalance.service";
 import { resolveLeaveYear } from "./leaveRequestCalculator.utils";
+import { expireCarryForwardCredits } from "./leaveYearEnd.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -221,6 +222,11 @@ async function resolveEligibility(options: {
   });
   const version = context.policies.leavePolicy?.version;
   if (!version) throw generateError("No leave policy is effective for this employee and date", 422);
+  await expireCarryForwardCredits({
+    company: options.company,
+    employeeId: options.employee._id,
+    asOf: currentDateKey(),
+  });
   await ensureEmployeeLeaveAccruals({
     companyId: options.company,
     employee: options.employee,

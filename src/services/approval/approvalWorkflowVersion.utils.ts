@@ -4,7 +4,31 @@ export interface ApprovalWorkflowVersionValue {
   effectiveFrom?: Date | string | null;
   publishedAt?: Date | string | null;
   createdAt?: Date | string | null;
+  applicableTo?: string[] | null;
   [key: string]: any;
+}
+
+export function approvalWorkflowVersionRequestTypes(
+  version: ApprovalWorkflowVersionValue | null | undefined,
+  legacyWorkflowTypes: string[] = []
+) {
+  const versionTypes = Array.isArray(version?.applicableTo)
+    ? version.applicableTo.filter(Boolean)
+    : [];
+  return Array.from(new Set(versionTypes.length ? versionTypes : legacyWorkflowTypes.filter(Boolean)));
+}
+
+export function approvalWorkflowVersionSupportsRequestType(
+  version: ApprovalWorkflowVersionValue | null | undefined,
+  legacyWorkflowTypes: string[],
+  requestType: string
+) {
+  return approvalWorkflowVersionRequestTypes(version, legacyWorkflowTypes).includes(requestType);
+}
+
+export function missingApprovalWorkflowRequestTypes(requiredTypes: string[], proposedTypes: string[]) {
+  const proposed = new Set(proposedTypes);
+  return Array.from(new Set(requiredTypes)).filter((requestType) => !proposed.has(requestType));
 }
 
 function validTime(value: Date | string | null | undefined) {

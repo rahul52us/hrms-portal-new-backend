@@ -39,6 +39,11 @@ import {
   settleLeaveEncashmentRequestService,
   withdrawLeaveEncashmentRequestService,
 } from "../services/leave/leaveEncashmentRequest.service";
+import {
+  listLeaveYearEndClosuresService,
+  listLeaveYearEndRunsService,
+  runLeaveYearEndService,
+} from "../services/leave/leaveYearEnd.service";
 
 const leaveRouting = express.Router();
 
@@ -50,6 +55,9 @@ leaveRouting.post("/attachments", uploadLeaveAttachmentService);
 leaveRouting.post("/balances/adjustments", adjustLeaveBalanceService);
 leaveRouting.post("/balances/rebuild", rebuildLeaveBalanceService);
 leaveRouting.post("/accruals/run", runLeaveAccrualCatchUpService);
+leaveRouting.post("/year-end/run", runLeaveYearEndService);
+leaveRouting.get("/year-end/runs", listLeaveYearEndRunsService);
+leaveRouting.get("/year-end/closures", listLeaveYearEndClosuresService);
 leaveRouting.post("/requests/preview", previewLeaveRequestService);
 leaveRouting.post("/requests", createLeaveRequestService);
 leaveRouting.get("/requests", listLeaveRequestsService);

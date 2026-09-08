@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import {
+  approvalWorkflowVersionRequestTypes,
+  approvalWorkflowVersionSupportsRequestType,
   approvalWorkflowVersionEffectiveTime,
+  missingApprovalWorkflowRequestTypes,
   selectEffectiveApprovalWorkflowVersion,
 } from "./approvalWorkflowVersion.utils";
 
@@ -47,10 +50,50 @@ function testReturnsNullWithoutAnEffectivePublishedVersion() {
   );
 }
 
+function testUsesVersionRequestTypesWhenPresent() {
+  const version = { applicableTo: ["leave_request", "leave_encashment_request"] };
+  assert.deepEqual(
+    approvalWorkflowVersionRequestTypes(version, ["leave_request"]),
+    ["leave_request", "leave_encashment_request"]
+  );
+  assert.equal(
+    approvalWorkflowVersionSupportsRequestType(
+      version,
+      ["leave_request"],
+      "leave_encashment_request"
+    ),
+    true
+  );
+}
+
+function testFallsBackForLegacyVersions() {
+  assert.equal(
+    approvalWorkflowVersionSupportsRequestType(
+      { versionNumber: 1 },
+      ["leave_request"],
+      "leave_request"
+    ),
+    true
+  );
+}
+
+function testFindsRemovedPublishedRequestTypes() {
+  assert.deepEqual(
+    missingApprovalWorkflowRequestTypes(
+      ["leave_request", "remote_work_request"],
+      ["leave_request", "leave_encashment_request"]
+    ),
+    ["remote_work_request"]
+  );
+}
+
 [
   testSelectsLatestEffectivePublishedVersion,
   testUsesPublicationDateForLegacyVersions,
   testReturnsNullWithoutAnEffectivePublishedVersion,
+  testUsesVersionRequestTypesWhenPresent,
+  testFallsBackForLegacyVersions,
+  testFindsRemovedPublishedRequestTypes,
 ].forEach((test) => test());
 
-console.log("Approval workflow version tests passed (3 tests)");
+console.log("Approval workflow version tests passed (6 tests)");

@@ -9,7 +9,12 @@ import ApprovalWorkflowVersion, {
   ApprovalWorkflowStepI,
 } from "../../schemas/Approval/ApprovalWorkflowVersion.schema";
 import User from "../../schemas/User/User";
-import { selectEffectiveApprovalWorkflowVersion } from "./approvalWorkflowVersion.utils";
+import {
+  approvalWorkflowVersionRequestTypes,
+  approvalWorkflowVersionSupportsRequestType,
+  missingApprovalWorkflowRequestTypes,
+  selectEffectiveApprovalWorkflowVersion,
+} from "./approvalWorkflowVersion.utils";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -36,6 +41,19 @@ function normalizeApplicableTo(value: unknown, fallback: string[] = []) {
     throw generateError("Select at least one valid approval request type", 422);
   }
   return applicableTo as (typeof APPROVAL_REQUEST_TYPES)[number][];
+}
+
+function ensurePublishedRequestTypesRemain(
+  publishedTypes: (typeof APPROVAL_REQUEST_TYPES)[number][],
+  proposedTypes: (typeof APPROVAL_REQUEST_TYPES)[number][]
+) {
+  const missing = missingApprovalWorkflowRequestTypes(publishedTypes, proposedTypes);
+  if (missing.length) {
+    throw generateError(
+      `Published request types cannot be removed from this workflow: ${missing.join(", ")}`,
+      422
+    );
+  }
 }
 
 function objectIdOrNull(value: unknown) {
@@ -126,7 +144,6 @@ export async function validatePublishedApprovalWorkflowReference(options: {
       _id: workflowId,
       company: options.company,
       status: "active",
-      applicableTo: options.requestType,
     }).lean(),
     ApprovalWorkflowVersion.findOne({
       _id: versionId,
@@ -135,7 +152,15 @@ export async function validatePublishedApprovalWorkflowReference(options: {
       status: "published",
     }).lean(),
   ]);
-  if (!workflow || !version) {
+  if (
+    !workflow ||
+    !version ||
+    !approvalWorkflowVersionSupportsRequestType(
+      version,
+      workflow.applicableTo || [],
+      options.requestType
+    )
+  ) {
     throw generateError(`The selected approval workflow is not published for ${options.requestType}`, 422);
   }
   return {
@@ -162,7 +187,6 @@ export async function resolveEffectiveApprovalWorkflowReference(options: {
     _id: workflowId,
     company: options.company,
     status: "active",
-    applicableTo: options.requestType,
   }).lean();
   if (!workflow) {
     throw generateError(`The configured approval workflow is unavailable for ${setupLabel}`, 409);
@@ -176,6 +200,15 @@ export async function resolveEffectiveApprovalWorkflowReference(options: {
   const version = selectEffectiveApprovalWorkflowVersion(versions, options.at || new Date());
   if (!version) {
     throw generateError(`No published approval workflow version is effective for ${setupLabel}`, 409);
+  }
+  if (
+    !approvalWorkflowVersionSupportsRequestType(
+      version,
+      workflow.applicableTo || [],
+      options.requestType
+    )
+  ) {
+    throw generateError(`The configured approval workflow is unavailable for ${setupLabel}`, 409);
   }
 
   return {
@@ -291,6 +324,7 @@ export async function createApprovalWorkflowService(req: any, res: Response, nex
       versionNumber: 1,
       status: "draft",
       effectiveFrom,
+      applicableTo,
       autoApprove,
       steps,
       changeReason: normalizeText(req.body?.changeReason),
@@ -327,6 +361,11 @@ export async function createApprovalWorkflowVersionService(req: any, res: Respon
     const latest = await ApprovalWorkflowVersion.findOne({ company: companyObjectId, workflow: workflow._id })
       .sort({ versionNumber: -1 })
       .lean();
+    const applicableTo = normalizeApplicableTo(
+      req.body?.applicableTo,
+      approvalWorkflowVersionRequestTypes(latest, workflow.applicableTo || [])
+    );
+    ensurePublishedRequestTypesRemain(workflow.applicableTo || [], applicableTo);
     const autoApprove = req.body?.autoApprove === undefined ? Boolean(latest?.autoApprove) : Boolean(req.body.autoApprove);
     const effectiveFrom = parseEffectiveDate(
       req.body?.effectiveFrom || new Date(),
@@ -345,6 +384,7 @@ export async function createApprovalWorkflowVersionService(req: any, res: Respon
       versionNumber,
       status: "draft",
       effectiveFrom,
+      applicableTo,
       autoApprove,
       steps,
       changeReason: normalizeText(req.body?.changeReason),
@@ -371,10 +411,21 @@ export async function updateApprovalWorkflowVersionService(req: any, res: Respon
       status: "draft",
     });
     if (!version) throw generateError("Approval workflow draft not found", 404);
+    const hasPublishedVersion = Boolean(await ApprovalWorkflowVersion.exists({
+      company: companyObjectId,
+      workflow: workflow._id,
+      status: "published",
+    }));
+    const applicableTo = normalizeApplicableTo(
+      req.body?.applicableTo,
+      approvalWorkflowVersionRequestTypes(version, workflow.applicableTo || [])
+    );
+    if (hasPublishedVersion) ensurePublishedRequestTypesRemain(workflow.applicableTo || [], applicableTo);
     const autoApprove = req.body?.autoApprove === undefined ? version.autoApprove : Boolean(req.body.autoApprove);
     const steps = await normalizeSteps({ company: companyObjectId, input: req.body?.steps, current: version.steps });
     if (autoApprove && steps.length) throw generateError("Automatic workflows cannot contain approval steps", 422);
     version.autoApprove = autoApprove;
+    version.applicableTo = applicableTo;
     version.steps = steps as any;
     if (req.body?.effectiveFrom !== undefined) {
       version.effectiveFrom = parseEffectiveDate(
@@ -383,7 +434,13 @@ export async function updateApprovalWorkflowVersionService(req: any, res: Respon
       ) as Date;
     }
     if (req.body?.changeReason !== undefined) version.changeReason = normalizeText(req.body.changeReason);
-    await version.save();
+    await mongoose.connection.transaction(async (session) => {
+      await version.save({ session });
+      if (!hasPublishedVersion) {
+        workflow.applicableTo = applicableTo;
+        await workflow.save({ session });
+      }
+    });
     return res.status(200).json({ success: true, data: version, message: "Approval workflow draft updated" });
   } catch (error) {
     next(error);
@@ -404,6 +461,16 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
       status: "draft",
     });
     if (!version) throw generateError("Approval workflow draft not found", 404);
+    const applicableTo = normalizeApplicableTo(
+      version.applicableTo,
+      workflow.applicableTo || []
+    );
+    const hasPublishedVersion = Boolean(await ApprovalWorkflowVersion.exists({
+      company: companyObjectId,
+      workflow: workflow._id,
+      status: "published",
+    }));
+    if (hasPublishedVersion) ensurePublishedRequestTypesRemain(workflow.applicableTo || [], applicableTo);
     const steps = await normalizeSteps({
       company: companyObjectId,
       input: version.steps,
@@ -426,6 +493,7 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
       throw generateError("Another published approval workflow version already starts on this date", 409);
     }
     version.steps = steps as any;
+    version.applicableTo = applicableTo;
     version.effectiveFrom = effectiveFrom;
     version.status = "published";
     version.publishedAt = new Date();
@@ -433,6 +501,8 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
     if (req.body?.changeReason !== undefined) version.changeReason = normalizeText(req.body.changeReason);
     await mongoose.connection.transaction(async (session) => {
       await version.save({ session });
+      workflow.applicableTo = applicableTo;
+      await workflow.save({ session });
       await writePolicyAudit({
         company: companyObjectId,
         entityType: "approval_workflow_version",
@@ -443,6 +513,7 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
           workflow: workflow._id,
           versionNumber: version.versionNumber,
           autoApprove: version.autoApprove,
+          applicableTo,
           effectiveFrom,
         },
       }, session);

@@ -11,6 +11,7 @@ import {
   approveCurrentApprovalStep,
   rejectCurrentApprovalStep,
 } from "./approvalDecision.utils";
+import { approvalWorkflowVersionSupportsRequestType } from "./approvalWorkflowVersion.utils";
 
 type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim";
 type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim";
@@ -157,7 +158,6 @@ export async function createApprovalInstance(options: {
     ApprovalWorkflow.findOne({
       _id: workflowId,
       company: options.company,
-      applicableTo: options.requestType,
     }).session(options.session),
     ApprovalWorkflowVersion.findOne({
       _id: workflowVersionId,
@@ -166,7 +166,17 @@ export async function createApprovalInstance(options: {
       status: "published",
     }).session(options.session),
   ]);
-  if (!workflow || !version) throw generateError("The selected approval workflow is unavailable", 409);
+  if (
+    !workflow ||
+    !version ||
+    !approvalWorkflowVersionSupportsRequestType(
+      version,
+      workflow.applicableTo || [],
+      options.requestType
+    )
+  ) {
+    throw generateError("The selected approval workflow is unavailable", 409);
+  }
 
   const seenApprovers = new Set<string>();
   const steps: any[] = [];

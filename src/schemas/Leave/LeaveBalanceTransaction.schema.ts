@@ -7,7 +7,9 @@ export const LEAVE_TRANSACTION_TYPES = [
   "manual_adjustment",
   "leave_debit",
   "leave_reversal",
+  "carry_forward_out",
   "carry_forward",
+  "lapse",
   "expiry",
   "encashment",
   "encashment_reversal",
@@ -24,7 +26,7 @@ export interface LeaveBalanceTransactionI extends Document {
   leaveYearEnd: string;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system" | "year_end";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -34,6 +36,8 @@ export interface LeaveBalanceTransactionI extends Document {
   leavePolicyVersion?: mongoose.Types.ObjectId | null;
   reversalOf?: mongoose.Types.ObjectId | null;
   compOffCreditLot?: mongoose.Types.ObjectId | null;
+  carryForwardLot?: mongoose.Types.ObjectId | null;
+  carryForwardAllocations: Array<{ lot: mongoose.Types.ObjectId; units: number }>;
   createdBy: mongoose.Types.ObjectId;
   createdAt?: Date;
 }
@@ -57,7 +61,7 @@ const LeaveBalanceTransactionSchema = new Schema<LeaveBalanceTransactionI>(
     transactionType: { type: String, enum: LEAVE_TRANSACTION_TYPES, required: true, index: true },
     sourceType: {
       type: String,
-      enum: ["leave_request", "leave_encashment", "comp_off_claim", "manual", "policy", "system"],
+      enum: ["leave_request", "leave_encashment", "comp_off_claim", "manual", "policy", "system", "year_end"],
       required: true,
     },
     sourceId: { type: Schema.Types.ObjectId, default: null, index: true },
@@ -69,6 +73,19 @@ const LeaveBalanceTransactionSchema = new Schema<LeaveBalanceTransactionI>(
     leavePolicyVersion: { type: Schema.Types.ObjectId, ref: "LeavePolicyVersion", default: null },
     reversalOf: { type: Schema.Types.ObjectId, ref: "LeaveBalanceTransaction", default: null },
     compOffCreditLot: { type: Schema.Types.ObjectId, ref: "CompOffCreditLot", default: null, index: true },
+    carryForwardLot: { type: Schema.Types.ObjectId, ref: "LeaveCarryForwardLot", default: null, index: true },
+    carryForwardAllocations: {
+      type: [
+        new Schema(
+          {
+            lot: { type: Schema.Types.ObjectId, ref: "LeaveCarryForwardLot", required: true },
+            units: { type: Number, required: true, min: 0.0001 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }

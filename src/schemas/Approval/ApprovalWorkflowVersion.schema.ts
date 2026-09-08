@@ -1,4 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
+import { APPROVAL_REQUEST_TYPES } from "./ApprovalWorkflow.schema";
 
 export const APPROVAL_STEP_TYPES = [
   "reporting_manager",
@@ -23,6 +24,7 @@ export interface ApprovalWorkflowVersionI extends Document {
   versionNumber: number;
   status: "draft" | "published" | "cancelled";
   effectiveFrom: Date;
+  applicableTo?: (typeof APPROVAL_REQUEST_TYPES)[number][];
   autoApprove: boolean;
   steps: ApprovalWorkflowStepI[];
   changeReason?: string;
@@ -58,6 +60,15 @@ const ApprovalWorkflowVersionSchema = new Schema<ApprovalWorkflowVersionI>(
       index: true,
     },
     effectiveFrom: { type: Date, required: true, default: Date.now, index: true },
+    applicableTo: {
+      type: [{ type: String, enum: APPROVAL_REQUEST_TYPES }],
+      required: true,
+      default: undefined,
+      validate: {
+        validator: (value: string[]) => Array.isArray(value) && value.length > 0,
+        message: "Select at least one request type",
+      },
+    },
     autoApprove: { type: Boolean, default: false },
     steps: {
       type: [ApprovalWorkflowStepSchema],

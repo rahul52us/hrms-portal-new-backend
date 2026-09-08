@@ -39,6 +39,7 @@ import {
   ensureEmployeeLeaveAccruals,
   runCompanyLeaveAccrualCatchUp,
 } from "./leaveAccrual.service";
+import { expireCarryForwardCredits } from "./leaveYearEnd.service";
 import {
   consumeReservedCompOffCredits,
   expireCompOffCredits,
@@ -440,6 +441,12 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
         422
       );
     }
+
+    await expireCarryForwardCredits({
+      company,
+      employeeId: employee._id,
+      asOf: currentDateKey(),
+    });
     const overlap = await LeaveRequest.exists({
       company,
       employee: employee._id,
@@ -1212,6 +1219,11 @@ export async function getEligibleLeaveTypesService(req: any, res: Response, next
       asOf: accrualAt,
       context: accrualAt === at ? context : undefined,
     });
+    await expireCarryForwardCredits({
+      company,
+      employeeId: employee._id,
+      asOf: currentDateKey(),
+    });
     await mongoose.connection.transaction(async (session) => {
       await expireCompOffCredits({
         company,
@@ -1269,6 +1281,11 @@ export async function listLeaveBalancesService(req: any, res: Response, next: Ne
       ? parseAttendanceDate(text(req.query.at)).dateKey
       : currentDateKey();
     await ensureEmployeeLeaveAccruals({ companyId: company, employee, asOf: accrualAt });
+    await expireCarryForwardCredits({
+      company,
+      employeeId: employee._id,
+      asOf: currentDateKey(),
+    });
     await mongoose.connection.transaction(async (session) => {
       await expireCompOffCredits({
         company,
@@ -1307,6 +1324,11 @@ export async function listLeaveTransactionsService(req: any, res: Response, next
       "You cannot view leave transactions for this employee"
     );
     await ensureEmployeeLeaveAccruals({ companyId: company, employee, asOf: currentDateKey() });
+    await expireCarryForwardCredits({
+      company,
+      employeeId: employee._id,
+      asOf: currentDateKey(),
+    });
     const { page, limit, skip } = pagination(req.query);
     const match: any = { company, employee: employee._id };
     if (req.query?.leaveTypeId) match.leaveType = objectId(req.query.leaveTypeId, "leave type id");
@@ -1437,6 +1459,11 @@ export async function rebuildLeaveBalanceService(req: any, res: Response, next: 
     const effectiveDate = parseAttendanceDate(text(req.body?.effectiveDate || currentDateKey())).dateKey;
     const resolved = await resolveAdjustmentContext({ company, employee, leaveTypeId, effectiveDate });
     await ensureEmployeeLeaveAccruals({ companyId: company, employee, asOf: effectiveDate });
+    await expireCarryForwardCredits({
+      company,
+      employeeId: employee._id,
+      asOf: currentDateKey(),
+    });
     const key = balanceKey({ company, employee: employee._id, leaveType: leaveTypeId, ...resolved.year });
     let balance: any;
     await mongoose.connection.transaction(async (session) => {

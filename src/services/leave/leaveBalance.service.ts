@@ -6,6 +6,7 @@ import LeaveBalanceTransaction, {
 } from "../../schemas/Leave/LeaveBalanceTransaction.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
 import LeaveEncashmentRequest from "../../schemas/Leave/LeaveEncashmentRequest.schema";
+import LeaveCarryForwardLot from "../../schemas/Leave/LeaveCarryForwardLot.schema";
 
 export interface LeaveBalanceKey {
   company: mongoose.Types.ObjectId;
@@ -27,6 +28,78 @@ function keyFilter(key: LeaveBalanceKey) {
     leaveType: key.leaveType,
     leaveYearKey: key.leaveYearKey,
   };
+}
+
+function carryForwardLotStatus(lot: any) {
+  if (Number(lot.availableUnits || 0) > 0) return "active";
+  return Number(lot.expiredUnits || 0) > 0 ? "expired" : "exhausted";
+}
+
+async function allocateCarryForwardLots(options: {
+  key: LeaveBalanceKey;
+  units: number;
+  session: ClientSession;
+}) {
+  let remaining = roundUnits(Math.abs(options.units));
+  const lots = await LeaveCarryForwardLot.find({
+    ...keyFilter(options.key),
+    status: "active",
+    availableUnits: { $gt: 0 },
+  }).session(options.session);
+  lots.sort((left: any, right: any) => {
+    const leftExpiry = left.expiresOn || "9999-12-31";
+    const rightExpiry = right.expiresOn || "9999-12-31";
+    return leftExpiry.localeCompare(rightExpiry) || String(left._id).localeCompare(String(right._id));
+  });
+
+  const allocations: Array<{ lot: mongoose.Types.ObjectId; units: number }> = [];
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    const units = roundUnits(Math.min(remaining, Number(lot.availableUnits || 0)));
+    if (units <= 0) continue;
+    lot.availableUnits = roundUnits(Number(lot.availableUnits || 0) - units);
+    lot.consumedUnits = roundUnits(Number(lot.consumedUnits || 0) + units);
+    lot.status = carryForwardLotStatus(lot);
+    await lot.save({ session: options.session });
+    allocations.push({ lot: lot._id as mongoose.Types.ObjectId, units });
+    remaining = roundUnits(remaining - units);
+  }
+  return allocations;
+}
+
+async function restoreCarryForwardLots(options: {
+  key: LeaveBalanceKey;
+  reversalOf: mongoose.Types.ObjectId;
+  effectiveDate: string;
+  session: ClientSession;
+}) {
+  const original = await LeaveBalanceTransaction.findOne({
+    _id: options.reversalOf,
+    company: options.key.company,
+  }).session(options.session);
+  if (!original) throw generateError("The original leave transaction could not be found", 409);
+
+  const allocations = original.carryForwardAllocations || [];
+  const expiredRestorations: Array<{ lot: any; units: number }> = [];
+  for (const allocation of allocations) {
+    const lot = await LeaveCarryForwardLot.findOne({
+      _id: allocation.lot,
+      ...keyFilter(options.key),
+      consumedUnits: { $gte: allocation.units },
+    }).session(options.session);
+    if (!lot) throw generateError("Carried leave allocation is inconsistent", 409);
+    const units = roundUnits(Number(allocation.units));
+    lot.consumedUnits = roundUnits(Number(lot.consumedUnits || 0) - units);
+    if (lot.expiresOn && lot.expiresOn < options.effectiveDate) {
+      lot.expiredUnits = roundUnits(Number(lot.expiredUnits || 0) + units);
+      expiredRestorations.push({ lot, units });
+    } else {
+      lot.availableUnits = roundUnits(Number(lot.availableUnits || 0) + units);
+    }
+    lot.status = carryForwardLotStatus(lot);
+    await lot.save({ session: options.session });
+  }
+  return { allocations, expiredRestorations };
 }
 
 async function ensureProjection(key: LeaveBalanceKey, session: ClientSession) {
@@ -106,7 +179,7 @@ export async function postLeaveBalanceTransaction(options: {
   key: LeaveBalanceKey;
   units: number;
   transactionType: (typeof LEAVE_TRANSACTION_TYPES)[number];
-  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system";
+  sourceType: "leave_request" | "leave_encashment" | "comp_off_claim" | "manual" | "policy" | "system" | "year_end";
   sourceId?: mongoose.Types.ObjectId | null;
   effectiveDate: string;
   idempotencyKey: string;
@@ -116,6 +189,8 @@ export async function postLeaveBalanceTransaction(options: {
   leavePolicyVersion?: mongoose.Types.ObjectId | null;
   reversalOf?: mongoose.Types.ObjectId | null;
   compOffCreditLot?: mongoose.Types.ObjectId | null;
+  carryForwardLot?: mongoose.Types.ObjectId | null;
+  skipCarryForwardAllocation?: boolean;
   createdBy: mongoose.Types.ObjectId;
   session: ClientSession;
 }) {
@@ -128,6 +203,28 @@ export async function postLeaveBalanceTransaction(options: {
     idempotencyKey: options.idempotencyKey,
   }).session(options.session);
   if (existing) return existing;
+
+  let carryForwardAllocations: Array<{ lot: mongoose.Types.ObjectId; units: number }> = [];
+  let expiredRestorations: Array<{ lot: any; units: number }> = [];
+  if (units < 0 && !options.skipCarryForwardAllocation && !["expiry", "comp_off_reversal"].includes(options.transactionType)) {
+    carryForwardAllocations = await allocateCarryForwardLots({
+      key: options.key,
+      units,
+      session: options.session,
+    });
+  } else if (units > 0 && options.reversalOf) {
+    const restored = await restoreCarryForwardLots({
+      key: options.key,
+      reversalOf: options.reversalOf,
+      effectiveDate: options.effectiveDate,
+      session: options.session,
+    });
+    carryForwardAllocations = restored.allocations.map((allocation: any) => ({
+      lot: allocation.lot,
+      units: allocation.units,
+    }));
+    expiredRestorations = restored.expiredRestorations;
+  }
 
   const [transaction] = await LeaveBalanceTransaction.create(
     [
@@ -145,6 +242,8 @@ export async function postLeaveBalanceTransaction(options: {
         leavePolicyVersion: options.leavePolicyVersion || null,
         reversalOf: options.reversalOf || null,
         compOffCreditLot: options.compOffCreditLot || null,
+        carryForwardLot: options.carryForwardLot || null,
+        carryForwardAllocations,
         createdBy: options.createdBy,
       },
     ],
@@ -170,6 +269,46 @@ export async function postLeaveBalanceTransaction(options: {
     },
     { session: options.session }
   );
+
+  for (const restoration of expiredRestorations) {
+    const expiryIdempotencyKey = `${options.idempotencyKey}:carry-forward-expiry:${restoration.lot._id}`;
+    const [expiryTransaction] = await LeaveBalanceTransaction.create(
+      [
+        {
+          ...options.key,
+          units: -restoration.units,
+          transactionType: "expiry",
+          sourceType: "year_end",
+          sourceId: restoration.lot.sourceClosure,
+          effectiveDate: options.effectiveDate,
+          idempotencyKey: expiryIdempotencyKey,
+          reason: `Restored carried leave had expired on ${restoration.lot.expiresOn}`,
+          leavePolicyAssignment: restoration.lot.leavePolicyAssignment || null,
+          leavePolicy: restoration.lot.leavePolicy || null,
+          leavePolicyVersion: restoration.lot.leavePolicyVersion || null,
+          carryForwardLot: restoration.lot._id,
+          carryForwardAllocations: [],
+          createdBy: options.createdBy,
+        },
+      ],
+      { session: options.session }
+    );
+    await EmployeeLeaveBalance.updateOne(
+      keyFilter(options.key),
+      {
+        $inc: {
+          debitedUnits: restoration.units,
+          balanceUnits: -restoration.units,
+          availableUnits: -restoration.units,
+        },
+        $set: {
+          lastTransaction: expiryTransaction._id,
+          lastCalculatedAt: new Date(),
+        },
+      },
+      { session: options.session }
+    );
+  }
   return transaction;
 }
 

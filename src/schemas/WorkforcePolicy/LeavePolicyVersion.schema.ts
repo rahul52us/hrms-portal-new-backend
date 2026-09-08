@@ -133,7 +133,7 @@ const LeavePolicyRuleSchema = new Schema<LeavePolicyRule>(
     prorateOnExit: { type: Boolean, default: true },
     carryForwardEnabled: { type: Boolean, default: false },
     maxCarryForward: { type: Number, min: 0, default: 0 },
-    carryForwardExpiryMonths: { type: Number, min: 0, max: 120, default: 0 },
+    carryForwardExpiryMonths: { type: Number, min: 0, max: 12, default: 0 },
     encashmentEnabled: { type: Boolean, default: false },
     maxEncashmentPerYear: { type: Number, min: 0, default: 0 },
     encashmentApprovalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
