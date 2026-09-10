@@ -3614,17 +3614,115 @@ export async function updateManagedUserEmployeeDocumentsHandler(req: Request, re
 
 export async function updateManagedUserReportingManagerHandler(req: Request, res: Response) {
   try {
-    const targetUserId = req.params.id;
-    const newManagerId = req.body.reportingManager || null;
-    const user = await User.findById(targetUserId);
+    const requester = assertAdminAccess(req);
+    ensurePermission(requester, PERMISSION_KEYS.EDIT_USERS, "You do not have permission to edit users");
+    ensurePermission(requester, PERMISSION_KEYS.ASSIGN_MANAGERS, "You do not have permission to assign managers");
 
-    if (!user) {
-      return res.status(404).json({ status: false, message: "User not found" });
+    const targetUserId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      throw generateError("Invalid user id", 400);
     }
 
-    // Assign the new manager
-    user.reportingManager = newManagerId;
-    await user.save();
+    const user = await User.findById(targetUserId);
+
+    if (!user || user.deletedAt) {
+      throw generateError("User not found", 404);
+    }
+
+    const targetCompanyId = String(user.company || "");
+    if (
+      requester.role !== "superadmin" &&
+      requester.companyId &&
+      targetCompanyId !== requester.companyId
+    ) {
+      throw generateError("You can only update users from your company", 403);
+    }
+
+    if (
+      requester.role === "departmenthead" &&
+      normalizeText(user.department) !== normalizeText(requester.department)
+    ) {
+      throw generateError("You can only update users from your department", 403);
+    }
+
+    const targetRole = normalizeRole(user.role);
+    if (
+      requester.role === "hr" &&
+      ["admin", "superadmin", "departmenthead", "hradmin", "hr"].includes(targetRole)
+    ) {
+      throw generateError("Scoped HR can only update employees and managers", 403);
+    }
+
+    if (
+      requester.role === "hradmin" &&
+      ["admin", "superadmin"].includes(targetRole)
+    ) {
+      throw generateError("HR Admin cannot update admin or superadmin accounts", 403);
+    }
+
+    assertWithinHrScope(requester, user, "update");
+    await ensureCompanyManagementAccess({
+      actor: requester,
+      requestedCompanyId: targetCompanyId,
+      actionLabel: "manage users for this company",
+      allowSuperadminWithoutCompany: false,
+    });
+
+    const rawManagerValue =
+      req.body?.reportingManagerId ??
+      req.body?.directManagerId ??
+      req.body?.reportingManagerUsername ??
+      req.body?.directManagerUsername ??
+      req.body?.reportingManager ??
+      req.body?.directManager;
+    const hasManagerValue = Boolean(
+      typeof rawManagerValue === "object"
+        ? normalizeObjectIdLike(rawManagerValue?._id || rawManagerValue?.value) ||
+            normalizeText(rawManagerValue?.username)
+        : normalizeText(rawManagerValue)
+    );
+    const reportingManagerInput = getReportingManagerPayload(req.body);
+    if (hasManagerValue && !reportingManagerInput.id && !reportingManagerInput.username) {
+      throw generateError("Invalid reporting manager id", 400);
+    }
+
+    const resolved = await resolveReportingManagerForCompany({
+      reportingManagerInput,
+      excludeUserId: targetUserId,
+      companyId: targetCompanyId,
+    });
+
+    if (resolved.reportingManager) {
+      assertWithinHrScope(requester, resolved.reportingManager, "assign reporting managers to");
+    }
+
+    const currentManagerId = normalizeObjectIdLike(user.reportingManager);
+    const nextManagerId = normalizeObjectIdLike(resolved.reportingManager?._id);
+
+    if (currentManagerId !== nextManagerId) {
+      await mongoose.connection.transaction(async (session) => {
+        await ensureCurrentEmployeeAssignment({
+          user,
+          changedBy: requester.userId,
+          source: "reporting_manager_update_backfill",
+          session,
+        });
+
+        user.reportingManager = resolved.reportingManager?._id || undefined;
+        user.updatedAt = new Date();
+        await user.save({ session });
+
+        await recordEmployeeAssignmentChange({
+          user,
+          changedBy: requester.userId,
+          changeReason: normalizeText(req.body?.changeReason) || "Reporting manager updated",
+          source: "reporting_manager_update",
+          session,
+        });
+      });
+    }
+
+    await user.populate("reportingManager", "name username role designation");
 
     return res.json({
       status: true,
@@ -3634,8 +3732,12 @@ export async function updateManagedUserReportingManagerHandler(req: Request, res
         reportingManager: user.reportingManager
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error updating reporting manager:", error);
-    return res.status(500).json({ status: false, message: "Server error", error: error instanceof Error ? error.message : "Unknown error" });
+    return res.status(error?.statusCode || 500).json({
+      status: false,
+      message: error?.message || "Failed to update reporting manager",
+      error: error?.message || "Failed to update reporting manager",
+    });
   }
 }
