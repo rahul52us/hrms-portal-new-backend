@@ -36,6 +36,7 @@ import {
 } from "./leaveBalance.service";
 import { resolveLeaveYear } from "./leaveRequestCalculator.utils";
 import { expireCarryForwardCredits } from "./leaveYearEnd.service";
+import { createRequestNotifications } from "../notification/notification.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -186,6 +187,91 @@ function syncApprovalState(request: any, approval: any) {
   );
   request.approverNameSnapshot =
     current?.approvers?.find((item: any) => item.status === "pending")?.nameSnapshot || "";
+}
+
+function encashmentMetadata(request: any) {
+  return {
+    requestType: "leave_encashment_request",
+    leaveTypeCode: request.leaveTypeCodeSnapshot,
+    leaveTypeName: request.leaveTypeNameSnapshot,
+    leaveYearKey: request.leaveYearKey,
+    requestedUnits: request.requestedUnits,
+    leaveUnit: request.leaveUnit,
+    payoutStatus: request.payoutStatus,
+  };
+}
+
+async function notifyEncashment(options: {
+  request: any;
+  recipients: any[];
+  actorId: any;
+  eventType: string;
+  title: string;
+  message: string;
+  actionUrl: string;
+  dedupeEventKey?: string;
+  category?: "request" | "approval";
+  session: ClientSession;
+}) {
+  await createRequestNotifications(
+    {
+      company: options.request.company,
+      recipients: options.recipients,
+      actor: options.actorId,
+      eventType: options.eventType,
+      entityType: "leave_encashment_request",
+      entityId: options.request._id,
+      title: options.title,
+      message: options.message,
+      actionUrl: options.actionUrl,
+      category: options.category,
+      metadata: encashmentMetadata(options.request),
+      dedupeEventKey: options.dedupeEventKey,
+    },
+    options.session
+  );
+}
+
+async function settlementRecipients(company: mongoose.Types.ObjectId, session: ClientSession) {
+  const users = await User.find({
+    company,
+    role: { $in: ["admin", "hradmin"] },
+    deletedAt: { $exists: false },
+    is_enabled: { $ne: false },
+  })
+    .select("_id")
+    .session(session)
+    .lean();
+  return users.map((user) => user._id);
+}
+
+async function notifyEncashmentApproved(options: {
+  request: any;
+  actorId: any;
+  session: ClientSession;
+}) {
+  await notifyEncashment({
+    request: options.request,
+    recipients: [options.request.employee],
+    actorId: options.actorId,
+    eventType: "leave_encashment_request.approved",
+    title: "Leave encashment approved",
+    message: `Your ${options.request.leaveTypeNameSnapshot} encashment for ${options.request.requestedUnits} ${options.request.leaveUnit} was approved and is awaiting payout.`,
+    actionUrl: "/dashboard/requests",
+    session: options.session,
+  });
+  const recipients = await settlementRecipients(options.request.company, options.session);
+  await notifyEncashment({
+    request: options.request,
+    recipients,
+    actorId: options.actorId,
+    eventType: "leave_encashment_request.payout_ready",
+    title: "Leave encashment payout pending",
+    message: `${options.request.requestedUnits} ${options.request.leaveUnit} of ${options.request.leaveTypeNameSnapshot} is approved and ready for payout recording.`,
+    actionUrl: "/dashboard/leave-management",
+    category: "approval",
+    session: options.session,
+  });
 }
 
 async function activeEncashmentUnits(options: {
@@ -494,6 +580,21 @@ export async function createLeaveEncashmentRequestService(req: any, res: Respons
         request.history.push(event(actor, "approved", request.decisionComment) as any);
       }
       await request.save({ session });
+      if (approval.finalApproved) {
+        await notifyEncashmentApproved({ request, actorId: actor._id, session });
+      } else {
+        await notifyEncashment({
+          request,
+          recipients: approval.currentApprovers,
+          actorId: actor._id,
+          eventType: "leave_encashment_request.awaiting_approval",
+          title: "Leave encashment needs approval",
+          message: `${employee.name} requested encashment of ${request.requestedUnits} ${request.leaveUnit} of ${request.leaveTypeNameSnapshot}.`,
+          actionUrl: "/employee",
+          dedupeEventKey: `leave_encashment_request.awaiting_approval:step:${approval.instance.currentStepOrder}`,
+          session,
+        });
+      }
     });
 
     const created = await populateRequest(LeaveEncashmentRequest.findById(request._id));
@@ -599,6 +700,7 @@ export async function approveLeaveEncashmentRequestService(req: any, res: Respon
         status: "submitted",
       }).session(session);
       if (!request) throw generateError("Only a submitted encashment request can be approved", 409);
+      const previousApprovers = new Set((request.currentApprovers || []).map((item: any) => String(item)));
       const approval = await approveApprovalInstance({
         company,
         requestModel: "LeaveEncashmentRequest",
@@ -610,12 +712,30 @@ export async function approveLeaveEncashmentRequestService(req: any, res: Respon
       syncApprovalState(request, approval);
       finalApproved = approval.finalApproved;
       currentStepName = approval.currentStepName;
+      const nextApprovers = approval.currentApprovers.filter(
+        (item: any) => !previousApprovers.has(String(item))
+      );
       if (finalApproved) {
         await finalizeApproval(request, actor._id, session);
         request.decisionComment = text(req.body?.comment);
         request.history.push(event(actor, "approved", req.body?.comment) as any);
       }
       await request.save({ session });
+      if (finalApproved) {
+        await notifyEncashmentApproved({ request, actorId: actor._id, session });
+      } else if (nextApprovers.length) {
+        await notifyEncashment({
+          request,
+          recipients: nextApprovers,
+          actorId: actor._id,
+          eventType: "leave_encashment_request.awaiting_approval",
+          title: "Leave encashment needs approval",
+          message: `An encashment request for ${request.requestedUnits} ${request.leaveUnit} of ${request.leaveTypeNameSnapshot} needs your approval.`,
+          actionUrl: "/employee",
+          dedupeEventKey: `leave_encashment_request.awaiting_approval:step:${approval.instance.currentStepOrder}`,
+          session,
+        });
+      }
     });
     const updated = await populateRequest(LeaveEncashmentRequest.findById(requestId));
     return res.status(200).json({
@@ -663,6 +783,16 @@ export async function rejectLeaveEncashmentRequestService(req: any, res: Respons
       request.decisionComment = comment;
       request.history.push(event(actor, "rejected", comment) as any);
       await request.save({ session });
+      await notifyEncashment({
+        request,
+        recipients: [request.employee],
+        actorId: actor._id,
+        eventType: "leave_encashment_request.rejected",
+        title: "Leave encashment rejected",
+        message: `Your ${request.leaveTypeNameSnapshot} encashment request for ${request.requestedUnits} ${request.leaveUnit} was rejected.`,
+        actionUrl: "/dashboard/requests",
+        session,
+      });
     });
     const updated = await populateRequest(LeaveEncashmentRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Leave encashment request rejected" });
@@ -687,6 +817,7 @@ export async function withdrawLeaveEncashmentRequestService(req: any, res: Respo
       if (String(request.employee) !== String(actor._id)) {
         throw generateError("Only the employee can withdraw this encashment request", 403);
       }
+      const pendingApprovers = [...(request.currentApprovers || [])];
       await cancelApprovalInstance({
         company,
         requestModel: "LeaveEncashmentRequest",
@@ -706,6 +837,18 @@ export async function withdrawLeaveEncashmentRequestService(req: any, res: Respo
       request.decisionComment = comment;
       request.history.push(event(actor, "withdrawn", comment) as any);
       await request.save({ session });
+      if (pendingApprovers.length) {
+        await notifyEncashment({
+          request,
+          recipients: pendingApprovers,
+          actorId: actor._id,
+          eventType: "leave_encashment_request.withdrawn",
+          title: "Leave encashment withdrawn",
+          message: `The ${request.leaveTypeNameSnapshot} encashment request for ${request.requestedUnits} ${request.leaveUnit} was withdrawn.`,
+          actionUrl: "/employee",
+          session,
+        });
+      }
     });
     const updated = await populateRequest(LeaveEncashmentRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Leave encashment request withdrawn" });
@@ -744,6 +887,16 @@ export async function settleLeaveEncashmentRequestService(req: any, res: Respons
       request.settledBy = actor._id;
       request.history.push(event(actor, "marked_paid", request.payoutReference || request.payoutNotes) as any);
       await request.save({ session });
+      await notifyEncashment({
+        request,
+        recipients: [request.employee],
+        actorId: actor._id,
+        eventType: "leave_encashment_request.paid",
+        title: "Leave encashment paid",
+        message: `Your ${request.leaveTypeNameSnapshot} encashment payout of ${request.payoutCurrency} ${request.payoutAmount} was recorded as paid.`,
+        actionUrl: "/dashboard/requests",
+        session,
+      });
     });
     const updated = await populateRequest(LeaveEncashmentRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Leave encashment marked paid" });
@@ -805,6 +958,16 @@ export async function cancelApprovedLeaveEncashmentRequestService(req: any, res:
       request.cancellationReason = reason;
       request.history.push(event(actor, "cancelled", reason) as any);
       await request.save({ session });
+      await notifyEncashment({
+        request,
+        recipients: [request.employee],
+        actorId: actor._id,
+        eventType: "leave_encashment_request.cancelled",
+        title: "Leave encashment cancelled",
+        message: `Your unpaid ${request.leaveTypeNameSnapshot} encashment was cancelled and the leave balance was restored.`,
+        actionUrl: "/dashboard/requests",
+        session,
+      });
     });
     const updated = await populateRequest(LeaveEncashmentRequest.findById(requestId));
     return res.status(200).json({

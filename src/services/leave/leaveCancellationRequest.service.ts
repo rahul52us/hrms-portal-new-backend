@@ -23,6 +23,7 @@ import {
   resolveLeaveCompanyId,
 } from "./leaveAccess.utils";
 import { finalizeApprovedLeaveCancellation } from "./leaveRequest.service";
+import { createRequestNotifications } from "../notification/notification.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -117,6 +118,49 @@ function syncApprovalState(request: any, approval: any) {
   );
   request.approverNameSnapshot =
     current?.approvers?.find((item: any) => item.status === "pending")?.nameSnapshot || "";
+}
+
+function cancellationMetadata(cancellation: any, leaveRequest: any) {
+  return {
+    requestType: "leave_cancellation_request",
+    leaveRequestId: String(leaveRequest._id),
+    leaveTypeCode: leaveRequest.leaveTypeCodeSnapshot,
+    leaveTypeName: leaveRequest.leaveTypeNameSnapshot,
+    fromDate: leaveRequest.fromDate,
+    toDate: leaveRequest.toDate,
+  };
+}
+
+async function notifyCancellation(options: {
+  cancellation: any;
+  leaveRequest: any;
+  recipients: any[];
+  actorId: any;
+  eventType: string;
+  title: string;
+  message: string;
+  actionUrl: string;
+  dedupeEventKey?: string;
+  category?: "request" | "approval";
+  session: mongoose.ClientSession;
+}) {
+  await createRequestNotifications(
+    {
+      company: options.cancellation.company,
+      recipients: options.recipients,
+      actor: options.actorId,
+      eventType: options.eventType,
+      entityType: "leave_cancellation_request",
+      entityId: options.cancellation._id,
+      title: options.title,
+      message: options.message,
+      actionUrl: options.actionUrl,
+      category: options.category,
+      metadata: cancellationMetadata(options.cancellation, options.leaveRequest),
+      dedupeEventKey: options.dedupeEventKey,
+    },
+    options.session
+  );
 }
 
 async function resolveCancellationWorkflow(company: mongoose.Types.ObjectId, request: any) {
@@ -288,6 +332,32 @@ export async function createLeaveCancellationRequestService(req: any, res: Respo
       }
       await cancellation.save({ session });
       await leaveRequest.save({ session });
+      if (approval.finalApproved) {
+        await notifyCancellation({
+          cancellation,
+          leaveRequest,
+          recipients: [cancellation.employee],
+          actorId: actor._id,
+          eventType: "leave_cancellation_request.approved",
+          title: "Leave cancellation approved",
+          message: `Your request to cancel ${leaveRequest.leaveTypeNameSnapshot} leave for ${leaveRequest.fromDate} to ${leaveRequest.toDate} was automatically approved.`,
+          actionUrl: "/dashboard/requests",
+          session,
+        });
+      } else {
+        await notifyCancellation({
+          cancellation,
+          leaveRequest,
+          recipients: approval.currentApprovers,
+          actorId: actor._id,
+          eventType: "leave_cancellation_request.awaiting_approval",
+          title: "Leave cancellation needs approval",
+          message: `${employee.name} requested cancellation of ${leaveRequest.leaveTypeNameSnapshot} leave for ${leaveRequest.fromDate} to ${leaveRequest.toDate}.`,
+          actionUrl: "/employee",
+          dedupeEventKey: `leave_cancellation_request.awaiting_approval:step:${approval.instance.currentStepOrder}`,
+          session,
+        });
+      }
     });
 
     const created = await populateCancellationRequest(
@@ -387,6 +457,7 @@ export async function approveLeaveCancellationRequestService(req: any, res: Resp
         status: "submitted",
       }).session(session);
       if (!cancellation) throw generateError("Only a submitted cancellation request can be approved", 409);
+      const previousApprovers = new Set((cancellation.currentApprovers || []).map((item: any) => String(item)));
       const leaveRequest = await LeaveRequest.findOne({
         _id: cancellation.leaveRequest,
         company,
@@ -404,6 +475,9 @@ export async function approveLeaveCancellationRequestService(req: any, res: Resp
       syncApprovalState(cancellation, approval);
       finalApproved = approval.finalApproved;
       currentStepName = approval.currentStepName;
+      const nextApprovers = approval.currentApprovers.filter(
+        (item: any) => !previousApprovers.has(String(item))
+      );
       if (finalApproved) {
         await finalizeApprovedLeaveCancellation({
           request: leaveRequest,
@@ -430,6 +504,32 @@ export async function approveLeaveCancellationRequestService(req: any, res: Resp
       }
       await cancellation.save({ session });
       await leaveRequest.save({ session });
+      if (finalApproved) {
+        await notifyCancellation({
+          cancellation,
+          leaveRequest,
+          recipients: [cancellation.employee],
+          actorId: actor._id,
+          eventType: "leave_cancellation_request.approved",
+          title: "Leave cancellation approved",
+          message: `Your request to cancel ${leaveRequest.leaveTypeNameSnapshot} leave for ${leaveRequest.fromDate} to ${leaveRequest.toDate} was approved.`,
+          actionUrl: "/dashboard/requests",
+          session,
+        });
+      } else if (nextApprovers.length) {
+        await notifyCancellation({
+          cancellation,
+          leaveRequest,
+          recipients: nextApprovers,
+          actorId: actor._id,
+          eventType: "leave_cancellation_request.awaiting_approval",
+          title: "Leave cancellation needs approval",
+          message: `A cancellation request for ${leaveRequest.leaveTypeNameSnapshot} leave from ${leaveRequest.fromDate} to ${leaveRequest.toDate} needs your approval.`,
+          actionUrl: "/employee",
+          dedupeEventKey: `leave_cancellation_request.awaiting_approval:step:${approval.instance.currentStepOrder}`,
+          session,
+        });
+      }
     });
     const updated = await populateCancellationRequest(LeaveCancellationRequest.findById(requestId));
     return res.status(200).json({
@@ -484,6 +584,17 @@ export async function rejectLeaveCancellationRequestService(req: any, res: Respo
       leaveRequest.history.push(leaveEvent(actor, "cancellation_rejected", comment) as any);
       await cancellation.save({ session });
       await leaveRequest.save({ session });
+      await notifyCancellation({
+        cancellation,
+        leaveRequest,
+        recipients: [cancellation.employee],
+        actorId: actor._id,
+        eventType: "leave_cancellation_request.rejected",
+        title: "Leave cancellation rejected",
+        message: `Your request to cancel ${leaveRequest.leaveTypeNameSnapshot} leave for ${leaveRequest.fromDate} to ${leaveRequest.toDate} was rejected. The approved leave remains active.`,
+        actionUrl: "/dashboard/requests",
+        session,
+      });
     });
     const updated = await populateCancellationRequest(LeaveCancellationRequest.findById(requestId));
     return res.status(200).json({
@@ -512,6 +623,7 @@ export async function withdrawLeaveCancellationRequestService(req: any, res: Res
       if (String(cancellation.employee) !== String(actor._id)) {
         throw generateError("Only the employee can withdraw this cancellation request", 403);
       }
+      const pendingApprovers = [...(cancellation.currentApprovers || [])];
       const leaveRequest = await LeaveRequest.findOne({
         _id: cancellation.leaveRequest,
         company,
@@ -538,6 +650,19 @@ export async function withdrawLeaveCancellationRequestService(req: any, res: Res
       leaveRequest.history.push(leaveEvent(actor, "cancellation_withdrawn", comment) as any);
       await cancellation.save({ session });
       await leaveRequest.save({ session });
+      if (pendingApprovers.length) {
+        await notifyCancellation({
+          cancellation,
+          leaveRequest,
+          recipients: pendingApprovers,
+          actorId: actor._id,
+          eventType: "leave_cancellation_request.withdrawn",
+          title: "Leave cancellation withdrawn",
+          message: `The cancellation request for ${leaveRequest.leaveTypeNameSnapshot} leave from ${leaveRequest.fromDate} to ${leaveRequest.toDate} was withdrawn.`,
+          actionUrl: "/employee",
+          session,
+        });
+      }
     });
     const updated = await populateCancellationRequest(LeaveCancellationRequest.findById(requestId));
     return res.status(200).json({

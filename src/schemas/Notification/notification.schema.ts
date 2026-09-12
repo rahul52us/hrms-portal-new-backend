@@ -9,9 +9,55 @@ const notificationSchema = new Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Company"
   },
+  recipient: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    index: true,
+  },
+  actor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+  },
+  title: {
+    type: String,
+    trim: true,
+    maxlength: 160,
+  },
   message: {
     type: String,
     required: true,
+    trim: true,
+    maxlength: 1000,
+  },
+  category: {
+    type: String,
+    enum: ['request', 'approval', 'attendance', 'announcement', 'system'],
+    default: 'system',
+  },
+  eventType: {
+    type: String,
+    trim: true,
+    maxlength: 120,
+  },
+  entityType: {
+    type: String,
+    trim: true,
+    maxlength: 80,
+  },
+  entityId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null,
+  },
+  actionUrl: {
+    type: String,
+    trim: true,
+    default: '',
+    maxlength: 500,
+  },
+  dedupeKey: {
+    type: String,
+    trim: true,
   },
   type: {
     type: String
@@ -45,18 +91,15 @@ const notificationSchema = new Schema({
       type: String,
     },
   }],
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    index: true,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+}, { timestamps: true });
 
 notificationSchema.index({ isRead: 1, createdAt: -1 });
+notificationSchema.index({ company: 1, recipient: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ company: 1, recipient: 1, createdAt: -1 });
+notificationSchema.index(
+  { dedupeKey: 1 },
+  { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } }
+);
 
 const NotificationModal = mongoose.model('Notification', notificationSchema);
 

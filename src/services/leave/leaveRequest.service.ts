@@ -54,6 +54,7 @@ import {
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
 import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
+import { createRequestNotifications } from "../notification/notification.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -355,6 +356,85 @@ function syncRequestApprovalState(request: any, approval: any) {
   request.approverNameSnapshot = currentApprover?.nameSnapshot || "";
 }
 
+function leaveRequestUnits(request: any) {
+  const units = Number(request.chargedUnits || request.requestedUnits || 0);
+  const unit = String(request.leaveUnit || "days");
+  return `${units} ${units === 1 ? unit.replace(/s$/, "") : unit}`;
+}
+
+function leaveRequestMetadata(request: any) {
+  return {
+    requestType: "leave_request",
+    leaveTypeCode: request.leaveTypeCodeSnapshot,
+    leaveTypeName: request.leaveTypeNameSnapshot,
+    fromDate: request.fromDate,
+    toDate: request.toDate,
+    units: Number(request.chargedUnits || request.requestedUnits || 0),
+  };
+}
+
+async function notifyLeaveApprovers(options: {
+  request: any;
+  recipients: any[];
+  actorId: any;
+  employeeName: string;
+  stepOrder?: number | null;
+  eventType?: string;
+  title?: string;
+  message?: string;
+  dedupeEventKey?: string;
+  session: mongoose.ClientSession;
+}) {
+  const eventType = options.eventType || "leave_request.awaiting_approval";
+  await createRequestNotifications(
+    {
+      company: options.request.company,
+      recipients: options.recipients,
+      actor: options.actorId,
+      eventType,
+      entityType: "leave_request",
+      entityId: options.request._id,
+      title: options.title || "Leave request needs approval",
+      message:
+        options.message ||
+        `${options.employeeName || "An employee"} requested ${leaveRequestUnits(options.request)} of ${options.request.leaveTypeNameSnapshot} from ${options.request.fromDate} to ${options.request.toDate}.`,
+      actionUrl: "/employee",
+      metadata: {
+        ...leaveRequestMetadata(options.request),
+        approvalStepOrder: options.stepOrder || null,
+      },
+      dedupeEventKey:
+        options.dedupeEventKey || `${eventType}:step:${options.stepOrder || "current"}`,
+    },
+    options.session
+  );
+}
+
+async function notifyLeaveEmployee(options: {
+  request: any;
+  actorId: any;
+  eventType: string;
+  title: string;
+  message: string;
+  session: mongoose.ClientSession;
+}) {
+  await createRequestNotifications(
+    {
+      company: options.request.company,
+      recipients: [options.request.employee],
+      actor: options.actorId,
+      eventType: options.eventType,
+      entityType: "leave_request",
+      entityId: options.request._id,
+      title: options.title,
+      message: options.message,
+      actionUrl: "/dashboard/requests",
+      metadata: leaveRequestMetadata(options.request),
+    },
+    options.session
+  );
+}
+
 export async function previewLeaveRequestService(req: any, res: Response, next: NextFunction) {
   try {
     const actor = getLeaveActor(req);
@@ -602,6 +682,25 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
         request.history.push(event(actor, "approved", "Auto-approved by approval workflow") as any);
       }
       await request.save({ session });
+      if (approval.finalApproved) {
+        await notifyLeaveEmployee({
+          request,
+          actorId: actor._id,
+          eventType: "leave_request.approved",
+          title: "Leave request approved",
+          message: `Your ${request.leaveTypeNameSnapshot} request for ${leaveRequestUnits(request)} was automatically approved.`,
+          session,
+        });
+      } else {
+        await notifyLeaveApprovers({
+          request,
+          recipients: approval.currentApprovers,
+          actorId: actor._id,
+          employeeName: employee.name,
+          stepOrder: approval.instance.currentStepOrder,
+          session,
+        });
+      }
       if (attachments.length) {
         const attachmentIds = attachments.map((item) => item.attachment);
         const linked = await LeaveAttachment.updateMany(
@@ -680,6 +779,7 @@ export async function addLeaveRequestDocumentsService(req: any, res: Response, n
     const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("Leave request not found", 404);
     ensureCanAddLeaveDocuments(actor, candidate);
+    const employee = await loadEmployee(company, candidate.employee);
     if (!candidate.documentRequirementSnapshot?.required) {
       throw generateError("This leave request does not require supporting documents", 409);
     }
@@ -733,6 +833,19 @@ export async function addLeaveRequestDocumentsService(req: any, res: Response, n
         event(actor, "documents_uploaded", `${attachments.length} supporting document${attachments.length === 1 ? "" : "s"} uploaded`) as any
       );
       await request.save({ session });
+      if (request.status === "submitted" && request.currentApprovers.length) {
+        await notifyLeaveApprovers({
+          request,
+          recipients: request.currentApprovers,
+          actorId: actor._id,
+          employeeName: employee.name,
+          eventType: "leave_request.documents_uploaded",
+          title: "Leave documents uploaded",
+          message: `Supporting documents were added to a ${request.leaveTypeNameSnapshot} request for ${request.fromDate} to ${request.toDate}.`,
+          dedupeEventKey: `leave_request.documents_uploaded:${request.attachments.length}`,
+          session,
+        });
+      }
     });
 
     const updated = await populateRequest(LeaveRequest.findById(requestId));
@@ -762,22 +875,32 @@ export async function verifyLeaveRequestDocumentsService(req: any, res: Response
     }
     const comment = text(req.body?.comment);
 
-    const request = await LeaveRequest.findOneAndUpdate(
-      { _id: requestId, company, documentStatus: "submitted" },
-      {
-        $set: {
-          documentStatus: "verified",
-          documentVerifiedAt: new Date(),
-          documentVerifiedBy: actor._id,
-          documentWaivedAt: null,
-          documentWaivedBy: null,
-          documentDecisionComment: comment,
+    await mongoose.connection.transaction(async (session) => {
+      const request = await LeaveRequest.findOneAndUpdate(
+        { _id: requestId, company, documentStatus: "submitted" },
+        {
+          $set: {
+            documentStatus: "verified",
+            documentVerifiedAt: new Date(),
+            documentVerifiedBy: actor._id,
+            documentWaivedAt: null,
+            documentWaivedBy: null,
+            documentDecisionComment: comment,
+          },
+          $push: { history: event(actor, "documents_verified", comment || undefined) },
         },
-        $push: { history: event(actor, "documents_verified", comment || undefined) },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!request) throw generateError("Document status changed; refresh and try again", 409);
+        { new: true, runValidators: true, session }
+      );
+      if (!request) throw generateError("Document status changed; refresh and try again", 409);
+      await notifyLeaveEmployee({
+        request,
+        actorId: actor._id,
+        eventType: "leave_request.documents_verified",
+        title: "Leave documents verified",
+        message: `Your supporting documents for ${request.leaveTypeNameSnapshot} were verified.`,
+        session,
+      });
+    });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Supporting documents verified" });
   } catch (error) {
@@ -802,22 +925,32 @@ export async function waiveLeaveRequestDocumentsService(req: any, res: Response,
     const comment = text(req.body?.comment);
     if (comment.length < 3) throw generateError("A document waiver reason is required", 422);
 
-    const request = await LeaveRequest.findOneAndUpdate(
-      { _id: requestId, company, documentStatus: { $in: ["pending", "submitted"] } },
-      {
-        $set: {
-          documentStatus: "waived",
-          documentWaivedAt: new Date(),
-          documentWaivedBy: actor._id,
-          documentVerifiedAt: null,
-          documentVerifiedBy: null,
-          documentDecisionComment: comment,
+    await mongoose.connection.transaction(async (session) => {
+      const request = await LeaveRequest.findOneAndUpdate(
+        { _id: requestId, company, documentStatus: { $in: ["pending", "submitted"] } },
+        {
+          $set: {
+            documentStatus: "waived",
+            documentWaivedAt: new Date(),
+            documentWaivedBy: actor._id,
+            documentVerifiedAt: null,
+            documentVerifiedBy: null,
+            documentDecisionComment: comment,
+          },
+          $push: { history: event(actor, "documents_waived", comment) },
         },
-        $push: { history: event(actor, "documents_waived", comment) },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!request) throw generateError("Document status changed; refresh and try again", 409);
+        { new: true, runValidators: true, session }
+      );
+      if (!request) throw generateError("Document status changed; refresh and try again", 409);
+      await notifyLeaveEmployee({
+        request,
+        actorId: actor._id,
+        eventType: "leave_request.documents_waived",
+        title: "Leave document requirement waived",
+        message: `The supporting-document requirement for your ${request.leaveTypeNameSnapshot} request was waived.`,
+        session,
+      });
+    });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Document requirement waived" });
   } catch (error) {
@@ -984,12 +1117,16 @@ export async function approveLeaveRequestService(req: any, res: Response, next: 
     const candidate = await LeaveRequest.findOne({ _id: requestId, company }).lean();
     if (!candidate) throw generateError("Leave request not found", 404);
     if (!candidate.approvalInstance) ensureCanApproveRequest(actor, candidate);
+    const employee = await loadEmployee(company, candidate.employee);
 
     let finalApproved = true;
     let currentStepName: string | null = null;
     await mongoose.connection.transaction(async (session) => {
       const request = await LeaveRequest.findOne({ _id: requestId, company, status: "submitted" }).session(session);
       if (!request) throw generateError("Only a submitted leave request can be approved", 409);
+      const previousApprovers = new Set((request.currentApprovers || []).map((item: any) => String(item)));
+      let nextApprovers: any[] = [];
+      let nextStepOrder: number | null = null;
       if (request.approvalInstance) {
         const approval = await approveApprovalInstance({
           company,
@@ -1002,6 +1139,8 @@ export async function approveLeaveRequestService(req: any, res: Response, next: 
         syncRequestApprovalState(request, approval);
         finalApproved = approval.finalApproved;
         currentStepName = approval.currentStepName;
+        nextApprovers = approval.currentApprovers.filter((item: any) => !previousApprovers.has(String(item)));
+        nextStepOrder = approval.instance.currentStepOrder;
       }
       if (finalApproved) {
         await finalizeLeaveApproval(request, actor._id, session);
@@ -1015,6 +1154,25 @@ export async function approveLeaveRequestService(req: any, res: Response, next: 
         request.history.push(event(actor, "approved", req.body?.comment) as any);
       }
       await request.save({ session });
+      if (finalApproved) {
+        await notifyLeaveEmployee({
+          request,
+          actorId: actor._id,
+          eventType: "leave_request.approved",
+          title: "Leave request approved",
+          message: `Your ${request.leaveTypeNameSnapshot} request for ${leaveRequestUnits(request)} was approved.`,
+          session,
+        });
+      } else if (nextApprovers.length) {
+        await notifyLeaveApprovers({
+          request,
+          recipients: nextApprovers,
+          actorId: actor._id,
+          employeeName: employee.name,
+          stepOrder: nextStepOrder,
+          session,
+        });
+      }
     });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({
@@ -1064,6 +1222,14 @@ export async function rejectLeaveRequestService(req: any, res: Response, next: N
       request.decisionComment = comment;
       request.history.push(event(actor, "rejected", comment) as any);
       await request.save({ session });
+      await notifyLeaveEmployee({
+        request,
+        actorId: actor._id,
+        eventType: "leave_request.rejected",
+        title: "Leave request rejected",
+        message: `Your ${request.leaveTypeNameSnapshot} request for ${leaveRequestUnits(request)} was rejected.`,
+        session,
+      });
     });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Leave request rejected" });
@@ -1083,6 +1249,7 @@ export async function withdrawLeaveRequestService(req: any, res: Response, next:
       if (String(request.employee) !== String(actor._id)) {
         throw generateError("Only the employee can withdraw this leave request", 403);
       }
+      const pendingApprovers = [...(request.currentApprovers || [])];
       if (request.approvalInstance) {
         await cancelApprovalInstance({
           company,
@@ -1101,6 +1268,19 @@ export async function withdrawLeaveRequestService(req: any, res: Response, next:
       request.approverNameSnapshot = "";
       request.history.push(event(actor, "withdrawn", req.body?.comment) as any);
       await request.save({ session });
+      if (pendingApprovers.length) {
+        await notifyLeaveApprovers({
+          request,
+          recipients: pendingApprovers,
+          actorId: actor._id,
+          employeeName: text(actor.name || actor.username) || "The employee",
+          eventType: "leave_request.withdrawn",
+          title: "Leave request withdrawn",
+          message: `${text(actor.name || actor.username) || "The employee"} withdrew the ${request.leaveTypeNameSnapshot} request for ${request.fromDate} to ${request.toDate}.`,
+          dedupeEventKey: "leave_request.withdrawn",
+          session,
+        });
+      }
     });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Leave request withdrawn" });
@@ -1189,6 +1369,14 @@ export async function cancelLeaveRequestService(req: any, res: Response, next: N
       request.cancellationReason = comment;
       request.history.push(event(actor, "cancelled", comment) as any);
       await request.save({ session });
+      await notifyLeaveEmployee({
+        request,
+        actorId: actor._id,
+        eventType: "leave_request.cancelled",
+        title: "Approved leave cancelled",
+        message: `Your approved ${request.leaveTypeNameSnapshot} leave for ${request.fromDate} to ${request.toDate} was cancelled.`,
+        session,
+      });
     });
     const updated = await populateRequest(LeaveRequest.findById(requestId));
     return res.status(200).json({ success: true, data: updated, message: "Approved leave cancelled and balance restored" });

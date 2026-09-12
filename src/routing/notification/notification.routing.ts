@@ -1,4 +1,8 @@
-import { getNotification, markNotificationAsRead } from "../../services/notification/notification.service";
+import {
+  getNotification,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+} from "../../services/notification/notification.service";
 import {
   listCompanyNotificationUsers,
   sendCompanyNotification,
@@ -10,5 +14,7 @@ const router = express.Router()
 router.get('/',authenticate,getNotification)
 router.get('/users',authenticate,listCompanyNotificationUsers)
 router.post('/send',authenticate,sendCompanyNotification)
+router.patch('/read-all',authenticate,markAllNotificationsAsRead)
+router.patch('/:notificationId/read',authenticate,markNotificationAsRead)
 router.put('/',authenticate,markNotificationAsRead)
 export default router;
