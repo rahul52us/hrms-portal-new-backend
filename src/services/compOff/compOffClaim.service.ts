@@ -20,8 +20,10 @@ import { resolveLeaveYear } from "../leave/leaveRequestCalculator.utils";
 import { PERMISSION_KEYS, hasPermission } from "../permissions/permission.utils";
 import { expireCompOffCredits } from "./compOffCredit.service";
 import {
+  buildCompOffClaimNotificationContent,
   calculateCompOffEligibleUnits,
   calculateCompOffExpiryDate,
+  CompOffClaimNotificationEvent,
 } from "./compOffClaim.utils";
 import {
   approveApprovalInstance,
@@ -30,6 +32,7 @@ import {
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
 import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
+import { createRequestNotifications } from "../notification/notification.service";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -84,6 +87,51 @@ function syncClaimApprovalState(claim: any, approval: any) {
   const current = approval.instance.steps?.find((step: any) => step.order === approval.instance.currentStepOrder);
   const currentApprover = current?.approvers?.find((item: any) => item.status === "pending");
   claim.approverNameSnapshot = currentApprover?.nameSnapshot || "";
+}
+
+function compOffClaimMetadata(claim: any) {
+  return {
+    requestType: "comp_off_claim",
+    attendanceDate: claim.attendanceDate,
+    requestedUnits: Number(claim.requestedUnits || 0),
+    approvedUnits: Number(claim.approvedUnits || 0),
+    expiresOn: claim.expiresOn || null,
+    leaveTypeId: String(claim.leaveType?._id || claim.leaveType || ""),
+    attendanceRecordId: String(claim.attendanceRecord?._id || claim.attendanceRecord || ""),
+  };
+}
+
+async function notifyCompOffClaim(options: {
+  claim: any;
+  recipients: any[];
+  actorId: any;
+  event: CompOffClaimNotificationEvent;
+  employeeName?: string;
+  dedupeEventKey?: string;
+  session: mongoose.ClientSession;
+}) {
+  const content = buildCompOffClaimNotificationContent(options.event, {
+    attendanceDate: options.claim.attendanceDate,
+    requestedUnits: options.claim.requestedUnits,
+    employeeName: options.employeeName,
+    expiresOn: options.claim.expiresOn,
+  });
+  await createRequestNotifications(
+    {
+      company: options.claim.company,
+      recipients: options.recipients,
+      actor: options.actorId,
+      eventType: content.eventType,
+      entityType: "comp_off_claim",
+      entityId: options.claim._id,
+      title: content.title,
+      message: content.message,
+      actionUrl: content.actionUrl,
+      metadata: compOffClaimMetadata(options.claim),
+      dedupeEventKey: options.dedupeEventKey,
+    },
+    options.session
+  );
 }
 
 function isApprovalParticipant(actor: any, claim: any) {
@@ -352,6 +400,25 @@ export async function createCompOffClaimService(req: any, res: Response, next: N
         claim.history.push(claimEvent(actor, "approved", "Auto-approved by approval workflow") as any);
       }
       await claim.save({ session });
+      if (autoApproved) {
+        await notifyCompOffClaim({
+          claim,
+          recipients: [claim.employee],
+          actorId: actor._id,
+          event: "approved",
+          session,
+        });
+      } else {
+        await notifyCompOffClaim({
+          claim,
+          recipients: approval.currentApprovers,
+          actorId: actor._id,
+          event: "awaiting_approval",
+          employeeName: result.employee.name,
+          dedupeEventKey: `comp_off_claim.awaiting_approval:step:${approval.instance.currentStepOrder}`,
+          session,
+        });
+      }
     });
     const populated = await populateClaim(CompOffClaim.findById(claim._id));
     return res.status(201).json({
@@ -533,6 +600,9 @@ export async function approveCompOffClaimService(req: any, res: Response, next: 
     await mongoose.connection.transaction(async (session) => {
       const claim = await CompOffClaim.findOne({ _id: claimId, company, status: "submitted" }).session(session);
       if (!claim) throw generateError("Only a submitted comp-off claim can be approved", 409);
+      const previousApprovers = new Set((claim.currentApprovers || []).map((item: any) => String(item)));
+      let nextApprovers: any[] = [];
+      let nextStepOrder: number | null = null;
       if (claim.approvalInstance) {
         const approval = await approveApprovalInstance({
           company,
@@ -545,6 +615,10 @@ export async function approveCompOffClaimService(req: any, res: Response, next: 
         syncClaimApprovalState(claim, approval);
         finalApproved = approval.finalApproved;
         currentStepName = approval.currentStepName;
+        nextApprovers = approval.currentApprovers.filter(
+          (item: any) => !previousApprovers.has(String(item))
+        );
+        nextStepOrder = approval.instance.currentStepOrder;
       }
       if (finalApproved) {
         await finalizeCompOffClaim(claim, actor._id, session);
@@ -558,6 +632,24 @@ export async function approveCompOffClaimService(req: any, res: Response, next: 
         claim.history.push(claimEvent(actor, "approved", req.body?.comment) as any);
       }
       await claim.save({ session });
+      if (finalApproved) {
+        await notifyCompOffClaim({
+          claim,
+          recipients: [claim.employee],
+          actorId: actor._id,
+          event: "approved",
+          session,
+        });
+      } else if (nextApprovers.length) {
+        await notifyCompOffClaim({
+          claim,
+          recipients: nextApprovers,
+          actorId: actor._id,
+          event: "awaiting_approval",
+          dedupeEventKey: `comp_off_claim.awaiting_approval:step:${nextStepOrder}`,
+          session,
+        });
+      }
     });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({
@@ -604,6 +696,13 @@ export async function rejectCompOffClaimService(req: any, res: Response, next: N
       claim.decisionComment = comment;
       claim.history.push(claimEvent(actor, "rejected", comment) as any);
       await claim.save({ session });
+      await notifyCompOffClaim({
+        claim,
+        recipients: [claim.employee],
+        actorId: actor._id,
+        event: "rejected",
+        session,
+      });
     });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({ success: true, data: updated, message: "Comp-off claim rejected" });
@@ -625,6 +724,7 @@ export async function withdrawCompOffClaimService(req: any, res: Response, next:
         status: "submitted",
       }).session(session);
       if (!claim) throw generateError("Only your submitted comp-off claim can be withdrawn", 409);
+      const pendingApprovers = [...(claim.currentApprovers || [])];
       if (claim.approvalInstance) {
         await cancelApprovalInstance({
           company,
@@ -641,6 +741,16 @@ export async function withdrawCompOffClaimService(req: any, res: Response, next:
       claim.approverNameSnapshot = "";
       claim.history.push(claimEvent(actor, "withdrawn", req.body?.comment) as any);
       await claim.save({ session });
+      if (pendingApprovers.length) {
+        await notifyCompOffClaim({
+          claim,
+          recipients: pendingApprovers,
+          actorId: actor._id,
+          event: "withdrawn",
+          employeeName: text(actor.name || actor.username) || "The employee",
+          session,
+        });
+      }
     });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({ success: true, data: updated, message: "Comp-off claim withdrawn" });
@@ -717,6 +827,13 @@ export async function revokeCompOffClaimService(req: any, res: Response, next: N
       claim.decisionComment = comment;
       claim.history.push(claimEvent(actor, "revoked", comment) as any);
       await claim.save({ session });
+      await notifyCompOffClaim({
+        claim,
+        recipients: [claim.employee],
+        actorId: actor._id,
+        event: "revoked",
+        session,
+      });
     });
     const updated = await populateClaim(CompOffClaim.findById(claimId));
     return res.status(200).json({ success: true, data: updated, message: "Comp-off claim and unused credit revoked" });
