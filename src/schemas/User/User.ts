@@ -199,6 +199,7 @@ UserSchema.pre("validate", async function enforceCompanyEmployeeIdentifier() {
 
 UserSchema.index({ company: 1, reportingManager: 1, deletedAt: 1 });
 UserSchema.index({ company: 1, name: 1, _id: 1 });
+UserSchema.index({ company: 1, _id: 1 });
 UserSchema.index(
   { username: 1 },
   {

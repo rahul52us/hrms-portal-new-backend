@@ -25,6 +25,7 @@ import approvalWorkflowsRouting from "./approvalWorkflows.routing";
 import attendanceRouting from "./attendance.routing";
 import remoteWorkRouting from "./remoteWork.routing";
 import compOffRouting from "./compOff.routing";
+import calendarRouting from "./calendar.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -55,6 +56,7 @@ const importRoutings = (app: any) => {
   app.use('/api/attendance', attendanceRouting);
   app.use('/api/remote-work', remoteWorkRouting);
   app.use('/api/comp-off', compOffRouting);
+  app.use('/api/calendar', calendarRouting);
 };
 
 export default importRoutings;
