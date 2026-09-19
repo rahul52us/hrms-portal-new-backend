@@ -96,6 +96,7 @@ EmployeeAssignmentHistorySchema.index({
   company: 1,
   employee: 1,
   effectiveFrom: -1,
+  effectiveTo: 1,
 });
 
 const EmployeeAssignmentHistory = mongoose.model<EmployeeAssignmentHistoryI>(

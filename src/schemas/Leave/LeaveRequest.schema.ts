@@ -351,6 +351,7 @@ const LeaveRequestSchema = new Schema<LeaveRequestI>(
 );
 
 LeaveRequestSchema.index({ company: 1, employee: 1, status: 1, fromDate: -1 });
+LeaveRequestSchema.index({ company: 1, "dayBreakdown.attendanceDate": 1, status: 1, employee: 1 });
 LeaveRequestSchema.index({ company: 1, approver: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, currentApprovers: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, departmentNameSnapshot: 1, status: 1, submittedAt: -1 });

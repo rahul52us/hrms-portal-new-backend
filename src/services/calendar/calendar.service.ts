@@ -48,7 +48,7 @@ async function context(req: any, singleDate = false) {
   return { actor, company, scope, dates, filters, category, includePending: req.query.includePending === "true" };
 }
 
-async function calendarData(company: mongoose.Types.ObjectId, dates: string[]) {
+export async function calendarData(company: mongoose.Types.ObjectId, dates: string[]) {
   const from = parseAttendanceDate(dates[0]).date;
   const to = parseAttendanceDate(dates[dates.length - 1]).date;
   const departments: any[] = await Department.find({ company }).select("departmentName teams").lean();
@@ -94,7 +94,7 @@ async function calendarData(company: mongoose.Types.ObjectId, dates: string[]) {
   return { departments, classify, from, to };
 }
 
-function fallbackOrganization(employee: any, departments: any[]) {
+export function fallbackOrganization(employee: any, departments: any[]) {
   const department = departments.find((item) => String(item.departmentName).toLowerCase() === String(employee.department || "").toLowerCase());
   const team = department?.teams?.find((item: any) => String(item.name).toLowerCase() === String(employee.team || "").toLowerCase());
   return {

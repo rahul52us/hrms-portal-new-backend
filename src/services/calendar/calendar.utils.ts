@@ -58,6 +58,7 @@ export function calendarVisible(actor: any, scope: CalendarScope, employee: any,
   if (filters.departmentId && calendarId(organization?.department) !== filters.departmentId) return false;
   if (filters.teamId && calendarId(organization?.teamId) !== filters.teamId) return false;
   if (filters.officeLocationId && calendarId(organization?.officeLocation) !== filters.officeLocationId) return false;
+  if (filters.managerId && calendarId(organization?.reportingManager) !== filters.managerId) return false;
   return true;
 }
 

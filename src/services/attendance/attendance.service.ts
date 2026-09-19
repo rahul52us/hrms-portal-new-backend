@@ -390,7 +390,9 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
           defaultAttendanceStatus: context.defaultAttendanceStatus,
           schedule: context.schedule,
           holiday: context.holiday,
-          missingPolicies: context.missingPolicies,
+          missingPolicies: context.missingPolicies.filter((item: string) =>
+            ["attendance_policy", "work_schedule", "holiday_calendar"].includes(item)
+          ),
           warnings: context.warnings,
         },
         remoteWorkAuthorization,
