@@ -592,6 +592,7 @@ async function policyDetails(record: any, context: any) {
           versionId: idString(attendanceVersion),
           versionNumber: attendanceVersion?.versionNumber || null,
           effectiveFrom: attendanceVersion?.effectiveFrom || null,
+          rules: attendanceVersion?.rules || null,
           scopeType: references.attendancePolicy?.scopeType || null,
         }
       : null,
@@ -621,123 +622,180 @@ async function policyDetails(record: any, context: any) {
   };
 }
 
-export async function getAttendanceEmployeeDayService(
-  req: any,
-  res: Response,
-  next: NextFunction
-) {
+function attendanceExplanation(record: any, context: any, policies: any) {
+  if (!record) {
+    if (context.dayType === "weekly_off") return "No attendance was required because this was a weekly off.";
+    if (String(context.dayType || "").includes("holiday")) {
+      return context.holiday?.name
+        ? `No attendance was required because ${context.holiday.name} was a holiday.`
+        : "No attendance was required because this was a holiday.";
+    }
+    return "No attendance record exists for this day.";
+  }
+
+  const worked = Number(record.workedMinutes || 0);
+  const fullDay = Number(policies.attendancePolicy?.rules?.minimumFullDayMinutes || 0);
+  const halfDay = Number(policies.attendancePolicy?.rules?.minimumHalfDayMinutes || 0);
+  const effectiveFullDay =
+    Number(context.expectedWorkMinutes) > 0 && fullDay > 0
+      ? Math.min(fullDay, Number(context.expectedWorkMinutes))
+      : fullDay;
+
+  if (record.status === "present") {
+    return context.requiresAttendance === false
+      ? `Worked ${worked} minutes on a non-working day.`
+      : `Worked ${worked} minutes${effectiveFullDay ? `, meeting the ${effectiveFullDay}-minute full-day requirement` : ""}.`;
+  }
+  if (record.status === "half_day") {
+    return `Worked ${worked} minutes${halfDay ? `, meeting the ${halfDay}-minute half-day requirement` : ""}${effectiveFullDay ? ` but below the ${effectiveFullDay}-minute full-day requirement` : ""}.`;
+  }
+  if (record.status === "absent") {
+    return `Worked ${worked} minutes${halfDay ? `, below the ${halfDay}-minute minimum for a half day` : ""}.`;
+  }
+  if (record.status === "incomplete") return "Attendance is incomplete because a required punch is missing.";
+  if (record.status === "pending") return "Attendance is still open and will be recalculated after the final punch-out.";
+  if (record.status === "leave") return "Approved leave applies to this attendance day.";
+  if (record.status === "holiday") return "This day was classified as a holiday.";
+  if (record.status === "weekly_off") return "This day was classified as a weekly off.";
+  return "Attendance was calculated from the recorded punches and effective policy.";
+}
+
+export async function loadAttendanceEmployeeDay(options: {
+  company: mongoose.Types.ObjectId;
+  employeeId: string | mongoose.Types.ObjectId;
+  attendanceDate: string;
+}) {
+  const employeeId = String(options.employeeId);
+  const employee: any = await User.findOne({ _id: employeeId, company: options.company })
+    .select(EMPLOYEE_FIELDS)
+    .lean();
+  if (!employee || !calendarEmployeeActive(employee, options.attendanceDate)) {
+    throw generateError("Employee was not active in this company on that date", 404);
+  }
+
+  const [context, record] = await Promise.all([
+    resolveEmployeeDayContext({
+      companyId: options.company,
+      employeeId,
+      attendanceDate: options.attendanceDate,
+    }),
+    AttendanceRecord.findOne({
+      company: options.company,
+      employee: employeeId,
+      attendanceDate: options.attendanceDate,
+    }).lean(),
+  ]);
+  const organization = organizationFromRecord(record) || context.organizationAssignment;
+  const [revisions, leaveRequest, remoteWorkRequest, policies] = await Promise.all([
+    record
+      ? AttendanceRecordRevision.find({ company: options.company, attendanceRecord: record._id })
+          .sort({ revisionNumber: -1, createdAt: -1 })
+          .populate("actor", "name code role")
+          .lean()
+      : [],
+    record?.leaveRequest
+      ? LeaveRequest.findOne({ company: options.company, _id: record.leaveRequest })
+          .select("_id status leaveTypeNameSnapshot leaveTypeCodeSnapshot leaveUnit fromDate toDate dayBreakdown reason")
+          .lean()
+      : LeaveRequest.findOne({
+          company: options.company,
+          employee: employeeId,
+          status: "approved",
+          "dayBreakdown.attendanceDate": options.attendanceDate,
+        })
+          .select("_id status leaveTypeNameSnapshot leaveTypeCodeSnapshot leaveUnit fromDate toDate dayBreakdown reason")
+          .lean(),
+    record?.remoteWorkRequest
+      ? RemoteWorkRequest.findOne({ company: options.company, _id: record.remoteWorkRequest })
+          .select("_id status fromDate toDate dates reason")
+          .lean()
+      : RemoteWorkRequest.findOne({
+          company: options.company,
+          employee: employeeId,
+          status: "approved",
+          "dates.attendanceDate": options.attendanceDate,
+        })
+          .select("_id status fromDate toDate dates reason")
+          .lean(),
+    policyDetails(record, context),
+  ]);
+
+  return {
+    organization,
+    data: {
+      attendanceDate: options.attendanceDate,
+      employee: {
+        id: idString(employee),
+        name: employee.name || "Employee",
+        code: employee.code || "",
+        designation: organization?.designationSnapshot || employee.designation || "",
+        picture: employee.pic?.url || null,
+      },
+      organization: {
+        departmentId: idString(organization?.department) || null,
+        department: organization?.departmentNameSnapshot || employee.department || "",
+        teamId: idString(organization?.teamId) || null,
+        team: organization?.teamNameSnapshot || employee.team || "",
+        officeLocationId: idString(organization?.officeLocation) || null,
+        officeLocation: organization?.officeLocationNameSnapshot || "",
+        managerId: idString(organization?.reportingManager) || null,
+        manager: organization?.reportingManagerNameSnapshot || "",
+      },
+      context: {
+        dayType: context.dayType,
+        requiresAttendance: context.requiresAttendance,
+        expectedWorkMinutes: context.expectedWorkMinutes,
+        defaultAttendanceStatus: context.defaultAttendanceStatus,
+        timezone: context.timezone,
+        schedule: context.schedule,
+        holiday: context.holiday,
+        missingPolicies: context.missingPolicies.filter((item: string) =>
+          ["attendance_policy", "work_schedule", "holiday_calendar"].includes(item)
+        ),
+        warnings: context.warnings,
+      },
+      policies,
+      record,
+      explanation: attendanceExplanation(record, context, policies),
+      leaveRequest,
+      remoteWorkRequest,
+      revisions,
+    },
+  };
+}
+
+export async function getAttendanceEmployeeDayService(req: any, res: Response, next: NextFunction) {
   try {
     const ctx = attendanceContext(req);
     const employeeId = validId(req.params.employeeId, "employee id");
-    const employee: any = await User.findOne({
-      _id: employeeId,
+    const details = await loadAttendanceEmployeeDay({
       company: ctx.company,
-    })
-      .select(EMPLOYEE_FIELDS)
-      .lean();
-    if (!employee || !calendarEmployeeActive(employee, ctx.attendanceDate)) {
-      throw generateError("Employee was not active in this company on that date", 404);
-    }
-
-    const [context, record] = await Promise.all([
-      resolveEmployeeDayContext({
-        companyId: ctx.company,
-        employeeId,
-        attendanceDate: ctx.attendanceDate,
-      }),
-      AttendanceRecord.findOne({
-        company: ctx.company,
-        employee: employeeId,
-        attendanceDate: ctx.attendanceDate,
-      }).lean(),
-    ]);
-    const organization = organizationFromRecord(record) || context.organizationAssignment;
-    if (!calendarOrganizationAccess(ctx.actor, organization)) {
+      employeeId,
+      attendanceDate: ctx.attendanceDate,
+    });
+    if (!calendarOrganizationAccess(ctx.actor, details.organization)) {
       throw generateError("You cannot view this employee's attendance", 403);
     }
+    return res.status(200).json({ success: true, data: details.data });
+  } catch (error) {
+    next(error);
+  }
+}
 
-    const [revisions, leaveRequest, remoteWorkRequest, policies] = await Promise.all([
-      record
-        ? AttendanceRecordRevision.find({
-            company: ctx.company,
-            attendanceRecord: record._id,
-          })
-            .sort({ revisionNumber: -1, createdAt: -1 })
-            .populate("actor", "name code role")
-            .lean()
-        : [],
-      record?.leaveRequest
-        ? LeaveRequest.findOne({ company: ctx.company, _id: record.leaveRequest })
-            .select(
-              "_id status leaveTypeNameSnapshot leaveTypeCodeSnapshot leaveUnit fromDate toDate dayBreakdown reason"
-            )
-            .lean()
-        : LeaveRequest.findOne({
-            company: ctx.company,
-            employee: employeeId,
-            status: "approved",
-            "dayBreakdown.attendanceDate": ctx.attendanceDate,
-          })
-            .select(
-              "_id status leaveTypeNameSnapshot leaveTypeCodeSnapshot leaveUnit fromDate toDate dayBreakdown reason"
-            )
-            .lean(),
-      record?.remoteWorkRequest
-        ? RemoteWorkRequest.findOne({ company: ctx.company, _id: record.remoteWorkRequest })
-            .select("_id status fromDate toDate dates reason")
-            .lean()
-        : RemoteWorkRequest.findOne({
-            company: ctx.company,
-            employee: employeeId,
-            status: "approved",
-            "dates.attendanceDate": ctx.attendanceDate,
-          })
-            .select("_id status fromDate toDate dates reason")
-            .lean(),
-      policyDetails(record, context),
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        attendanceDate: ctx.attendanceDate,
-        employee: {
-          id: idString(employee),
-          name: employee.name || "Employee",
-          code: employee.code || "",
-          designation: organization?.designationSnapshot || employee.designation || "",
-          picture: employee.pic?.url || null,
-        },
-        organization: {
-          departmentId: idString(organization?.department) || null,
-          department: organization?.departmentNameSnapshot || employee.department || "",
-          teamId: idString(organization?.teamId) || null,
-          team: organization?.teamNameSnapshot || employee.team || "",
-          officeLocationId: idString(organization?.officeLocation) || null,
-          officeLocation: organization?.officeLocationNameSnapshot || "",
-          managerId: idString(organization?.reportingManager) || null,
-          manager: organization?.reportingManagerNameSnapshot || "",
-        },
-        context: {
-          dayType: context.dayType,
-          requiresAttendance: context.requiresAttendance,
-          expectedWorkMinutes: context.expectedWorkMinutes,
-          defaultAttendanceStatus: context.defaultAttendanceStatus,
-          timezone: context.timezone,
-          schedule: context.schedule,
-          holiday: context.holiday,
-          missingPolicies: context.missingPolicies.filter((item: string) =>
-            ["attendance_policy", "work_schedule", "holiday_calendar"].includes(item)
-          ),
-          warnings: context.warnings,
-        },
-        policies,
-        record,
-        leaveRequest,
-        remoteWorkRequest,
-        revisions,
-      },
+export async function getMyAttendanceDayService(req: any, res: Response, next: NextFunction) {
+  try {
+    const actor = getEmployeeRequestActor(req);
+    if (actor.role === "superadmin") {
+      throw generateError("Attendance is available to company accounts only", 403);
+    }
+    const company = resolveEmployeeRequestCompanyId(actor, undefined, "attendance");
+    const attendanceDate = parseAttendanceDate(String(req.params.attendanceDate || "")).dateKey;
+    const details = await loadAttendanceEmployeeDay({
+      company,
+      employeeId: actor._id,
+      attendanceDate,
     });
+    return res.status(200).json({ success: true, data: details.data });
   } catch (error) {
     next(error);
   }

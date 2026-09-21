@@ -59,6 +59,17 @@ async function main() {
     });
     return { status: response.status, body: (await response.json()) as any };
   };
+  const requestRaw = async (actor: any, path: string) => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/attendance${path}`, {
+      headers: { Authorization: `Bearer ${token(actor)}` },
+    });
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type") || "",
+      disposition: response.headers.get("content-disposition") || "",
+      text: await response.text(),
+    };
+  };
 
   let assertions = 0;
   try {
@@ -105,6 +116,39 @@ async function main() {
 
     const forbidden = await request(employee, `/overview?date=${date}`);
     assert.equal(forbidden.status, 403); assertions++;
+
+    const myRecords = await request(
+      employee,
+      "/records?from=2026-09-01&to=2026-09-30&page=1&limit=1"
+    );
+    assert.equal(myRecords.status, 200); assertions++;
+    assert.ok(myRecords.body.data.length <= 1); assertions++;
+    assert.equal(typeof myRecords.body.summary.recordedDays, "number"); assertions++;
+    if (myRecords.body.data[0]) {
+      const filtered = await request(
+        employee,
+        `/records?from=2026-09-01&to=2026-09-30&status=${myRecords.body.data[0].status}`
+      );
+      assert.equal(filtered.status, 200); assertions++;
+      assert.ok(
+        filtered.body.data.every((record: any) => record.status === myRecords.body.data[0].status)
+      ); assertions++;
+    }
+    assert.equal((await request(employee, "/records?status=unknown")).status, 400); assertions++;
+    assert.equal((await request(employee, "/records?page=1.5")).status, 400); assertions++;
+
+    const myDay = await request(employee, `/records/${date}`);
+    assert.equal(myDay.status, 200); assertions++;
+    assert.equal(myDay.body.data.employee.id, String(employee._id)); assertions++;
+    assert.equal(myDay.body.data.attendanceDate, date); assertions++;
+    assert.equal(typeof myDay.body.data.explanation, "string"); assertions++;
+
+    const statement = await requestRaw(employee, "/statements/monthly?month=2026-09");
+    assert.equal(statement.status, 200); assertions++;
+    assert.match(statement.contentType, /^text\/csv/); assertions++;
+    assert.match(statement.disposition, /attachment; filename=/); assertions++;
+    assert.match(statement.text.replace(/^\uFEFF/, ""), /^Date,Day,Status,/); assertions++;
+    assert.equal((await request(employee, "/statements/monthly?month=2026-13")).status, 400); assertions++;
     const crossCompany = users.find(
       (item) => item.company && String(item.company) !== String(admin.company)
     );

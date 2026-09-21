@@ -1,10 +1,13 @@
 import { NextFunction, Response } from "express";
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
-import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
+import AttendanceRecord, {
+  ATTENDANCE_RECORD_STATUSES,
+} from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
+import User from "../../schemas/User/User";
 import { calculateAttendance } from "./attendanceCalculator.utils";
 import {
   buildFinalPunchSession,
@@ -322,8 +325,12 @@ async function appendPunchRevision(options: {
 }
 
 function pagination(query: any) {
-  const page = Math.max(1, Number(query?.page || 1));
-  const limit = Math.max(1, Math.min(100, Number(query?.limit || 20)));
+  const page = query?.page === undefined || query?.page === "" ? 1 : Number(query.page);
+  const limit = query?.limit === undefined || query?.limit === "" ? 20 : Number(query.limit);
+  if (!Number.isSafeInteger(page) || page < 1) throw generateError("Invalid attendance page", 400);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw generateError("Attendance limit must be between 1 and 100", 400);
+  }
   return { page, limit, skip: (page - 1) * limit };
 }
 
@@ -620,15 +627,161 @@ export async function listMyAttendanceService(req: any, res: Response, next: Nex
       if (from) match.attendanceDate.$gte = from;
       if (to) match.attendanceDate.$lte = to;
     }
-    const [items, total] = await Promise.all([
+    const status = text(req.query?.status || "all").toLowerCase();
+    if (status !== "all") {
+      if (!(ATTENDANCE_RECORD_STATUSES as readonly string[]).includes(status)) {
+        throw generateError("Invalid attendance status filter", 400);
+      }
+      match.status = status;
+    }
+    const [items, total, summaryRows] = await Promise.all([
       AttendanceRecord.find(match).sort({ attendanceDate: -1 }).skip(skip).limit(limit).lean(),
       AttendanceRecord.countDocuments(match),
+      AttendanceRecord.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            recordedDays: { $sum: 1 },
+            presentDays: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+            halfDayDays: { $sum: { $cond: [{ $eq: ["$status", "half_day"] }, 1, 0] } },
+            absentDays: { $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] } },
+            incompleteDays: { $sum: { $cond: [{ $eq: ["$status", "incomplete"] }, 1, 0] } },
+            leaveDays: { $sum: { $cond: [{ $eq: ["$status", "leave"] }, 1, 0] } },
+            holidayDays: { $sum: { $cond: [{ $eq: ["$status", "holiday"] }, 1, 0] } },
+            weeklyOffDays: { $sum: { $cond: [{ $eq: ["$status", "weekly_off"] }, 1, 0] } },
+            workedMinutes: { $sum: "$workedMinutes" },
+            lateDays: { $sum: { $cond: ["$isLate", 1, 0] } },
+          },
+        },
+      ]),
     ]);
+    const summary = summaryRows[0] || {
+      recordedDays: 0,
+      presentDays: 0,
+      halfDayDays: 0,
+      absentDays: 0,
+      incompleteDays: 0,
+      leaveDays: 0,
+      holidayDays: 0,
+      weeklyOffDays: 0,
+      workedMinutes: 0,
+      lateDays: 0,
+    };
+    delete summary._id;
     return res.status(200).json({
       success: true,
       data: items,
+      summary,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+function monthlyRange(value: unknown) {
+  const month = text(value);
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) throw generateError("Attendance statement month must use YYYY-MM format", 400);
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  if (year < 2000 || year > 2200 || monthNumber < 1 || monthNumber > 12) {
+    throw generateError("Invalid attendance statement month", 400);
+  }
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return {
+    month,
+    from: `${month}-01`,
+    to: `${month}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+export function attendanceCsvCell(value: unknown) {
+  const normalized = String(value ?? "");
+  return /[",\r\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized;
+}
+
+function attendanceCsvTime(value: unknown) {
+  if (!value) return "";
+  const parsed = new Date(value as any);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+}
+
+export function buildAttendanceStatementCsv(records: any[]) {
+  const headers = [
+    "Date",
+    "Day",
+    "Status",
+    "Day type",
+    "Work mode",
+    "First punch in",
+    "Final punch out",
+    "Worked minutes",
+    "Late minutes",
+    "Early exit minutes",
+    "Overtime minutes",
+    "Location",
+    "Record state",
+  ];
+  const rows = records.map((record) => {
+    const sessions = Array.isArray(record.punchSessions) ? record.punchSessions : [];
+    const firstPunch = sessions.find((session: any) => session?.punchIn)?.punchIn;
+    const finalPunch = [...sessions].reverse().find((session: any) => session?.punchOut)?.punchOut;
+    const date = String(record.attendanceDate || "");
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(
+          new Date(`${date}T00:00:00Z`)
+        )
+      : "";
+    return [
+      date,
+      day,
+      record.status,
+      record.dayTypeSnapshot,
+      record.workMode,
+      attendanceCsvTime(firstPunch),
+      attendanceCsvTime(finalPunch),
+      Number(record.workedMinutes || 0),
+      Number(record.lateMinutes || 0),
+      Number(record.earlyExitMinutes || 0),
+      Number(record.overtimeMinutes || 0),
+      record.officeLocationNameSnapshot || "",
+      record.state,
+    ];
+  });
+  return [headers, ...rows].map((row) => row.map(attendanceCsvCell).join(",")).join("\r\n");
+}
+
+export async function downloadMyAttendanceStatementService(
+  req: any,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const actor = actorDetails(req);
+    const range = monthlyRange(req.query?.month);
+    const [employee, records] = await Promise.all([
+      User.findOne({ _id: actor.employeeId, company: actor.companyId })
+        .select("name code")
+        .lean(),
+      AttendanceRecord.find({
+        company: actor.companyId,
+        employee: actor.employeeId,
+        attendanceDate: { $gte: range.from, $lte: range.to },
+      })
+        .sort({ attendanceDate: 1 })
+        .lean(),
+    ]);
+    if (!employee) throw generateError("Employee account was not found", 404);
+    const csv = buildAttendanceStatementCsv(records);
+    const employeeCode = text((employee as any).code || "employee").replace(/[^a-zA-Z0-9_-]/g, "-");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="attendance-${employeeCode}-${range.month}.csv"`
+    );
+    return res.status(200).send(`\uFEFF${csv}`);
   } catch (error) {
     next(error);
   }
