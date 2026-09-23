@@ -9,6 +9,28 @@ export interface AttendanceRules {
   missingPunchTreatment: "flag_incomplete" | "half_day" | "absent";
   overtimeEnabled: boolean;
   overtimeStartsAfterMinutes: number;
+  regularization: AttendanceRegularizationRules;
+}
+
+export const ATTENDANCE_REGULARIZATION_TYPES = [
+  "missing_punch_in",
+  "missing_punch_out",
+  "time_correction",
+  "work_mode_correction",
+  "full_day_correction",
+] as const;
+
+export interface AttendanceRegularizationRules {
+  enabled: boolean;
+  allowedTypes: (typeof ATTENDANCE_REGULARIZATION_TYPES)[number][];
+  requestStartDays: number;
+  maxBackdateDays: number;
+  monthlyRequestLimit: number;
+  minimumReasonLength: number;
+  documentMode: "none" | "optional" | "required";
+  approvalWorkflow?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersionNumber?: number | null;
 }
 
 export interface AttendancePolicyVersionI extends Document {
@@ -40,6 +62,36 @@ const AttendanceRulesSchema = new Schema<AttendanceRules>(
     },
     overtimeEnabled: { type: Boolean, default: false },
     overtimeStartsAfterMinutes: { type: Number, min: 0, default: 0 },
+    regularization: {
+      type: new Schema<AttendanceRegularizationRules>(
+        {
+          enabled: { type: Boolean, default: false },
+          allowedTypes: {
+            type: [{ type: String, enum: ATTENDANCE_REGULARIZATION_TYPES }],
+            default: [...ATTENDANCE_REGULARIZATION_TYPES],
+          },
+          requestStartDays: { type: Number, min: 0, max: 365, default: 0 },
+          maxBackdateDays: { type: Number, min: 1, max: 365, default: 30 },
+          monthlyRequestLimit: { type: Number, min: 0, max: 100, default: 3 },
+          minimumReasonLength: { type: Number, min: 3, max: 500, default: 10 },
+          documentMode: {
+            type: String,
+            enum: ["none", "optional", "required"],
+            default: "none",
+          },
+          approvalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+          approvalWorkflowVersion: {
+            type: Schema.Types.ObjectId,
+            ref: "ApprovalWorkflowVersion",
+            default: null,
+          },
+          approvalWorkflowVersionNumber: { type: Number, min: 1, default: null },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
   },
   { _id: false }
 );

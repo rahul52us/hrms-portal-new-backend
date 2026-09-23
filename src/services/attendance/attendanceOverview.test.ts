@@ -47,5 +47,11 @@ assert.equal(summary.absent, 0);
 assert.equal(attendanceRowMatches({ status: "present", workMode: "office" }, "present", "all"), true);
 assert.equal(attendanceRowMatches({ status: "present", workMode: "office" }, "absent", "all"), false);
 assert.equal(attendanceRowMatches({ status: "present", workMode: "office" }, "all", "remote"), false);
+assert.equal(attendanceRowMatches({ status: "present", workMode: "office", hasMissingPunch: true }, "all", "all", "missing_punch"), true);
+assert.equal(attendanceRowMatches({ status: "present", workMode: "office", isLate: false }, "all", "all", "late_arrival"), false);
+assert.equal(attendanceRowMatches({ status: "absent", workMode: "office" }, "all", "all", "absence"), true);
+assert.equal(attendanceRowMatches({ status: "present", workMode: "office", overtimeMinutes: 45 }, "all", "all", "overtime"), true);
+assert.equal(attendanceRowMatches({ status: "not_marked", workMode: "office", dayType: "unconfigured", schedule: { configured: false } }, "all", "all", "setup_gap"), true);
+assert.equal(attendanceRowMatches({ status: "not_marked", workMode: "office", dayType: "working_day", schedule: { configured: true }, setupGaps: ["attendance_policy"] }, "all", "all", "setup_gap"), true);
 
 console.log("attendance overview tests passed");

@@ -5,6 +5,7 @@ export const APPROVAL_REQUEST_TYPES = [
   "leave_encashment_request",
   "remote_work_request",
   "comp_off_claim",
+  "attendance_regularization_request",
 ] as const;
 
 export interface ApprovalWorkflowI extends Document {

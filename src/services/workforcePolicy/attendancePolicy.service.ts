@@ -3,8 +3,10 @@ import { NextFunction, Response } from "express";
 import { generateError } from "../../config/Error/functions";
 import AttendancePolicy from "../../schemas/WorkforcePolicy/AttendancePolicy.schema";
 import AttendancePolicyVersion, {
+  ATTENDANCE_REGULARIZATION_TYPES,
   AttendanceRules,
 } from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
+import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
 import {
   ensurePolicyManager,
@@ -28,6 +30,18 @@ const DEFAULT_RULES: AttendanceRules = {
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,
+  regularization: {
+    enabled: false,
+    allowedTypes: [...ATTENDANCE_REGULARIZATION_TYPES],
+    requestStartDays: 0,
+    maxBackdateDays: 30,
+    monthlyRequestLimit: 3,
+    minimumReasonLength: 10,
+    documentMode: "none",
+    approvalWorkflow: null,
+    approvalWorkflowVersion: null,
+    approvalWorkflowVersionNumber: null,
+  },
 };
 
 function normalizeNumber(value: unknown, fallback: number, label: string, minimum = 0) {
@@ -71,6 +85,35 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
     throw generateError("Invalid missing punch treatment", 400);
   }
 
+  const currentRegularization = base.regularization?.toObject
+    ? base.regularization.toObject()
+    : base.regularization || DEFAULT_RULES.regularization;
+  const regularizationInput = input.regularization || {};
+  const allowedTypesInput = regularizationInput.allowedTypes === undefined
+    ? currentRegularization.allowedTypes
+    : regularizationInput.allowedTypes;
+  if (!Array.isArray(allowedTypesInput)) {
+    throw generateError("Regularization correction types must be an array", 400);
+  }
+  const allowedTypes = Array.from(
+    new Set(allowedTypesInput.map((item: unknown) => normalizeText(item).toLowerCase()).filter(Boolean))
+  );
+  if (allowedTypes.some((item) => !ATTENDANCE_REGULARIZATION_TYPES.includes(item as any))) {
+    throw generateError("Invalid attendance regularization correction type", 400);
+  }
+  const documentMode = normalizeText(
+    regularizationInput.documentMode || currentRegularization.documentMode || "none"
+  ).toLowerCase();
+  if (!["none", "optional", "required"].includes(documentMode)) {
+    throw generateError("Invalid regularization document requirement", 400);
+  }
+  const regularizationEnabled = typeof regularizationInput.enabled === "boolean"
+    ? regularizationInput.enabled
+    : Boolean(currentRegularization.enabled);
+  if (regularizationEnabled && !allowedTypes.length) {
+    throw generateError("Select at least one attendance correction type", 422);
+  }
+
   return {
     gracePeriodMinutesLate: normalizeNumber(
       input.gracePeriodMinutesLate,
@@ -94,6 +137,47 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
       base.overtimeStartsAfterMinutes,
       "Overtime threshold"
     ),
+    regularization: {
+      enabled: regularizationEnabled,
+      allowedTypes: allowedTypes as any,
+      requestStartDays: normalizeNumber(
+        regularizationInput.requestStartDays,
+        Number(currentRegularization.requestStartDays || 0),
+        "Regularization request start days",
+        0
+      ),
+      maxBackdateDays: normalizeNumber(
+        regularizationInput.maxBackdateDays,
+        Number(currentRegularization.maxBackdateDays || 30),
+        "Regularization maximum backdate days",
+        1
+      ),
+      monthlyRequestLimit: normalizeNumber(
+        regularizationInput.monthlyRequestLimit,
+        Number(currentRegularization.monthlyRequestLimit || 0),
+        "Regularization monthly request limit",
+        0
+      ),
+      minimumReasonLength: normalizeNumber(
+        regularizationInput.minimumReasonLength,
+        Number(currentRegularization.minimumReasonLength || 10),
+        "Regularization minimum reason length",
+        3
+      ),
+      documentMode: documentMode as any,
+      approvalWorkflow:
+        regularizationInput.approvalWorkflow === undefined
+          ? currentRegularization.approvalWorkflow || null
+          : regularizationInput.approvalWorkflow || null,
+      approvalWorkflowVersion:
+        regularizationInput.approvalWorkflowVersion === undefined
+          ? currentRegularization.approvalWorkflowVersion || null
+          : regularizationInput.approvalWorkflowVersion || null,
+      approvalWorkflowVersionNumber:
+        regularizationInput.approvalWorkflowVersionNumber === undefined
+          ? currentRegularization.approvalWorkflowVersionNumber || null
+          : Number(regularizationInput.approvalWorkflowVersionNumber || 0) || null,
+    },
   };
 }
 
@@ -478,7 +562,19 @@ export async function publishAttendancePolicyVersionService(req: any, res: Respo
       throw generateError("Another published version already starts on this date", 409);
     }
 
-    version.rules = normalizeAttendanceRules({}, version.rules) as any;
+    const normalizedRules = normalizeAttendanceRules({}, version.rules);
+    if (normalizedRules.regularization.enabled) {
+      const reference = await validatePublishedApprovalWorkflowReference({
+        company: companyObjectId,
+        workflowId: normalizedRules.regularization.approvalWorkflow,
+        versionId: normalizedRules.regularization.approvalWorkflowVersion,
+        requestType: "attendance_regularization_request",
+      });
+      normalizedRules.regularization.approvalWorkflow = reference.workflow;
+      normalizedRules.regularization.approvalWorkflowVersion = reference.version;
+      normalizedRules.regularization.approvalWorkflowVersionNumber = reference.versionNumber;
+    }
+    version.rules = normalizedRules as any;
     version.effectiveFrom = effectiveFrom;
     version.changeReason = changeReason || "Initial policy publication";
     version.status = "published";

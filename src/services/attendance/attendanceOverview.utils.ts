@@ -19,6 +19,16 @@ export const ATTENDANCE_OVERVIEW_WORK_MODES = [
   "field",
 ] as const;
 
+export const ATTENDANCE_OVERVIEW_EXCEPTIONS = [
+  "all",
+  "missing_punch",
+  "late_arrival",
+  "early_exit",
+  "absence",
+  "overtime",
+  "setup_gap",
+] as const;
+
 export type AttendanceOverviewStatus =
   (typeof ATTENDANCE_OVERVIEW_STATUSES)[number];
 
@@ -121,12 +131,30 @@ export function addAttendanceSummaryRow(summary: ReturnType<typeof createAttenda
   if (row.status === "incomplete") summary.incomplete += 1;
   if (row.status === "pending") summary.pending += 1;
   if (row.status === "not_marked") summary.notMarked += 1;
-  if (row.dayType === "unconfigured") summary.unconfigured += 1;
+  if (row.dayType === "unconfigured" || row.setupGaps?.length) summary.unconfigured += 1;
   return summary;
 }
 
-export function attendanceRowMatches(row: any, status: string, workMode: string) {
+export function attendanceRowMatches(
+  row: any,
+  status: string,
+  workMode: string,
+  exception = "all"
+) {
   if (status !== "all" && row.status !== status) return false;
   if (workMode !== "all" && row.workMode !== workMode) return false;
+  if (exception === "missing_punch" && !row.hasMissingPunch) return false;
+  if (exception === "late_arrival" && !row.isLate) return false;
+  if (exception === "early_exit" && !row.isEarlyExit) return false;
+  if (exception === "absence" && row.status !== "absent") return false;
+  if (exception === "overtime" && Number(row.overtimeMinutes || 0) <= 0) return false;
+  if (
+    exception === "setup_gap" &&
+    row.dayType !== "unconfigured" &&
+    row.schedule?.configured !== false &&
+    !row.setupGaps?.length
+  ) {
+    return false;
+  }
   return true;
 }

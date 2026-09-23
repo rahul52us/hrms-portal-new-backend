@@ -51,6 +51,18 @@ const DEFAULT_RULES: AttendanceRules = {
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,
+  regularization: {
+    enabled: false,
+    allowedTypes: [],
+    requestStartDays: 0,
+    maxBackdateDays: 30,
+    monthlyRequestLimit: 3,
+    minimumReasonLength: 10,
+    documentMode: "none",
+    approvalWorkflow: null,
+    approvalWorkflowVersion: null,
+    approvalWorkflowVersionNumber: null,
+  },
 };
 
 function validDate(value: Date | string | null | undefined) {

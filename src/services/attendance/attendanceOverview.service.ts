@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
+import AttendanceRegularizationRequest from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
 import Department from "../../schemas/Department/Department.schema";
 import EmployeeAssignmentHistory from "../../schemas/EmployeeAssignment/EmployeeAssignmentHistory.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
@@ -33,6 +34,7 @@ import { parseAttendanceDate } from "./employeeDayContext.utils";
 import {
   ATTENDANCE_OVERVIEW_STATUSES,
   ATTENDANCE_OVERVIEW_WORK_MODES,
+  ATTENDANCE_OVERVIEW_EXCEPTIONS,
   addAttendanceSummaryRow,
   approvedRequestDay,
   attendanceRowMatches,
@@ -100,6 +102,10 @@ function attendanceContext(req: any) {
   if (!(ATTENDANCE_OVERVIEW_WORK_MODES as readonly string[]).includes(workMode)) {
     throw generateError("Invalid attendance work mode filter", 400);
   }
+  const exception = String(req.query?.exception || "all");
+  if (!(ATTENDANCE_OVERVIEW_EXCEPTIONS as readonly string[]).includes(exception)) {
+    throw generateError("Invalid attendance exception filter", 400);
+  }
   return {
     actor,
     company,
@@ -111,6 +117,7 @@ function attendanceContext(req: any) {
     filters,
     status,
     workMode,
+    exception,
   };
 }
 
@@ -145,6 +152,10 @@ function classificationWithRecordSnapshot(classification: any, record: any) {
   if (!record) return classification;
   return {
     ...classification,
+    attendancePolicyConfigured:
+      Boolean(record.attendancePolicyVersion) || classification.attendancePolicyConfigured,
+    holidayCalendarConfigured:
+      Boolean(record.holidayCalendarVersion) || classification.holidayCalendarConfigured,
     dayType: record.dayTypeSnapshot || classification.dayType,
     requiresAttendance:
       typeof record.requiresAttendanceSnapshot === "boolean"
@@ -157,6 +168,7 @@ function classificationWithRecordSnapshot(classification: any, record: any) {
     timezone: record.timezone || classification.timezone,
     schedule: {
       ...classification.schedule,
+      configured: Boolean(record.workScheduleVersion) || classification.schedule?.configured !== false,
       startTime: record.scheduleStartTimeSnapshot || classification.schedule?.startTime || null,
       endTime: record.scheduleEndTimeSnapshot || classification.schedule?.endTime || null,
     },
@@ -185,7 +197,9 @@ function organizationFilters(ctx: ReturnType<typeof attendanceContext>) {
 export async function getAttendanceOverviewService(req: any, res: Response, next: NextFunction) {
   try {
     const ctx = attendanceContext(req);
-    const data = await calendarData(ctx.company, [ctx.attendanceDate]);
+    const data = await calendarData(ctx.company, [ctx.attendanceDate], {
+      includeAttendancePolicy: true,
+    });
     const summary = createAttendanceSummary();
     const items: any[] = [];
     const diagnostics = {
@@ -378,6 +392,11 @@ export async function getAttendanceOverviewService(req: any, res: Response, next
             startTime: classification.schedule?.startTime || null,
             endTime: classification.schedule?.endTime || null,
           },
+          setupGaps: [
+            ...(!classification.attendancePolicyConfigured ? ["attendance_policy"] : []),
+            ...(classification.schedule?.configured === false ? ["work_schedule"] : []),
+            ...(!classification.holidayCalendarConfigured ? ["holiday_calendar"] : []),
+          ],
           holiday: classification.holiday || null,
           firstIn,
           lastOut,
@@ -411,7 +430,7 @@ export async function getAttendanceOverviewService(req: any, res: Response, next
         };
 
         addAttendanceSummaryRow(summary, row);
-        if (!attendanceRowMatches(row, ctx.status, ctx.workMode)) continue;
+        if (!attendanceRowMatches(row, ctx.status, ctx.workMode, ctx.exception)) continue;
         if (total >= ctx.skip && items.length < ctx.limit) items.push(row);
         total += 1;
       }
@@ -686,7 +705,7 @@ export async function loadAttendanceEmployeeDay(options: {
     }).lean(),
   ]);
   const organization = organizationFromRecord(record) || context.organizationAssignment;
-  const [revisions, leaveRequest, remoteWorkRequest, policies] = await Promise.all([
+  const [revisions, leaveRequest, remoteWorkRequest, regularizationRequest, policies] = await Promise.all([
     record
       ? AttendanceRecordRevision.find({ company: options.company, attendanceRecord: record._id })
           .sort({ revisionNumber: -1, createdAt: -1 })
@@ -717,6 +736,15 @@ export async function loadAttendanceEmployeeDay(options: {
         })
           .select("_id status fromDate toDate dates reason")
           .lean(),
+    AttendanceRegularizationRequest.findOne({
+      company: options.company,
+      employee: employeeId,
+      attendanceDate: options.attendanceDate,
+    })
+      .sort({ submittedAt: -1 })
+      .select("_id correctionType status reason requestedChanges submittedAt decidedAt decisionComment appliedRevisionNumber approvalInstance approverNameSnapshot")
+      .populate("approvalInstance", "status currentStepOrder steps.nameSnapshot steps.order")
+      .lean(),
     policyDetails(record, context),
   ]);
 
@@ -759,6 +787,7 @@ export async function loadAttendanceEmployeeDay(options: {
       explanation: attendanceExplanation(record, context, policies),
       leaveRequest,
       remoteWorkRequest,
+      regularizationRequest,
       revisions,
     },
   };

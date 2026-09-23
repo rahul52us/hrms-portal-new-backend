@@ -6,6 +6,7 @@ import Department from "../../schemas/Department/Department.schema";
 import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import EmployeeAssignmentHistory from "../../schemas/EmployeeAssignment/EmployeeAssignmentHistory.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import WorkScheduleVersion from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
 import HolidayCalendarVersion from "../../schemas/WorkforcePolicy/HolidayCalendarVersion.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
@@ -48,15 +49,25 @@ async function context(req: any, singleDate = false) {
   return { actor, company, scope, dates, filters, category, includePending: req.query.includePending === "true" };
 }
 
-export async function calendarData(company: mongoose.Types.ObjectId, dates: string[]) {
+export async function calendarData(
+  company: mongoose.Types.ObjectId,
+  dates: string[],
+  options: { includeAttendancePolicy?: boolean } = {}
+) {
   const from = parseAttendanceDate(dates[0]).date;
   const to = parseAttendanceDate(dates[dates.length - 1]).date;
   const departments: any[] = await Department.find({ company }).select("departmentName teams").lean();
+  const resourceTypes = options.includeAttendancePolicy
+    ? ["attendance_policy", "work_schedule", "holiday_calendar"]
+    : ["work_schedule", "holiday_calendar"];
   const assignments: any[] = await WorkforcePolicyAssignment.find({
-    company, resourceType: { $in: ["work_schedule", "holiday_calendar"] }, effectiveFrom: { $lte: to },
+    company, resourceType: { $in: resourceTypes }, effectiveFrom: { $lte: to },
     $or: [{ effectiveTo: null }, { effectiveTo: { $gt: from } }],
   }).lean();
   const resources = (type: string) => assignments.filter((item) => item.resourceType === type).map((item) => item.resource);
+  const attendancePolicies: any[] = options.includeAttendancePolicy
+    ? await AttendancePolicyVersion.find({ company, policy: { $in: resources("attendance_policy") }, status: "published", effectiveFrom: { $lte: to } }).select("policy status effectiveFrom versionNumber").lean()
+    : [];
   const schedules: any[] = await WorkScheduleVersion.find({ company, schedule: { $in: resources("work_schedule") }, status: "published", effectiveFrom: { $lte: to } }).select("schedule status effectiveFrom versionNumber rules").lean();
   const holidays: any[] = await HolidayCalendarVersion.find({ company, calendar: { $in: resources("holiday_calendar") }, status: "published", effectiveFrom: { $lte: to } }).select("calendar status effectiveFrom versionNumber timezone holidays").lean();
   const assignmentIndex = new Map<string, any[]>();
@@ -65,16 +76,24 @@ export async function calendarData(company: mongoose.Types.ObjectId, dates: stri
     assignmentIndex.set(key, [...(assignmentIndex.get(key) || []), item]);
   }
   const versionIndex = new Map<string, any[]>();
-  for (const [type, values] of [["work_schedule", schedules], ["holiday_calendar", holidays]] as const) {
+  const versionGroups: Array<[string, any[]]> = [
+    ["work_schedule", schedules],
+    ["holiday_calendar", holidays],
+  ];
+  if (options.includeAttendancePolicy) versionGroups.unshift(["attendance_policy", attendancePolicies]);
+  for (const [type, values] of versionGroups) {
     for (const item of values) {
-      const key = `${type}:${calendarId(item.schedule || item.calendar)}`;
+      const key = `${type}:${calendarId(item.policy || item.schedule || item.calendar)}`;
       versionIndex.set(key, [...(versionIndex.get(key) || []), item]);
     }
   }
   const classificationCache = new Map<string, any>();
   const resolutionCache = new Map<string, any>();
   const classify = (employee: any, organization: any, date: string) => {
-    const hasEmployeeOverride = ["work_schedule", "holiday_calendar"].some((type) => assignmentIndex.has(`${type}:employee:${calendarId(employee)}`));
+    const overrideTypes = options.includeAttendancePolicy
+      ? ["attendance_policy", "work_schedule", "holiday_calendar"]
+      : ["work_schedule", "holiday_calendar"];
+    const hasEmployeeOverride = overrideTypes.some((type) => assignmentIndex.has(`${type}:employee:${calendarId(employee)}`));
     const resolutionKey = `${date}:${calendarId(organization?.department)}:${calendarId(organization?.teamId)}:${calendarId(organization?.officeLocation)}:${hasEmployeeOverride ? calendarId(employee) : ""}`;
     if (resolutionCache.has(resolutionKey)) return resolutionCache.get(resolutionKey);
     const scopes = [["company", ""], ["employee", calendarId(employee)], ["department", calendarId(organization?.department)], ["team", calendarId(organization?.teamId)], ["location", calendarId(organization?.officeLocation)]];
@@ -83,10 +102,19 @@ export async function calendarData(company: mongoose.Types.ObjectId, dates: stri
       const versions = candidates.flatMap((item) => versionIndex.get(`${type}:${calendarId(item.resource)}`) || []);
       return selectCalendarPolicy(candidates, versions, date);
     };
+    const attendancePolicy = options.includeAttendancePolicy ? resolve("attendance_policy") : null;
     const schedule = resolve("work_schedule");
     const holiday = resolve("holiday_calendar");
-    const key = `${date}:${calendarId(schedule?.version)}:${calendarId(holiday?.version)}`;
-    if (!classificationCache.has(key)) classificationCache.set(key, calendarDayClassification(date, schedule, holiday));
+    const key = `${date}:${calendarId(attendancePolicy?.version)}:${calendarId(schedule?.version)}:${calendarId(holiday?.version)}`;
+    if (!classificationCache.has(key)) {
+      classificationCache.set(key, {
+        ...calendarDayClassification(date, schedule, holiday),
+        ...(options.includeAttendancePolicy
+          ? { attendancePolicyConfigured: Boolean(attendancePolicy?.version) }
+          : {}),
+        holidayCalendarConfigured: Boolean(holiday?.version),
+      });
+    }
     const result = classificationCache.get(key);
     resolutionCache.set(resolutionKey, result);
     return result;

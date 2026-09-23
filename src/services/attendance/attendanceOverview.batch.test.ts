@@ -7,6 +7,7 @@ import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import User from "../../schemas/User/User";
 import HolidayCalendarVersion from "../../schemas/WorkforcePolicy/HolidayCalendarVersion.schema";
+import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
 import WorkScheduleVersion from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
 import { getAttendanceOverviewService } from "./attendanceOverview.service";
@@ -14,6 +15,7 @@ import { getAttendanceOverviewService } from "./attendanceOverview.service";
 const company = new mongoose.Types.ObjectId("aaaaaaaaaaaaaaaaaaaaaaaa");
 const department = new mongoose.Types.ObjectId("bbbbbbbbbbbbbbbbbbbbbbbb");
 const schedule = new mongoose.Types.ObjectId("cccccccccccccccccccccccc");
+const attendancePolicy = new mongoose.Types.ObjectId("eeeeeeeeeeeeeeeeeeeeeeee");
 const employees = Array.from({ length: 10000 }, (_, index) => ({
   _id: new mongoose.Types.ObjectId((index + 1).toString(16).padStart(24, "0")),
   company,
@@ -71,6 +73,13 @@ async function main() {
   mock(WorkforcePolicyAssignment, "find", () =>
     query([
       {
+        resourceType: "attendance_policy",
+        scopeType: "company",
+        scopeId: null,
+        resource: attendancePolicy,
+        effectiveFrom: "2020-01-01",
+      },
+      {
         resourceType: "work_schedule",
         scopeType: "company",
         scopeId: null,
@@ -96,6 +105,15 @@ async function main() {
         },
       },
     ])
+  );
+  mock(AttendancePolicyVersion, "find", () =>
+    query([{
+      _id: new mongoose.Types.ObjectId(),
+      policy: attendancePolicy,
+      status: "published",
+      effectiveFrom: "2020-01-01",
+      versionNumber: 1,
+    }])
   );
   mock(HolidayCalendarVersion, "find", () => query([]));
   mock(EmployeeAssignmentHistory, "find", (match) =>
@@ -207,10 +225,15 @@ async function main() {
     assert.equal(result.data.summary.wfh, 1);
     assert.equal(result.data.summary.notMarked, 9998);
     assert.equal(result.data.items.length, 25);
+    assert.equal(
+      result.data.items[0].setupGaps.includes("attendance_policy"),
+      false,
+      "Published attendance policy assignments must resolve in the batched overview"
+    );
     assert.equal(result.pagination.total, 10000);
-    assert.equal(queries, 245, "Queries scale by 250-employee batches, not per employee");
+    assert.equal(queries, 246, "Queries scale by 250-employee batches, not per employee");
     console.log(
-      `10,000-employee attendance batching test passed (245 mocked queries, ${Date.now() - started}ms)`
+      `10,000-employee attendance batching test passed (246 mocked queries, ${Date.now() - started}ms)`
     );
   } finally {
     originals.reverse().forEach((restore) => restore());

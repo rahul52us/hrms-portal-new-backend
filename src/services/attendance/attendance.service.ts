@@ -5,6 +5,7 @@ import AttendanceRecord, {
   ATTENDANCE_RECORD_STATUSES,
 } from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
+import AttendanceRegularizationRequest from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import User from "../../schemas/User/User";
@@ -656,6 +657,26 @@ export async function listMyAttendanceService(req: any, res: Response, next: Nex
         },
       ]),
     ]);
+    const regularizations = items.length
+      ? await AttendanceRegularizationRequest.find({
+          company: actor.companyId,
+          employee: actor.employeeId,
+          attendanceDate: { $in: items.map((item) => item.attendanceDate) },
+        })
+          .sort({ submittedAt: -1 })
+          .select("attendanceDate correctionType status submittedAt appliedRevisionNumber")
+          .lean()
+      : [];
+    const regularizationByDate = new Map<string, any>();
+    regularizations.forEach((request: any) => {
+      if (!regularizationByDate.has(request.attendanceDate)) {
+        regularizationByDate.set(request.attendanceDate, request);
+      }
+    });
+    const data = items.map((item: any) => ({
+      ...item,
+      regularization: regularizationByDate.get(item.attendanceDate) || null,
+    }));
     const summary = summaryRows[0] || {
       recordedDays: 0,
       presentDays: 0,
@@ -671,7 +692,7 @@ export async function listMyAttendanceService(req: any, res: Response, next: Nex
     delete summary._id;
     return res.status(200).json({
       success: true,
-      data: items,
+      data,
       summary,
       pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     });

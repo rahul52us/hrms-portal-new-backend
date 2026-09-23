@@ -13,8 +13,8 @@ import {
 } from "./approvalDecision.utils";
 import { approvalWorkflowVersionSupportsRequestType } from "./approvalWorkflowVersion.utils";
 
-type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim";
-type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim";
+type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim" | "attendance_regularization_request";
+type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -27,9 +27,11 @@ function objectId(value: unknown, label: string) {
 }
 
 function permissionFor(requestType: RequestType) {
-  return requestType === "remote_work_request"
-    ? PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS
-    : PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS;
+  if (requestType === "remote_work_request") return PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS;
+  if (requestType === "attendance_regularization_request") {
+    return PERMISSION_KEYS.APPROVE_ATTENDANCE_REGULARIZATIONS;
+  }
+  return PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS;
 }
 
 function scopeEmployee(employee: any) {
