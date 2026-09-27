@@ -12,6 +12,7 @@ import User from "../../schemas/User/User";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
 import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import { resolveEmployeeDayContext } from "../attendance/employeeDayContext.service";
+import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 import { PERMISSION_KEYS, hasPermission } from "../permissions/permission.utils";
 import {
   buildLeaveRequestScope,
@@ -503,6 +504,10 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
       endPortion: req.body?.endPortion,
       requestedHours: req.body?.requestedHours,
       attachmentCount: attachments.length,
+    });
+    await assertAttendanceDatesWritable({
+      company,
+      attendanceDates: result.calculation.dayBreakdown.map((day: any) => day.attendanceDate),
     });
     const documentRequirement = result.calculation.documentRequirement || {
       required: false,

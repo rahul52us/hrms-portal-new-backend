@@ -8,6 +8,7 @@ import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
 import User from "../../schemas/User/User";
 import { parseAttendanceDate } from "../attendance/employeeDayContext.utils";
 import { resolveEmployeeDayContext } from "../attendance/employeeDayContext.service";
+import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 import {
   buildEmployeeRequestScope,
   ensureEmployeeInActorScope,
@@ -428,6 +429,10 @@ export async function createRemoteWorkRequestService(req: any, res: Response, ne
     const company = resolveEmployeeRequestCompanyId(actor, req.body?.companyId, "remote-work");
     const employee = await resolveEmployeeForRequest(actor, company, req.body?.employeeId);
     const result = await calculateRequest({ company, employee, ...req.body });
+    await assertAttendanceDatesWritable({
+      company,
+      attendanceDates: result.dates.map((day) => day.attendanceDate),
+    });
     const approvalWorkflow = await resolveEffectiveApprovalWorkflowReference({
       company,
       workflowId: result.rules.approvalWorkflow,

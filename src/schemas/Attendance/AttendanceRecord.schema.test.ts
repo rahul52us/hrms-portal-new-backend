@@ -22,6 +22,8 @@ function testOptionalEnumDefaults() {
   assert.equal(attendance.validateSync(), undefined);
   assert.equal(attendance.remoteWorkPortion, null);
   assert.equal(attendance.leaveUnit, null);
+  assert.equal(attendance.overtimeApprovalStatus, "not_required");
+  assert.equal(attendance.approvedOvertimeMinutes, 0);
 }
 
 function testValidEnumValues() {
@@ -41,8 +43,22 @@ function testInvalidEnumValues() {
   assert.ok(validation?.errors.leaveUnit);
 }
 
+function testOvertimeApprovalValues() {
+  assert.equal(
+    record({
+      overtimeApprovalRequiredSnapshot: true,
+      overtimeApprovalStatus: "approved",
+      approvedOvertimeMinutes: 90,
+      overtimeReview: new mongoose.Types.ObjectId(),
+    }).validateSync(),
+    undefined
+  );
+  assert.ok(record({ overtimeApprovalStatus: "ignored" }).validateSync()?.errors.overtimeApprovalStatus);
+}
+
 testOptionalEnumDefaults();
 testValidEnumValues();
 testInvalidEnumValues();
+testOvertimeApprovalValues();
 
 console.log("AttendanceRecord schema tests passed");

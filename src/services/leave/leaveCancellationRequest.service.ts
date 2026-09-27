@@ -15,6 +15,7 @@ import {
   rejectApprovalInstance,
 } from "../approval/approvalEngine.service";
 import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
+import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 import { PERMISSION_KEYS, hasPermission } from "../permissions/permission.utils";
 import {
   buildLeaveRequestScope,
@@ -238,6 +239,10 @@ export async function createLeaveCancellationRequestService(req: any, res: Respo
     if (String(candidate.employee) !== String(actor._id)) {
       throw generateError("Only the employee can request cancellation of approved leave", 403);
     }
+    await assertAttendanceDatesWritable({
+      company,
+      attendanceDates: (candidate.dayBreakdown || []).map((day: any) => day.attendanceDate),
+    });
     const existing = await LeaveCancellationRequest.exists({
       company,
       leaveRequest: leaveRequestId,

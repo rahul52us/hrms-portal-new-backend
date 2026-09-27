@@ -30,6 +30,17 @@ const DEFAULT_RULES: AttendanceRules = {
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,
+  overtimeApproval: {
+    required: false,
+    approvalWorkflow: null,
+    approvalWorkflowVersion: null,
+    approvalWorkflowVersionNumber: null,
+  },
+  autoFinalize: {
+    enabled: false,
+    graceMinutes: 1440,
+    mode: "clean_only",
+  },
   regularization: {
     enabled: false,
     allowedTypes: [...ATTENDANCE_REGULARIZATION_TYPES],
@@ -113,6 +124,38 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
   if (regularizationEnabled && !allowedTypes.length) {
     throw generateError("Select at least one attendance correction type", 422);
   }
+  const currentAutoFinalize = base.autoFinalize?.toObject
+    ? base.autoFinalize.toObject()
+    : base.autoFinalize || DEFAULT_RULES.autoFinalize;
+  const autoFinalizeInput = input.autoFinalize || {};
+  const autoFinalizeMode = normalizeText(
+    autoFinalizeInput.mode || currentAutoFinalize.mode || "clean_only"
+  ).toLowerCase();
+  if (!["clean_only", "all_calculated"].includes(autoFinalizeMode)) {
+    throw generateError("Invalid attendance auto-finalization mode", 400);
+  }
+  const autoFinalizeGraceMinutes = normalizeNumber(
+    autoFinalizeInput.graceMinutes,
+    Number(currentAutoFinalize.graceMinutes ?? 1440),
+    "Auto-finalization grace period",
+    0
+  );
+  if (autoFinalizeGraceMinutes > 2880) {
+    throw generateError("Auto-finalization grace period cannot exceed 2880 minutes", 400);
+  }
+  const currentOvertimeApproval = base.overtimeApproval?.toObject
+    ? base.overtimeApproval.toObject()
+    : base.overtimeApproval || DEFAULT_RULES.overtimeApproval;
+  const overtimeApprovalInput = input.overtimeApproval || {};
+  const overtimeEnabled = typeof input.overtimeEnabled === "boolean"
+    ? input.overtimeEnabled
+    : Boolean(base.overtimeEnabled);
+  const overtimeApprovalRequired = typeof overtimeApprovalInput.required === "boolean"
+    ? overtimeApprovalInput.required
+    : Boolean(currentOvertimeApproval.required);
+  if (overtimeApprovalRequired && !overtimeEnabled) {
+    throw generateError("Enable overtime calculation before requiring overtime approval", 422);
+  }
 
   return {
     gracePeriodMinutesLate: normalizeNumber(
@@ -130,13 +173,34 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
     requirePunchOut:
       typeof input.requirePunchOut === "boolean" ? input.requirePunchOut : base.requirePunchOut,
     missingPunchTreatment,
-    overtimeEnabled:
-      typeof input.overtimeEnabled === "boolean" ? input.overtimeEnabled : base.overtimeEnabled,
+    overtimeEnabled,
     overtimeStartsAfterMinutes: normalizeNumber(
       input.overtimeStartsAfterMinutes,
       base.overtimeStartsAfterMinutes,
       "Overtime threshold"
     ),
+    overtimeApproval: {
+      required: overtimeApprovalRequired,
+      approvalWorkflow:
+        overtimeApprovalInput.approvalWorkflow === undefined
+          ? currentOvertimeApproval.approvalWorkflow || null
+          : overtimeApprovalInput.approvalWorkflow || null,
+      approvalWorkflowVersion:
+        overtimeApprovalInput.approvalWorkflowVersion === undefined
+          ? currentOvertimeApproval.approvalWorkflowVersion || null
+          : overtimeApprovalInput.approvalWorkflowVersion || null,
+      approvalWorkflowVersionNumber:
+        overtimeApprovalInput.approvalWorkflowVersionNumber === undefined
+          ? currentOvertimeApproval.approvalWorkflowVersionNumber || null
+          : Number(overtimeApprovalInput.approvalWorkflowVersionNumber || 0) || null,
+    },
+    autoFinalize: {
+      enabled: typeof autoFinalizeInput.enabled === "boolean"
+        ? autoFinalizeInput.enabled
+        : Boolean(currentAutoFinalize.enabled),
+      graceMinutes: autoFinalizeGraceMinutes,
+      mode: autoFinalizeMode as any,
+    },
     regularization: {
       enabled: regularizationEnabled,
       allowedTypes: allowedTypes as any,
@@ -573,6 +637,17 @@ export async function publishAttendancePolicyVersionService(req: any, res: Respo
       normalizedRules.regularization.approvalWorkflow = reference.workflow;
       normalizedRules.regularization.approvalWorkflowVersion = reference.version;
       normalizedRules.regularization.approvalWorkflowVersionNumber = reference.versionNumber;
+    }
+    if (normalizedRules.overtimeApproval.required) {
+      const reference = await validatePublishedApprovalWorkflowReference({
+        company: companyObjectId,
+        workflowId: normalizedRules.overtimeApproval.approvalWorkflow,
+        versionId: normalizedRules.overtimeApproval.approvalWorkflowVersion,
+        requestType: "attendance_overtime_review",
+      });
+      normalizedRules.overtimeApproval.approvalWorkflow = reference.workflow;
+      normalizedRules.overtimeApproval.approvalWorkflowVersion = reference.version;
+      normalizedRules.overtimeApproval.approvalWorkflowVersionNumber = reference.versionNumber;
     }
     version.rules = normalizedRules as any;
     version.effectiveFrom = effectiveFrom;

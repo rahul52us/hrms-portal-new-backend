@@ -19,6 +19,7 @@ export interface AttendanceCalculationInput {
   requiresAttendance?: boolean | null;
   expectedWorkMinutes?: number | null;
   defaultAttendanceStatus?: "pending" | "holiday" | "weekly_off";
+  dayClosed?: boolean;
 }
 
 export interface AttendanceCalculationResult {
@@ -51,6 +52,17 @@ const DEFAULT_RULES: AttendanceRules = {
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
   overtimeStartsAfterMinutes: 0,
+  overtimeApproval: {
+    required: false,
+    approvalWorkflow: null,
+    approvalWorkflowVersion: null,
+    approvalWorkflowVersionNumber: null,
+  },
+  autoFinalize: {
+    enabled: false,
+    graceMinutes: 1440,
+    mode: "clean_only",
+  },
   regularization: {
     enabled: false,
     allowedTypes: [],
@@ -199,8 +211,17 @@ export function calculateAttendance(
   let status: AttendanceCalculationResult["status"] =
     input.defaultAttendanceStatus || "pending";
   if (sessions.length > 0) {
-    if (hasOpenSession) {
+    if (hasOpenSession && !input.dayClosed) {
       status = "pending";
+    } else if (hasOpenSession && input.dayClosed && rules.requirePunchOut) {
+      status =
+        rules.missingPunchTreatment === "half_day"
+          ? "half_day"
+          : rules.missingPunchTreatment === "absent"
+            ? "absent"
+            : "incomplete";
+    } else if (hasOpenSession && input.dayClosed) {
+      status = "present";
     } else if (hasMissingPunch && rules.requirePunchOut) {
       status =
         rules.missingPunchTreatment === "half_day"
@@ -228,11 +249,13 @@ export function calculateAttendance(
             ? "half_day"
             : "absent";
     }
+  } else if (input.dayClosed && input.requiresAttendance === true) {
+    status = "absent";
   }
 
   return {
     status,
-    state: hasOpenSession ? "open" : "calculated",
+    state: hasOpenSession && !input.dayClosed ? "open" : "calculated",
     workedMinutes,
     breakMinutes,
     lateMinutes,

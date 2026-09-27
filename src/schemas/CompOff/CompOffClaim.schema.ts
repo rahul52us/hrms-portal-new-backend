@@ -103,7 +103,7 @@ const CompOffClaimSchema = new Schema<CompOffClaimI>(
 );
 
 CompOffClaimSchema.index(
-  { company: 1, employee: 1, leaveType: 1, attendanceDate: 1 },
+  { company: 1, attendanceRecord: 1 },
   {
     unique: true,
     partialFilterExpression: { status: { $in: ["submitted", "approved"] } },

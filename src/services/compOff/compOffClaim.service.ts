@@ -9,6 +9,7 @@ import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
 import { resolveEmployeeDayContext } from "../attendance/employeeDayContext.service";
 import { parseAttendanceDate } from "../attendance/employeeDayContext.utils";
+import { approvedMinutesAvailable } from "../attendance/attendanceOvertime.utils";
 import {
   buildLeaveRequestScope,
   getLeaveActor,
@@ -198,8 +199,14 @@ async function resolveEligibility(options: {
   if (!["weekly_off", "mandatory_holiday"].includes(dayType)) {
     throw generateError("Comp-off can be earned only for work on a weekly off or mandatory holiday", 422);
   }
-  if (record.state === "open" || record.hasMissingPunch) {
-    throw generateError("Complete the punch session before claiming comp-off", 422);
+  if (record.state !== "finalized" || record.hasMissingPunch) {
+    throw generateError("Finalize the complete attendance record before claiming comp-off", 422);
+  }
+  if (
+    record.overtimeApprovalRequiredSnapshot === true &&
+    record.overtimeApprovalStatus !== "approved"
+  ) {
+    throw generateError("Overtime approval must be completed before claiming comp-off", 409);
   }
 
   const leaveTypes = await LeaveType.find({
@@ -211,14 +218,14 @@ async function resolveEligibility(options: {
   const existingClaims = await CompOffClaim.find({
     company: options.company,
     employee: options.employeeId,
-    attendanceDate,
-    leaveType: { $in: earnedRules.map((rule: any) => rule.leaveType) },
+    attendanceRecord: record._id,
     status: { $in: ["submitted", "approved"] },
   })
     .select("leaveType status requestedUnits approvedUnits")
     .lean();
   const claimByType = new Map(existingClaims.map((claim) => [String(claim.leaveType), claim]));
-  const workedMinutes = Number(record.workedMinutes || 0);
+  const activeClaim = existingClaims[0] || null;
+  const workedMinutes = approvedMinutesAvailable(record);
   const items = earnedRules.map((rule: any) => {
     const fullThreshold = Number(rule.compOffFullDayMinutes || 480);
     const halfThreshold = Number(rule.compOffHalfDayMinutes || 240);
@@ -236,7 +243,7 @@ async function resolveEligibility(options: {
       },
       rule,
       eligibleUnits,
-      existingClaim: claimByType.get(String(rule.leaveType)) || null,
+      existingClaim: claimByType.get(String(rule.leaveType)) || activeClaim,
     };
   });
   return { employee, attendanceDate, context, record, dayType, items };
@@ -285,6 +292,8 @@ export async function getCompOffEligibilityService(req: any, res: Response, next
         attendanceDate: result.attendanceDate,
         dayType: result.dayType,
         workedMinutes: result.record.workedMinutes,
+        approvedWorkedMinutes: approvedMinutesAvailable(result.record),
+        overtimeApprovalStatus: result.record.overtimeApprovalStatus || "not_required",
         attendanceState: result.record.state,
         items: result.items,
       },
@@ -515,15 +524,21 @@ async function finalizeCompOffClaim(
       status: "published",
     }).session(session),
   ]);
-  if (!record || record.state === "open" || record.hasMissingPunch) {
+  if (!record || record.state !== "finalized" || record.hasMissingPunch) {
     throw generateError("Attendance evidence is missing or incomplete", 409);
+  }
+  if (
+    record.overtimeApprovalRequiredSnapshot === true &&
+    record.overtimeApprovalStatus !== "approved"
+  ) {
+    throw generateError("Overtime approval must be completed before approving comp-off", 409);
   }
   const rule: any = version?.rules?.find((item: any) => String(item.leaveType) === String(claim.leaveType));
   if (!version || !rule || rule.entitlementMode !== "earned") {
     throw generateError("The historical comp-off policy rule is unavailable", 409);
   }
   const eligibleUnits = calculateCompOffEligibleUnits({
-    workedMinutes: Number(record.workedMinutes || 0),
+    workedMinutes: approvedMinutesAvailable(record),
     fullDayMinutes: Number(rule.compOffFullDayMinutes || 480),
     halfDayMinutes: Number(rule.compOffHalfDayMinutes || 240),
   });

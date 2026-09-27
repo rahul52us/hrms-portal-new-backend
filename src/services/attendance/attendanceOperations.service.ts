@@ -5,6 +5,7 @@ import mongoose, { ClientSession } from "mongoose";
 import { Readable } from "stream";
 import { generateError } from "../../config/Error/functions";
 import AttendanceImportBatch from "../../schemas/Attendance/AttendanceImportBatch.schema";
+import AttendancePeriod from "../../schemas/Attendance/AttendancePeriod.schema";
 import AttendanceRecord, {
   ATTENDANCE_RECORD_STATUSES,
   ATTENDANCE_WORK_MODES,
@@ -29,6 +30,12 @@ import {
   contextSnapshotFields,
   localAttendanceTimeToUtc,
 } from "./attendanceRegularization.service";
+import { assertAttendanceDateWritable } from "./attendancePeriod.service";
+import {
+  assertNoActiveCompOffClaimForAttendanceRecord,
+  ensureOvertimeReviewForFinalizedRecord,
+  supersedeOvertimeReviewForRecord,
+} from "./attendanceOvertime.service";
 
 type AttendanceOperation =
   | "adjust"
@@ -116,6 +123,8 @@ function revisionSummary(record: any) {
     lateMinutes: Number(record.lateMinutes || 0),
     earlyExitMinutes: Number(record.earlyExitMinutes || 0),
     overtimeMinutes: Number(record.overtimeMinutes || 0),
+    overtimeApprovalStatus: record.overtimeApprovalStatus || "not_required",
+    approvedOvertimeMinutes: Number(record.approvedOvertimeMinutes || 0),
     hasMissingPunch: record.hasMissingPunch === true,
   };
 }
@@ -222,11 +231,13 @@ async function mutateAttendance(options: {
 
   let savedRecord: any = null;
   await mongoose.connection.transaction(async (session) => {
+    await assertAttendanceDateWritable({ company, attendanceDate, session });
     let record: any = await AttendanceRecord.findOne({ company, employee: employeeId, attendanceDate }).session(session);
     const previous = recordSnapshot(record);
 
     if (input.operation === "reopen") {
       if (!record || record.state !== "finalized") throw generateError("Only finalized attendance can be reopened", 409);
+      await assertNoActiveCompOffClaimForAttendanceRecord(record._id, session);
       record.state = hasOpenPunch(record) ? "open" : "calculated";
     } else {
       if (record?.state === "finalized") {
@@ -323,7 +334,18 @@ async function mutateAttendance(options: {
     record.calculationReason = input.reason;
     record.source = input.source === "import" ? "import" : input.operation === "recalculate" ? "recalculation" : "manual";
     record.updatedBy = actor._id;
+    if (input.operation === "reopen") {
+      await supersedeOvertimeReviewForRecord({
+        record,
+        actor,
+        reason: input.reason,
+        session,
+      });
+    }
     await record.save({ session });
+    if (input.operation === "finalize") {
+      await ensureOvertimeReviewForFinalizedRecord({ record, actor, session });
+    }
 
     const action = input.operation === "finalize"
       ? "finalized"
@@ -560,7 +582,8 @@ async function validateImportRows(company: mongoose.Types.ObjectId, rows: Import
   }
   const employeeIds = employees.map((employee) => employee._id);
   const attendanceDates = [...new Set(normalizedDates.values())];
-  const [finalizedRecords, approvedLeaves]: any[][] = employeeIds.length && attendanceDates.length
+  const periodKeys = [...new Set(attendanceDates.map((date) => date.slice(0, 7)))];
+  const [finalizedRecords, approvedLeaves, lockedPeriods]: any[][] = employeeIds.length && attendanceDates.length
     ? await Promise.all([
         AttendanceRecord.find({
           company,
@@ -574,11 +597,17 @@ async function validateImportRows(company: mongoose.Types.ObjectId, rows: Import
           status: "approved",
           "dayBreakdown.attendanceDate": { $in: attendanceDates },
         }).select("employee dayBreakdown").lean(),
+        AttendancePeriod.find({
+          company,
+          periodKey: { $in: periodKeys },
+          status: "locked",
+        }).select("periodKey").lean(),
       ])
-    : [[], []];
+    : [[], [], []];
   const finalizedKeys = new Set(
     finalizedRecords.map((record) => `${record.employee}:${record.attendanceDate}`)
   );
+  const lockedPeriodKeys = new Set(lockedPeriods.map((period) => period.periodKey));
   const approvedLeaveKeys = new Set<string>();
   for (const request of approvedLeaves) {
     for (const day of request.dayBreakdown || []) {
@@ -605,6 +634,9 @@ async function validateImportRows(company: mongoose.Types.ObjectId, rows: Import
     }
     if (employee && attendanceDate && approvedLeaveKeys.has(`${employee._id}:${attendanceDate}`)) {
       rowErrors.push("Approved leave applies to this date");
+    }
+    if (attendanceDate && lockedPeriodKeys.has(attendanceDate.slice(0, 7))) {
+      rowErrors.push("Attendance cycle is locked for this date; reopen the cycle before importing changes");
     }
     const duplicateKey = `${row.employeeCode}:${attendanceDate}`;
     if (attendanceDate && seen.has(duplicateKey)) rowErrors.push("Duplicate employee and date in this file");

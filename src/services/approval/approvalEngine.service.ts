@@ -13,8 +13,8 @@ import {
 } from "./approvalDecision.utils";
 import { approvalWorkflowVersionSupportsRequestType } from "./approvalWorkflowVersion.utils";
 
-type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim" | "attendance_regularization_request";
-type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest";
+type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim" | "attendance_regularization_request" | "attendance_overtime_review";
+type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest" | "AttendanceOvertimeReview";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -30,6 +30,9 @@ function permissionFor(requestType: RequestType) {
   if (requestType === "remote_work_request") return PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS;
   if (requestType === "attendance_regularization_request") {
     return PERMISSION_KEYS.APPROVE_ATTENDANCE_REGULARIZATIONS;
+  }
+  if (requestType === "attendance_overtime_review") {
+    return PERMISSION_KEYS.APPROVE_ATTENDANCE_OVERTIME;
   }
   return PERMISSION_KEYS.APPROVE_LEAVE_REQUESTS;
 }
@@ -151,7 +154,7 @@ export async function createApprovalInstance(options: {
   employee: any;
   workflowId: unknown;
   workflowVersionId: unknown;
-  actorId: mongoose.Types.ObjectId;
+  actorId: mongoose.Types.ObjectId | null;
   session: ClientSession;
 }) {
   const workflowId = objectId(options.workflowId, "approval workflow id");
@@ -237,7 +240,12 @@ export async function createApprovalInstance(options: {
         currentStepOrder: firstStep?.order || null,
         steps,
         history: [
-          { action: "created", actor: options.actorId, actorNameSnapshot: "Request submitter", at: new Date() },
+          {
+            action: "created",
+            actor: options.actorId,
+            actorNameSnapshot: options.actorId ? "Request submitter" : "System",
+            at: new Date(),
+          },
           ...(autoApproved
             ? [{ action: "auto_approved", actor: null, actorNameSnapshot: "System", at: new Date() }]
             : []),

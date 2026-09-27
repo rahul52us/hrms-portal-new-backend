@@ -1,12 +1,18 @@
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
+import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 
 export async function applyApprovedRemoteWorkToAttendance(options: {
   request: any;
   actor: mongoose.Types.ObjectId;
   session: mongoose.ClientSession;
 }) {
+  await assertAttendanceDatesWritable({
+    company: options.request.company,
+    attendanceDates: (options.request.dates || []).map((day: any) => day.attendanceDate),
+    session: options.session,
+  });
   for (const day of options.request.dates || []) {
     const conflicting = await AttendanceRecord.findOne({
       company: options.request.company,
@@ -51,6 +57,11 @@ export async function removeCancelledRemoteWorkFromAttendance(options: {
   actor: mongoose.Types.ObjectId;
   session: mongoose.ClientSession;
 }) {
+  await assertAttendanceDatesWritable({
+    company: options.request.company,
+    attendanceDates: (options.request.dates || []).map((day: any) => day.attendanceDate),
+    session: options.session,
+  });
   const finalized = await AttendanceRecord.exists({
     company: options.request.company,
     remoteWorkRequest: options.request._id,

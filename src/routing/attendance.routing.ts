@@ -31,6 +31,35 @@ import {
   reopenAttendanceEmployeeDayService,
   updateAttendanceEmployeeDayService,
 } from "../services/attendance/attendanceOperations.service";
+import {
+  createAttendanceProcessorRunService,
+  getAttendanceProcessorRunService,
+  listAttendanceProcessorRunsService,
+  prepareAttendanceCycleService,
+  resumeAttendanceProcessorRunService,
+} from "../services/attendance/attendanceProcessor.service";
+import {
+  getAttendancePeriodForDateService,
+  getAttendancePeriodService,
+  lockAttendancePeriodService,
+  reopenAttendancePeriodService,
+} from "../services/attendance/attendancePeriod.service";
+import {
+  approveAttendanceOvertimeReviewService,
+  listAttendanceOvertimeReviewsService,
+  rejectAttendanceOvertimeReviewService,
+} from "../services/attendance/attendanceOvertime.service";
+import {
+  exportAttendancePayrollService,
+  exportAttendanceReportService,
+  getAttendanceExceptionsReportService,
+  getAttendancePayrollService,
+  getAttendanceReportsDashboardService,
+  getDailyAttendanceReportService,
+  getMonthlyAttendanceReportService,
+  lockAttendancePayrollService,
+  updateAttendancePayrollSettingsService,
+} from "../services/attendance/attendanceReports.service";
 
 const attendanceRouting = express.Router();
 const attendanceImport = multer({
@@ -56,6 +85,27 @@ attendanceRouting.post("/operations/bulk", bulkAttendanceOperationsService);
 attendanceRouting.get("/import/template", downloadAttendanceImportTemplateService);
 attendanceRouting.post("/import/preview", attendanceImport.single("file"), previewAttendanceImportService);
 attendanceRouting.post("/import/apply", attendanceImport.single("file"), applyAttendanceImportService);
+attendanceRouting.get("/processor/runs", listAttendanceProcessorRunsService);
+attendanceRouting.post("/processor/runs", createAttendanceProcessorRunService);
+attendanceRouting.get("/processor/runs/:runId", getAttendanceProcessorRunService);
+attendanceRouting.post("/processor/runs/:runId/resume", resumeAttendanceProcessorRunService);
+attendanceRouting.get("/periods/date/:attendanceDate", getAttendancePeriodForDateService);
+attendanceRouting.get("/periods/:periodKey", getAttendancePeriodService);
+attendanceRouting.post("/periods/:periodKey/prepare", prepareAttendanceCycleService);
+attendanceRouting.post("/periods/:periodKey/lock", lockAttendancePeriodService);
+attendanceRouting.post("/periods/:periodKey/reopen", reopenAttendancePeriodService);
+attendanceRouting.get("/reports/dashboard", getAttendanceReportsDashboardService);
+attendanceRouting.get("/reports/daily", getDailyAttendanceReportService);
+attendanceRouting.get("/reports/monthly", getMonthlyAttendanceReportService);
+attendanceRouting.get("/reports/exceptions", getAttendanceExceptionsReportService);
+attendanceRouting.get("/reports/export", exportAttendanceReportService);
+attendanceRouting.patch("/payroll/settings", updateAttendancePayrollSettingsService);
+attendanceRouting.get("/payroll/:periodKey", getAttendancePayrollService);
+attendanceRouting.post("/payroll/:periodKey/lock", lockAttendancePayrollService);
+attendanceRouting.get("/payroll/:periodKey/export", exportAttendancePayrollService);
+attendanceRouting.get("/overtime/reviews", listAttendanceOvertimeReviewsService);
+attendanceRouting.post("/overtime/reviews/:reviewId/approve", approveAttendanceOvertimeReviewService);
+attendanceRouting.post("/overtime/reviews/:reviewId/reject", rejectAttendanceOvertimeReviewService);
 attendanceRouting.get("/regularization/eligibility", getAttendanceRegularizationEligibilityService);
 attendanceRouting.post("/regularization/requests", createAttendanceRegularizationRequestService);
 attendanceRouting.get("/regularization/requests", listAttendanceRegularizationRequestsService);

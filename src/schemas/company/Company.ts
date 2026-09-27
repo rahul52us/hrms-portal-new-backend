@@ -44,6 +44,9 @@ interface CompanyI extends Document {
   sidebarColors?: any;
   departments?: string[];
   rolePermissions?: any;
+  payrollSettings?: {
+    attendanceCutoffDay?: number;
+  };
   lastActiveAt?: Date;
 }
 
@@ -158,6 +161,14 @@ const companySchema = new mongoose.Schema<CompanyI>({
   sidebarColors: { type: mongoose.Schema.Types.Mixed, default: {} },
   departments: { type: [{ type: String, trim: true }], default: [] },
   rolePermissions: { type: mongoose.Schema.Types.Mixed, default: {} },
+  payrollSettings: {
+    attendanceCutoffDay: {
+      type: Number,
+      min: 1,
+      max: 31,
+      default: 31,
+    },
+  },
   lastActiveAt: {
     type: Date,
   },

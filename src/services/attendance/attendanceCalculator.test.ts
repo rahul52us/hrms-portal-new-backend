@@ -78,6 +78,24 @@ function testMissingPunchTreatments() {
   assert.equal(invalidPair.hasMissingPunch, true);
 }
 
+function testClosedDayMaterialization() {
+  const noPunch = calculateAttendance({
+    ...base,
+    dayClosed: true,
+    punchSessions: [],
+  });
+  assert.equal(noPunch.status, "absent");
+  assert.equal(noPunch.state, "calculated");
+
+  const missingPunch = calculateAttendance({
+    ...base,
+    dayClosed: true,
+    punchSessions: [{ punchIn: local("09:30"), punchOut: null }],
+  });
+  assert.equal(missingPunch.status, "incomplete");
+  assert.equal(missingPunch.state, "calculated");
+}
+
 function testHolidayWork() {
   const result = calculateAttendance({
     ...base,
@@ -107,9 +125,10 @@ function testNoPunchUsesDayClassification() {
   testMultipleSessionsAndBreak,
   testOpenSession,
   testMissingPunchTreatments,
+  testClosedDayMaterialization,
   testHolidayWork,
   testNoPunchUsesDayClassification,
 ].forEach((test) => test());
 
-console.log("Attendance calculator tests passed (6 tests)");
+console.log("Attendance calculator tests passed (7 tests)");
 

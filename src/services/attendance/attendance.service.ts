@@ -17,6 +17,7 @@ import {
 } from "./attendancePunch.utils";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
+import { assertAttendanceDateWritable } from "./attendancePeriod.service";
 
 const DEFAULT_TIMEZONE = "Asia/Kolkata";
 
@@ -432,6 +433,7 @@ export async function punchInService(req: any, res: Response, next: NextFunction
     const now = new Date();
     const { context, attendanceDate, timezone } = await resolveCurrentContext({ ...actor, now });
     ensurePunchPolicies(context);
+    await assertAttendanceDateWritable({ company: actor.companyId, attendanceDate });
     const recentAttendanceDates = [attendanceDate, previousAttendanceDate(attendanceDate)].filter(Boolean);
     const activeRecordCandidate = await AttendanceRecord.findOne({
       company: actor.companyId,
@@ -563,6 +565,10 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
     if (!record) {
       throw generateError("Punch-out is available only for the current attendance day", 409);
     }
+    await assertAttendanceDateWritable({
+      company: actor.companyId,
+      attendanceDate: record.attendanceDate,
+    });
 
     const punchUpdate = buildFinalPunchSession(record.punchSessions || [], now);
     if (!punchUpdate) throw generateError("Punch in before recording punch-out", 409);

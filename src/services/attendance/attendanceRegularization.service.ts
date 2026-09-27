@@ -23,6 +23,11 @@ import {
 import { createRequestNotifications } from "../notification/notification.service";
 import { PERMISSION_KEYS } from "../permissions/permission.utils";
 import { calculateAttendance } from "./attendanceCalculator.utils";
+import { assertAttendanceDateWritable } from "./attendancePeriod.service";
+import {
+  assertNoActiveCompOffClaimForAttendanceRecord,
+  ensureOvertimeReviewForFinalizedRecord,
+} from "./attendanceOvertime.service";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
 
@@ -275,6 +280,7 @@ async function regularizationContext(company: mongoose.Types.ObjectId, employee:
 }
 
 async function eligibility(company: mongoose.Types.ObjectId, employee: mongoose.Types.ObjectId, attendanceDate: string) {
+  await assertAttendanceDateWritable({ company, attendanceDate });
   const result = await regularizationContext(company, employee, attendanceDate);
   const timezone = text(result.context.timezone) || "Asia/Kolkata";
   const today = dateKeyInTimezone(new Date(), timezone);
@@ -358,6 +364,11 @@ function requestedChanges(body: any, type: string, attendanceDate: string, timez
 }
 
 async function applyApprovedRequest(request: any, actorId: mongoose.Types.ObjectId, session: mongoose.ClientSession) {
+  await assertAttendanceDateWritable({
+    company: request.company,
+    attendanceDate: request.attendanceDate,
+    session,
+  });
   const context = await resolveEmployeeDayContext({
     companyId: request.company,
     employeeId: request.employee,
@@ -374,6 +385,9 @@ async function applyApprovedRequest(request: any, actorId: mongoose.Types.Object
     }
   } else if (record) {
     throw generateError("An attendance record was created after this request was submitted. Withdraw it and submit a new correction", 409);
+  }
+  if (record) {
+    await assertNoActiveCompOffClaimForAttendanceRecord(record._id, session);
   }
 
   const changes: any = request.requestedChanges || {};
@@ -471,6 +485,13 @@ async function applyApprovedRequest(request: any, actorId: mongoose.Types.Object
   record.source = "manual";
   record.updatedBy = actorId;
   await record.save({ session });
+  if (record.state === "finalized") {
+    await ensureOvertimeReviewForFinalizedRecord({
+      record,
+      actor: { _id: actorId, role: "attendance_approver" },
+      session,
+    });
+  }
 
   await AttendanceRecordRevision.create([{
     company: request.company,

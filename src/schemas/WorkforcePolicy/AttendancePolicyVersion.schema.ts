@@ -9,7 +9,22 @@ export interface AttendanceRules {
   missingPunchTreatment: "flag_incomplete" | "half_day" | "absent";
   overtimeEnabled: boolean;
   overtimeStartsAfterMinutes: number;
+  overtimeApproval: AttendanceOvertimeApprovalRules;
+  autoFinalize: AttendanceAutoFinalizeRules;
   regularization: AttendanceRegularizationRules;
+}
+
+export interface AttendanceOvertimeApprovalRules {
+  required: boolean;
+  approvalWorkflow?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersion?: mongoose.Types.ObjectId | null;
+  approvalWorkflowVersionNumber?: number | null;
+}
+
+export interface AttendanceAutoFinalizeRules {
+  enabled: boolean;
+  graceMinutes: number;
+  mode: "clean_only" | "all_calculated";
 }
 
 export const ATTENDANCE_REGULARIZATION_TYPES = [
@@ -62,6 +77,39 @@ const AttendanceRulesSchema = new Schema<AttendanceRules>(
     },
     overtimeEnabled: { type: Boolean, default: false },
     overtimeStartsAfterMinutes: { type: Number, min: 0, default: 0 },
+    overtimeApproval: {
+      type: new Schema<AttendanceOvertimeApprovalRules>(
+        {
+          required: { type: Boolean, default: false },
+          approvalWorkflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null },
+          approvalWorkflowVersion: {
+            type: Schema.Types.ObjectId,
+            ref: "ApprovalWorkflowVersion",
+            default: null,
+          },
+          approvalWorkflowVersionNumber: { type: Number, min: 1, default: null },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
+    autoFinalize: {
+      type: new Schema<AttendanceAutoFinalizeRules>(
+        {
+          enabled: { type: Boolean, default: false },
+          graceMinutes: { type: Number, min: 0, max: 2880, default: 1440 },
+          mode: {
+            type: String,
+            enum: ["clean_only", "all_calculated"],
+            default: "clean_only",
+          },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
     regularization: {
       type: new Schema<AttendanceRegularizationRules>(
         {

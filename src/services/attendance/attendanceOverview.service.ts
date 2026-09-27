@@ -4,6 +4,9 @@ import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
 import AttendanceRegularizationRequest from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
+import AttendanceOvertimeReview from "../../schemas/Attendance/AttendanceOvertimeReview.schema";
+import CompOffClaim from "../../schemas/CompOff/CompOffClaim.schema";
+import CompOffCreditLot from "../../schemas/CompOff/CompOffCreditLot.schema";
 import Department from "../../schemas/Department/Department.schema";
 import EmployeeAssignmentHistory from "../../schemas/EmployeeAssignment/EmployeeAssignmentHistory.schema";
 import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
@@ -407,6 +410,9 @@ export async function getAttendanceOverviewService(req: any, res: Response, next
           lateMinutes: Number(record?.lateMinutes || 0),
           earlyExitMinutes: Number(record?.earlyExitMinutes || 0),
           overtimeMinutes: Number(record?.overtimeMinutes || 0),
+          overtimeApprovalRequired: record?.overtimeApprovalRequiredSnapshot === true,
+          overtimeApprovalStatus: record?.overtimeApprovalStatus || "not_required",
+          approvedOvertimeMinutes: Number(record?.approvedOvertimeMinutes || 0),
           isLate: record?.isLate === true,
           isEarlyExit: record?.isEarlyExit === true,
           hasMissingPunch: record?.hasMissingPunch === true,
@@ -705,7 +711,16 @@ export async function loadAttendanceEmployeeDay(options: {
     }).lean(),
   ]);
   const organization = organizationFromRecord(record) || context.organizationAssignment;
-  const [revisions, leaveRequest, remoteWorkRequest, regularizationRequest, policies] = await Promise.all([
+  const [
+    revisions,
+    leaveRequest,
+    remoteWorkRequest,
+    regularizationRequest,
+    overtimeReview,
+    compOffClaim,
+    compOffCredit,
+    policies,
+  ] = await Promise.all([
     record
       ? AttendanceRecordRevision.find({ company: options.company, attendanceRecord: record._id })
           .sort({ revisionNumber: -1, createdAt: -1 })
@@ -745,6 +760,32 @@ export async function loadAttendanceEmployeeDay(options: {
       .select("_id correctionType status reason requestedChanges submittedAt decidedAt decisionComment appliedRevisionNumber approvalInstance approverNameSnapshot")
       .populate("approvalInstance", "status currentStepOrder steps.nameSnapshot steps.order")
       .lean(),
+    AttendanceOvertimeReview.findOne({
+      company: options.company,
+      employee: employeeId,
+      attendanceDate: options.attendanceDate,
+    })
+      .sort({ attendanceRevisionNumber: -1, submittedAt: -1 })
+      .select("_id status attendanceRecord attendanceRevisionNumber overtimeMinutesSnapshot workedMinutesSnapshot dayTypeSnapshot submittedAt decidedAt decisionComment currentApprovers approvalInstance")
+      .populate("currentApprovers", "name username code role")
+      .populate("approvalInstance", "status currentStepOrder steps.nameSnapshot steps.order steps.approvers")
+      .lean(),
+    CompOffClaim.findOne({
+      company: options.company,
+      employee: employeeId,
+      attendanceDate: options.attendanceDate,
+    })
+      .sort({ submittedAt: -1 })
+      .select("_id status attendanceRecord requestedUnits approvedUnits expiresOn submittedAt decidedAt leaveType")
+      .populate("leaveType", "name code unit")
+      .lean(),
+    record
+      ? CompOffCreditLot.findOne({ company: options.company, attendanceRecord: record._id })
+          .sort({ createdAt: -1 })
+          .select("_id status leaveType claim originalUnits availableUnits reservedUnits consumedUnits earnedDate expiresOn")
+          .populate("leaveType", "name code unit")
+          .lean()
+      : null,
     policyDetails(record, context),
   ]);
 
@@ -788,6 +829,9 @@ export async function loadAttendanceEmployeeDay(options: {
       leaveRequest,
       remoteWorkRequest,
       regularizationRequest,
+      overtimeReview,
+      compOffClaim,
+      compOffCredit,
       revisions,
     },
   };

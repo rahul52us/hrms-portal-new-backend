@@ -2,6 +2,7 @@ import mongoose, { ClientSession } from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
 import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordRevision.schema";
+import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 
 function id(value: unknown) {
   const normalized = String((value as any)?._id || value || "").trim();
@@ -52,6 +53,11 @@ export async function applyApprovedLeaveToAttendance(options: {
   actor: mongoose.Types.ObjectId;
   session: ClientSession;
 }) {
+  await assertAttendanceDatesWritable({
+    company: options.request.company,
+    attendanceDates: (options.request.dayBreakdown || []).map((day: any) => day.attendanceDate),
+    session: options.session,
+  });
   for (const day of options.request.dayBreakdown || []) {
     if (Number(day.chargedUnits || 0) <= 0 || day.chargeReason === "sandwich_rule") continue;
 
@@ -137,6 +143,11 @@ export async function removeCancelledLeaveFromAttendance(options: {
   actor: mongoose.Types.ObjectId;
   session: ClientSession;
 }) {
+  await assertAttendanceDatesWritable({
+    company: options.request.company,
+    attendanceDates: (options.request.dayBreakdown || []).map((day: any) => day.attendanceDate),
+    session: options.session,
+  });
   const records = await AttendanceRecord.find({
     company: options.request.company,
     employee: options.request.employee,

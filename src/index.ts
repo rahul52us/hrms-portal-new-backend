@@ -12,6 +12,11 @@ import connectToDatabase from "./db/db";
 import mongoose from "mongoose";
 import { serveCourseAsset } from "./services/scorm/scormStorage.service";
 import { startLeaveAccrualScheduler } from "./services/leave/leaveAccrualScheduler";
+import { recoverPendingAttendanceProcessorRuns } from "./services/attendance/attendanceProcessor.service";
+import {
+  runScheduledAttendanceProcessor,
+  startAttendanceProcessorScheduler,
+} from "./services/attendance/attendanceProcessorScheduler";
 
 dotenv.config();
 
@@ -132,6 +137,21 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       startLeaveAccrualScheduler();
+      const attendanceSchedulerStarted = startAttendanceProcessorScheduler();
+      recoverPendingAttendanceProcessorRuns()
+        .then(async (count) => {
+          if (count) console.log(`Recovered ${count} pending attendance processor run(s)`);
+          if (!attendanceSchedulerStarted) return;
+          const catchup = await runScheduledAttendanceProcessor();
+          if (catchup.queued.length) {
+            console.log(
+              `Queued ${catchup.queued.length} attendance catch-up run(s) across ${catchup.companies} company account(s)`
+            );
+          }
+        })
+        .catch((error: any) => {
+          console.error("Attendance processor recovery failed:", error?.message || error);
+        });
     });
   } catch (error) {
     console.error("Failed to start server:", error);

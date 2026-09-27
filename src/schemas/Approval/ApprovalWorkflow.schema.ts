@@ -6,6 +6,7 @@ export const APPROVAL_REQUEST_TYPES = [
   "remote_work_request",
   "comp_off_claim",
   "attendance_regularization_request",
+  "attendance_overtime_review",
 ] as const;
 
 export interface ApprovalWorkflowI extends Document {

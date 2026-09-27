@@ -15,6 +15,13 @@ export const ATTENDANCE_RECORD_STATES = ["open", "calculated", "finalized"] as c
 
 export const ATTENDANCE_WORK_MODES = ["office", "remote", "hybrid", "field"] as const;
 
+export const ATTENDANCE_OVERTIME_APPROVAL_STATUSES = [
+  "not_required",
+  "pending",
+  "approved",
+  "rejected",
+] as const;
+
 export interface AttendancePunchSessionI {
   punchIn?: Date | null;
   punchOut?: Date | null;
@@ -44,6 +51,10 @@ export interface AttendanceRecordI extends Document {
   lateMinutes: number;
   earlyExitMinutes: number;
   overtimeMinutes: number;
+  overtimeApprovalRequiredSnapshot: boolean;
+  overtimeApprovalStatus: (typeof ATTENDANCE_OVERTIME_APPROVAL_STATUSES)[number];
+  approvedOvertimeMinutes: number;
+  overtimeReview?: mongoose.Types.ObjectId | null;
   isLate: boolean;
   isEarlyExit: boolean;
   hasMissingPunch: boolean;
@@ -159,6 +170,15 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
     lateMinutes: { type: Number, min: 0, default: 0 },
     earlyExitMinutes: { type: Number, min: 0, default: 0 },
     overtimeMinutes: { type: Number, min: 0, default: 0 },
+    overtimeApprovalRequiredSnapshot: { type: Boolean, default: false },
+    overtimeApprovalStatus: {
+      type: String,
+      enum: ATTENDANCE_OVERTIME_APPROVAL_STATUSES,
+      default: "not_required",
+      index: true,
+    },
+    approvedOvertimeMinutes: { type: Number, min: 0, default: 0 },
+    overtimeReview: { type: Schema.Types.ObjectId, ref: "AttendanceOvertimeReview", default: null, index: true },
     isLate: { type: Boolean, default: false },
     isEarlyExit: { type: Boolean, default: false },
     hasMissingPunch: { type: Boolean, default: false },
