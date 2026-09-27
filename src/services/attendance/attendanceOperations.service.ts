@@ -42,6 +42,7 @@ type AttendanceOperation =
   | "set_status"
   | "set_work_mode"
   | "recalculate"
+  | "refresh_policies_recalculate"
   | "finalize"
   | "reopen";
 
@@ -126,6 +127,29 @@ function revisionSummary(record: any) {
     overtimeApprovalStatus: record.overtimeApprovalStatus || "not_required",
     approvedOvertimeMinutes: Number(record.approvedOvertimeMinutes || 0),
     hasMissingPunch: record.hasMissingPunch === true,
+    employeeAssignmentHistory: text(record.employeeAssignmentHistory),
+    attendancePolicyVersion: text(record.attendancePolicyVersion),
+    workScheduleVersion: text(record.workScheduleVersion),
+    holidayCalendarVersion: text(record.holidayCalendarVersion),
+    policyResolvedAt: record.policyResolvedAt || null,
+  };
+}
+
+export function refreshedPolicySnapshot(context: any) {
+  const references = context?.policyReferences || {};
+  const missing = [
+    ["Attendance Policy", references.attendancePolicy?.versionId],
+    ["Work Schedule", references.workSchedule?.versionId],
+    ["Holiday Calendar", references.holidayCalendar?.versionId],
+  ]
+    .filter(([, versionId]) => !versionId)
+    .map(([label]) => label);
+  if (missing.length) {
+    throw generateError(`Cannot refresh attendance: missing ${missing.join(", ")}`, 422);
+  }
+  return {
+    timezone: context.timezone || "Asia/Kolkata",
+    ...contextSnapshotFields(context),
   };
 }
 
@@ -224,7 +248,7 @@ async function mutateAttendance(options: {
   }
   if (
     access.data.leaveRequest &&
-    ["adjust", "set_status", "set_work_mode", "recalculate"].includes(input.operation)
+    ["adjust", "set_status", "set_work_mode", "recalculate", "refresh_policies_recalculate"].includes(input.operation)
   ) {
     throw generateError("Approved leave applies to this date. Change the leave request before editing attendance", 409);
   }
@@ -243,7 +267,7 @@ async function mutateAttendance(options: {
       if (record?.state === "finalized") {
         throw generateError("Attendance is finalized. Reopen it before making changes", 409);
       }
-      if (["recalculate", "finalize"].includes(input.operation) && !record) {
+      if (["recalculate", "refresh_policies_recalculate", "finalize"].includes(input.operation) && !record) {
         throw generateError("Create or mark attendance before using this action", 409);
       }
       if (!record) {
@@ -309,6 +333,18 @@ async function mutateAttendance(options: {
 
       if (input.operation === "recalculate") await recalculateRecord(record, context, session);
 
+      if (input.operation === "refresh_policies_recalculate") {
+        await assertNoActiveCompOffClaimForAttendanceRecord(record._id, session);
+        await supersedeOvertimeReviewForRecord({
+          record,
+          actor,
+          reason: `Effective policy snapshots refreshed: ${input.reason}`,
+          session,
+        });
+        record.set(refreshedPolicySnapshot(context));
+        await recalculateRecord(record, context, session);
+      }
+
       if (["adjust", "set_status"].includes(input.operation) && input.status !== undefined) {
         record.status = normalizedStatus(input.status);
         record.state = record.status === "pending" ? "open" : "calculated";
@@ -332,7 +368,11 @@ async function mutateAttendance(options: {
     record.calculatedAt = new Date();
     record.calculatedBy = actor._id;
     record.calculationReason = input.reason;
-    record.source = input.source === "import" ? "import" : input.operation === "recalculate" ? "recalculation" : "manual";
+    record.source = input.source === "import"
+      ? "import"
+      : ["recalculate", "refresh_policies_recalculate"].includes(input.operation)
+        ? "recalculation"
+        : "manual";
     record.updatedBy = actor._id;
     if (input.operation === "reopen") {
       await supersedeOvertimeReviewForRecord({
@@ -351,7 +391,7 @@ async function mutateAttendance(options: {
       ? "finalized"
       : input.operation === "reopen"
         ? "reopened"
-        : input.operation === "recalculate"
+        : ["recalculate", "refresh_policies_recalculate"].includes(input.operation)
           ? "recalculated"
           : "manual_adjustment";
     await AttendanceRecordRevision.create([{
@@ -368,7 +408,11 @@ async function mutateAttendance(options: {
       },
       snapshot: recordSnapshot(record),
       actor: actor._id,
-      source: input.source === "import" ? "import" : input.operation === "recalculate" ? "recalculation" : "manual",
+      source: input.source === "import"
+        ? "import"
+        : ["recalculate", "refresh_policies_recalculate"].includes(input.operation)
+          ? "recalculation"
+          : "manual",
     }], { session });
     savedRecord = recordSnapshot(record);
   });
@@ -383,7 +427,7 @@ function operationPermission(operation: AttendanceOperation) {
 
 export function operationInput(body: any, forcedOperation?: AttendanceOperation): AttendanceMutationInput {
   const operation = forcedOperation || text(body?.operation).toLowerCase() as AttendanceOperation;
-  if (!["adjust", "set_status", "set_work_mode", "recalculate", "finalize", "reopen"].includes(operation)) {
+  if (!["adjust", "set_status", "set_work_mode", "recalculate", "refresh_policies_recalculate", "finalize", "reopen"].includes(operation)) {
     throw generateError("Select a valid attendance operation", 422);
   }
   const input: AttendanceMutationInput = {

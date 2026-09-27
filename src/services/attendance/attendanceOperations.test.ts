@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import AttendanceImportBatch from "../../schemas/Attendance/AttendanceImportBatch.schema";
 import { getDefaultPermissionsForRole, PERMISSION_KEYS } from "../permissions/permission.utils";
-import { operationInput } from "./attendanceOperations.service";
+import { operationInput, refreshedPolicySnapshot } from "./attendanceOperations.service";
 
 const statusOperation = operationInput({
   operation: "set_status",
@@ -19,6 +19,45 @@ const overnightAdjustment = operationInput({
   punchOutNextDay: true,
 }, "adjust");
 assert.equal(overnightAdjustment.punchOutNextDay, true);
+
+const refreshOperation = operationInput({
+  operation: "refresh_policies_recalculate",
+  reason: "Apply the newly effective overtime policy",
+});
+assert.equal(refreshOperation.operation, "refresh_policies_recalculate");
+
+const refreshedSnapshot = refreshedPolicySnapshot({
+  timezone: "Asia/Kolkata",
+  dayType: "working_day",
+  requiresAttendance: true,
+  expectedWorkMinutes: 480,
+  schedule: { startTime: "09:30", endTime: "18:30" },
+  organizationAssignment: {},
+  policyReferences: {
+    attendancePolicy: {
+      assignmentId: new mongoose.Types.ObjectId(),
+      resourceId: new mongoose.Types.ObjectId(),
+      versionId: new mongoose.Types.ObjectId(),
+    },
+    workSchedule: {
+      assignmentId: new mongoose.Types.ObjectId(),
+      resourceId: new mongoose.Types.ObjectId(),
+      versionId: new mongoose.Types.ObjectId(),
+    },
+    holidayCalendar: {
+      assignmentId: new mongoose.Types.ObjectId(),
+      resourceId: new mongoose.Types.ObjectId(),
+      versionId: new mongoose.Types.ObjectId(),
+    },
+  },
+});
+assert.equal(refreshedSnapshot.timezone, "Asia/Kolkata");
+assert.equal(refreshedSnapshot.scheduleStartTimeSnapshot, "09:30");
+assert.ok(refreshedSnapshot.attendancePolicyVersion);
+assert.throws(
+  () => refreshedPolicySnapshot({ policyReferences: {} }),
+  /missing Attendance Policy, Work Schedule, Holiday Calendar/i
+);
 
 assert.throws(
   () => operationInput({ operation: "set_status", status: "leave", reason: "Manual leave" }),
