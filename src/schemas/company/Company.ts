@@ -46,6 +46,12 @@ interface CompanyI extends Document {
   rolePermissions?: any;
   payrollSettings?: {
     attendanceCutoffDay?: number;
+    currency?: string;
+    currencyMinorUnits?: number;
+    payFrequency?: "monthly";
+    payDay?: number;
+    roundingMode?: "nearest" | "floor" | "ceil";
+    employeeCompensationVisibility?: "hidden" | "current" | "history";
   };
   lastActiveAt?: Date;
 }
@@ -167,6 +173,40 @@ const companySchema = new mongoose.Schema<CompanyI>({
       min: 1,
       max: 31,
       default: 31,
+    },
+    currency: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      match: /^[A-Z]{3}$/,
+      default: "INR",
+    },
+    currencyMinorUnits: {
+      type: Number,
+      min: 0,
+      max: 3,
+      default: 2,
+    },
+    payFrequency: {
+      type: String,
+      enum: ["monthly"],
+      default: "monthly",
+    },
+    payDay: {
+      type: Number,
+      min: 1,
+      max: 31,
+      default: 31,
+    },
+    roundingMode: {
+      type: String,
+      enum: ["nearest", "floor", "ceil"],
+      default: "nearest",
+    },
+    employeeCompensationVisibility: {
+      type: String,
+      enum: ["hidden", "current", "history"],
+      default: "hidden",
     },
   },
   lastActiveAt: {

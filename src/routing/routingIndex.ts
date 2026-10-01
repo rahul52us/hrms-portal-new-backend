@@ -26,6 +26,7 @@ import attendanceRouting from "./attendance.routing";
 import remoteWorkRouting from "./remoteWork.routing";
 import compOffRouting from "./compOff.routing";
 import calendarRouting from "./calendar.routing";
+import payrollRouting from "./payroll.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -57,6 +58,7 @@ const importRoutings = (app: any) => {
   app.use('/api/remote-work', remoteWorkRouting);
   app.use('/api/comp-off', compOffRouting);
   app.use('/api/calendar', calendarRouting);
+  app.use('/api/payroll', payrollRouting);
 };
 
 export default importRoutings;
