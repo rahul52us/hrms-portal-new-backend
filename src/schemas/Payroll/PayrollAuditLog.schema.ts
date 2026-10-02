@@ -7,6 +7,7 @@ export const PAYROLL_AUDIT_ENTITY_TYPES = [
   "employee_compensation",
   "compensation_import",
   "payroll_run",
+  "payroll_input",
   "payslip",
 ] as const;
 

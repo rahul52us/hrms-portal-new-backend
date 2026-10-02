@@ -60,7 +60,25 @@ export function ensureEmployeeCompensationManager(req: any) {
   );
 }
 
-export async function resolvePayrollCompany(req: any, requestedCompanyInput?: unknown, mutation = false) {
+export function ensurePayrollRunManager(req: any) {
+  const actor = getPayrollActor(req);
+  const role = normalizePayrollRole(actor?.role);
+  if (!["superadmin", "admin", "hradmin"].includes(role)) {
+    throw generateError("Only company administrators and HR Admin can manage payroll runs", 403);
+  }
+  ensurePermission(
+    actor,
+    PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
+    "You do not have permission to manage payroll runs"
+  );
+}
+
+export async function resolvePayrollCompany(
+  req: any,
+  requestedCompanyInput?: unknown,
+  mutation = false,
+  actionLabel = "manage payroll configuration for this company"
+) {
   const actor = getPayrollActor(req);
   const role = normalizePayrollRole(actor?.role);
   const actorCompanyId = String(actor?.company || actor?.companyId || "").trim();
@@ -81,7 +99,7 @@ export async function resolvePayrollCompany(req: any, requestedCompanyInput?: un
     await ensureCompanyManagementAccess({
       actor,
       requestedCompanyId: companyId,
-      actionLabel: "manage payroll configuration for this company",
+      actionLabel,
       allowSuperadminWithoutCompany: false,
     });
   }
@@ -102,7 +120,7 @@ export async function resolvePayrollCompany(req: any, requestedCompanyInput?: un
 
 export async function writePayrollAudit(options: {
   company: mongoose.Types.ObjectId;
-  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "compensation_import" | "payroll_run" | "payslip";
+  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "compensation_import" | "payroll_run" | "payroll_input" | "payslip";
   entityId: mongoose.Types.ObjectId;
   action: string;
   actor: mongoose.Types.ObjectId;

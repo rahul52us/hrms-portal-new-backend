@@ -38,6 +38,33 @@ import {
   listCompensationImportRowsService,
   previewCompensationImportService,
 } from "../services/payroll/employeeCompensationImport.service";
+import {
+  createPayrollRunService,
+  getPayrollRunService,
+  getPayrollRunSourceService,
+  listPayrollRunsService,
+} from "../services/payroll/payrollRun.service";
+import {
+  listPayrollEmployeeInputsService,
+  preparePayrollEmployeeInputsService,
+} from "../services/payroll/payrollEmployeeInput.service";
+import {
+  cancelPayrollOneTimeInputService,
+  createPayrollOneTimeInputService,
+  listPayrollOneTimeInputsService,
+} from "../services/payroll/payrollOneTimeInput.service";
+import {
+  listPayrollEmployeeSnapshotsService,
+  preparePayrollEmployeeSnapshotsService,
+} from "../services/payroll/payrollEmployeeSnapshot.service";
+import {
+  calculateDraftPayrollService,
+  listDraftPayrollResultsService,
+} from "../services/payroll/payrollCalculation.service";
+import {
+  decidePayrollValidationIssueService,
+  listPayrollValidationIssuesService,
+} from "../services/payroll/payrollValidation.service";
 
 const payrollRouting = express.Router();
 const compensationImport = multer({
@@ -78,6 +105,21 @@ payrollRouting.post("/compensation/import/preview", compensationImport.single("f
 payrollRouting.get("/compensation/import", listCompensationImportBatchesService);
 payrollRouting.get("/compensation/import/:batchId", listCompensationImportRowsService);
 payrollRouting.post("/compensation/import/:batchId/commit", commitCompensationImportService);
+payrollRouting.get("/runs/source/:periodKey", getPayrollRunSourceService);
+payrollRouting.get("/runs", listPayrollRunsService);
+payrollRouting.post("/runs", createPayrollRunService);
+payrollRouting.get("/runs/:runId/employee-inputs", listPayrollEmployeeInputsService);
+payrollRouting.post("/runs/:runId/prepare-attendance-inputs", preparePayrollEmployeeInputsService);
+payrollRouting.get("/runs/:runId/employee-snapshots", listPayrollEmployeeSnapshotsService);
+payrollRouting.post("/runs/:runId/prepare-employee-snapshots", preparePayrollEmployeeSnapshotsService);
+payrollRouting.get("/runs/:runId/results", listDraftPayrollResultsService);
+payrollRouting.post("/runs/:runId/calculate", calculateDraftPayrollService);
+payrollRouting.get("/runs/:runId/validation", listPayrollValidationIssuesService);
+payrollRouting.post("/runs/:runId/validation/:resultId/issues/:issueCode/decision", decidePayrollValidationIssueService);
+payrollRouting.get("/runs/:runId/one-time-inputs", listPayrollOneTimeInputsService);
+payrollRouting.post("/runs/:runId/one-time-inputs", createPayrollOneTimeInputService);
+payrollRouting.post("/runs/:runId/one-time-inputs/:inputId/cancel", cancelPayrollOneTimeInputService);
+payrollRouting.get("/runs/:runId", getPayrollRunService);
 payrollRouting.get("/audit", listPayrollAuditLogsService);
 
 export default payrollRouting;
