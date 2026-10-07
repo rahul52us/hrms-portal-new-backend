@@ -2,10 +2,12 @@ import { NextFunction, Response } from "express";
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import EmployeePayrollResult from "../../schemas/Payroll/EmployeePayrollResult.schema";
+import PayrollFinalizedResult from "../../schemas/Payroll/PayrollFinalizedResult.schema";
 import PayrollEmployeeInput from "../../schemas/Payroll/PayrollEmployeeInput.schema";
 import PayrollEmployeeSnapshot from "../../schemas/Payroll/PayrollEmployeeSnapshot.schema";
 import PayrollOneTimeInput from "../../schemas/Payroll/PayrollOneTimeInput.schema";
 import PayrollRun from "../../schemas/Payroll/PayrollRun.schema";
+import { getStatutoryProvider } from "./statutory/statutoryProvider.registry";
 import {
   ensurePayrollRunManager,
   getPayrollActorId,
@@ -21,12 +23,16 @@ export const PAYROLL_RESULT_TOTAL_FIELDS = [
   "arrearsMinor",
   "grossEarningsMinor",
   "recurringDeductionsMinor",
+  "statutoryEmployeeDeductionsMinor",
+  "incomeTaxWithholdingMinor",
   "oneTimeDeductionsMinor",
   "recoveriesMinor",
   "totalDeductionsMinor",
   "recurringReimbursementsMinor",
   "oneTimeReimbursementsMinor",
   "totalReimbursementsMinor",
+  "recurringEmployerContributionsMinor",
+  "statutoryEmployerContributionsMinor",
   "employerContributionsMinor",
   "taxableEarningsMinor",
   "netPayMinor",
@@ -114,6 +120,69 @@ function emptyTotals() {
   return Object.fromEntries(PAYROLL_RESULT_TOTAL_FIELDS.map((field) => [field, 0])) as Record<string, number>;
 }
 
+function dateKey(value: unknown) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function taxYearForCycleEnd(cycleEndDate: string) {
+  const [year, month] = cycleEndDate.split("-").map(Number);
+  const startYear = month >= 4 ? year : year - 1;
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
+function remainingTaxYearPayrollPeriods(cycleEndDate: string) {
+  const month = Number(cycleEndDate.slice(5, 7));
+  if (!Number.isInteger(month) || month < 1 || month > 12) throw new Error("Payroll cycle end date is invalid");
+  return month >= 4 ? 16 - month : 4 - month;
+}
+
+type PriorTaxHistory = { taxableEarningsMinor: number; taxWithheldMinor: number };
+
+export async function resolvePriorTaxHistoryForRun(options: {
+  company: mongoose.Types.ObjectId;
+  run: any;
+  employees: mongoose.Types.ObjectId[];
+  session?: mongoose.ClientSession;
+}) {
+  const [taxYearStart] = taxYearForCycleEnd(text(options.run.cycleEndDate)).split("-");
+  const startDate = `${taxYearStart}-04-01`;
+  const priorRunsQuery = PayrollRun.find({
+    company: options.company,
+    _id: { $ne: options.run._id },
+    finalizationVersion: { $gt: 0 },
+    cycleEndDate: { $gte: startDate, $lt: text(options.run.cycleEndDate) },
+  }).select("_id finalizationVersion").lean();
+  if (options.session) priorRunsQuery.session(options.session);
+  const priorRuns: any[] = await priorRunsQuery;
+  const history = new Map<string, PriorTaxHistory>();
+  if (!priorRuns.length || !options.employees.length) return history;
+  const finalizedQuery = PayrollFinalizedResult.find({
+    company: options.company,
+    employee: { $in: options.employees },
+    $or: priorRuns.map((run) => ({ payrollRun: run._id, finalizationVersion: run.finalizationVersion })),
+  }).select("employee totals.taxableEarningsMinor statutoryContributions").lean();
+  if (options.session) finalizedQuery.session(options.session);
+  const finalizedResults: any[] = await finalizedQuery;
+  for (const finalized of finalizedResults) {
+    const employeeId = idString(finalized.employee);
+    const current = history.get(employeeId) || { taxableEarningsMinor: 0, taxWithheldMinor: 0 };
+    current.taxableEarningsMinor = safeSum(
+      [current.taxableEarningsMinor, Number(finalized.totals?.taxableEarningsMinor || 0)],
+      "Prior taxable earnings"
+    );
+    current.taxWithheldMinor = safeSum([
+      current.taxWithheldMinor,
+      ...(finalized.statutoryContributions || [])
+        .filter((line: any) => line.moduleKey === "income_tax_withholding" && line.side === "employee_deduction")
+        .map((line: any) => Number(line.amountMinor || 0)),
+    ], "Prior income-tax withholding");
+    history.set(employeeId, current);
+  }
+  return history;
+}
+
 export function buildDraftPayrollResults(options: {
   run: any;
   payrollInputs: any[];
@@ -122,6 +191,7 @@ export function buildDraftPayrollResults(options: {
   actorId: mongoose.Types.ObjectId;
   calculationVersion: number;
   calculatedAt?: Date;
+  priorTaxHistoryByEmployee?: Map<string, PriorTaxHistory>;
 }) {
   const calculatedAt = options.calculatedAt || new Date();
   const snapshotsByEmployee = new Map(options.employeeSnapshots.map((item) => [idString(item.employee), item]));
@@ -215,6 +285,7 @@ export function buildDraftPayrollResults(options: {
             category: component.category,
             taxable: Boolean(component.taxable),
             prorateOnUnpaidDays,
+            statutoryWageBases: Array.isArray(component.statutoryWageBases) ? component.statutoryWageBases : [],
             overridden: Boolean(component.overridden),
             scheduledAmountMinor,
             payableAmountMinor,
@@ -238,11 +309,137 @@ export function buildDraftPayrollResults(options: {
       componentName: text(input.componentNameSnapshot),
       category: input.componentCategorySnapshot,
       taxable: Boolean(input.componentTaxableSnapshot),
+      statutoryWageBases: Array.isArray(input.componentStatutoryWageBasesSnapshot)
+        ? input.componentStatutoryWageBasesSnapshot
+        : [],
       inputType: input.inputType,
       amountMinor: safeMinor(input.amountMinor, `${text(input.componentNameSnapshot)} one-time amount`),
       reason: text(input.reason),
       reference: text(input.reference),
+      sourceType: input.sourceType || "manual",
+      sourcePayrollRun: input.sourcePayrollRun || null,
+      sourcePeriodKey: input.sourcePeriodKey ? text(input.sourcePeriodKey) : undefined,
+      sourceFinalizationVersion: input.sourceFinalizationVersion || null,
+      sourceFinalizedResult: input.sourceFinalizedResult || null,
     }));
+
+    const currentTaxableEarningsMinor = safeSum([
+      ...recurringComponents.filter((item) => item.category === "earning" && item.taxable).map((item) => Number(item.payableAmountMinor)),
+      ...oneTimeInputs.filter((item) => ["earning", "arrear"].includes(item.inputType) && item.taxable).map((item) => Number(item.amountMinor)),
+    ], "Taxable earnings");
+    const scheduledRecurringTaxableEarningsMinor = safeSum(
+      recurringComponents
+        .filter((item) => item.category === "earning" && item.taxable)
+        .map((item) => Number(item.scheduledAmountMinor)),
+      "Scheduled recurring taxable earnings"
+    );
+    const remainingPayrollPeriods = remainingTaxYearPayrollPeriods(text(options.run.cycleEndDate));
+    const priorTaxHistory = options.priorTaxHistoryByEmployee?.get(employeeId) || {
+      taxableEarningsMinor: 0,
+      taxWithheldMinor: 0,
+    };
+
+    let statutoryContributions: any[] = [];
+    const statutoryProviderKey = text(options.run.statutoryProviderKey || snapshot?.statutory?.providerKey).toLowerCase();
+    const runEnabledModules = Array.isArray(options.run.statutoryEnabledModules)
+      ? options.run.statutoryEnabledModules.map((value: unknown) => text(value))
+      : [];
+    const employeeEnabledModules = new Set(
+      Array.isArray(snapshot?.statutory?.enabledModules)
+        ? snapshot.statutory.enabledModules.map((value: unknown) => text(value))
+        : []
+    );
+    const enabledModules = runEnabledModules.filter(
+      (module: string) => module === "income_tax_withholding" || employeeEnabledModules.has(module)
+    );
+    const contributionApplies = snapshot?.statutory?.applicability?.providentFund === true
+      || snapshot?.statutory?.applicability?.employeeStateInsurance === true
+      || snapshot?.statutory?.applicability?.professionalTax === true
+      || snapshot?.statutory?.applicability?.labourWelfareFund === true
+      || enabledModules.includes("income_tax_withholding");
+    if (contributionApplies) {
+      if (!statutoryProviderKey) {
+        addIssue(issues, {
+          code: "missing_statutory_contribution_provider",
+          severity: "error",
+          category: "statutory",
+          message: "No statutory provider is available for employee contribution calculation",
+        });
+      } else if (snapshot?.statutory?.providerKey && text(snapshot.statutory.providerKey).toLowerCase() !== statutoryProviderKey) {
+        addIssue(issues, {
+          code: "statutory_provider_mismatch",
+          severity: "error",
+          category: "statutory",
+          message: "The employee statutory provider does not match the payroll run provider",
+        });
+      } else {
+        const provider = getStatutoryProvider(statutoryProviderKey);
+        if (!provider?.calculateContributions) {
+          addIssue(issues, {
+            code: "unsupported_statutory_contribution_provider",
+            severity: "error",
+            category: "statutory",
+            message: `Statutory contribution calculation is not available for provider ${statutoryProviderKey}`,
+          });
+        } else if (
+          text(options.run.statutoryProviderImplementationVersion)
+          && text(options.run.statutoryProviderImplementationVersion) !== provider.implementationVersion
+        ) {
+          addIssue(issues, {
+            code: "statutory_provider_implementation_mismatch",
+            severity: "error",
+            category: "statutory",
+            message: `Payroll run provider ${options.run.statutoryProviderImplementationVersion} does not match installed provider ${provider.implementationVersion}; publish a current statutory profile version and prepare a new payroll run`,
+          });
+        } else {
+          try {
+            const calculated = provider.calculateContributions({
+              cycleEndDate: text(options.run.cycleEndDate),
+              currency: text(options.run.currency).toUpperCase(),
+              currencyMinorUnits: Number(options.run.currencyMinorUnits),
+              enabledModules,
+              configuration: options.run.statutoryConfigurationSnapshot || {},
+              applicability: snapshot?.statutory?.applicability || {},
+              recurringComponents,
+              oneTimeInputs,
+              payrollDays: { paidDays, unpaidDays, totalDays },
+              employee: {
+                gender: snapshot?.identity?.gender,
+                officeState: text(snapshot?.organization?.officeLocationState),
+                officeCountry: text(snapshot?.organization?.officeLocationCountry),
+              },
+              taxWithholding: enabledModules.includes("income_tax_withholding") ? {
+                taxYear: snapshot?.statutory?.taxDeclaration?.taxYear || taxYearForCycleEnd(text(options.run.cycleEndDate)),
+                taxRegime: snapshot?.statutory?.taxDeclaration?.taxRegime,
+                declarationVersion: snapshot?.statutory?.taxDeclaration?.versionNumber,
+                declarations: snapshot?.statutory?.taxDeclaration?.declarations || {},
+                hasPan: Boolean(text(snapshot?.statutory?.panNumber)),
+                employeeDateOfBirth: dateKey(snapshot?.identity?.dateOfBirth),
+                priorTaxableEarningsMinor: priorTaxHistory.taxableEarningsMinor,
+                priorTaxWithheldMinor: priorTaxHistory.taxWithheldMinor,
+                currentTaxableEarningsMinor,
+                projectedFutureRecurringTaxableEarningsMinor: safeSum(
+                  Array.from({ length: Math.max(0, remainingPayrollPeriods - 1) }, () => scheduledRecurringTaxableEarningsMinor),
+                  "Projected future recurring taxable earnings"
+                ),
+                remainingPayrollPeriods,
+              } : undefined,
+            });
+            statutoryContributions = calculated.lines;
+            for (const issue of calculated.issues) {
+              addIssue(issues, { ...issue, category: "statutory" });
+            }
+          } catch (error: any) {
+            addIssue(issues, {
+              code: "statutory_contribution_calculation_failed",
+              severity: "error",
+              category: "statutory",
+              message: error?.message || "Statutory contribution calculation failed",
+            });
+          }
+        }
+      }
+    }
 
     const recurringByCategory = (category: string) => recurringComponents
       .filter((item) => item.category === category)
@@ -259,17 +456,35 @@ export function buildDraftPayrollResults(options: {
     const arrearsMinor = safeSum(oneTimeByType("arrear"), "Arrears");
     const grossEarningsMinor = safeSum([recurringEarningsMinor, oneTimeEarningsMinor, arrearsMinor], "Gross earnings");
     const recurringDeductionsMinor = safeSum(recurringByCategory("deduction"), "Recurring deductions");
+    const statutoryEmployeeDeductionsMinor = safeSum(
+      statutoryContributions.filter((item) => item.side === "employee_deduction").map((item) => Number(item.amountMinor)),
+      "Statutory employee deductions"
+    );
+    const incomeTaxWithholdingMinor = safeSum(
+      statutoryContributions
+        .filter((item) => item.moduleKey === "income_tax_withholding" && item.side === "employee_deduction")
+        .map((item) => Number(item.amountMinor)),
+      "Income-tax withholding"
+    );
     const oneTimeDeductionsMinor = safeSum(oneTimeByType("deduction"), "One-time deductions");
     const recoveriesMinor = safeSum(oneTimeByType("recovery"), "Recoveries");
-    const totalDeductionsMinor = safeSum([recurringDeductionsMinor, oneTimeDeductionsMinor, recoveriesMinor], "Total deductions");
+    const totalDeductionsMinor = safeSum(
+      [recurringDeductionsMinor, statutoryEmployeeDeductionsMinor, oneTimeDeductionsMinor, recoveriesMinor],
+      "Total deductions"
+    );
     const recurringReimbursementsMinor = safeSum(recurringByCategory("reimbursement"), "Recurring reimbursements");
     const oneTimeReimbursementsMinor = safeSum(oneTimeByType("reimbursement"), "One-time reimbursements");
     const totalReimbursementsMinor = safeSum([recurringReimbursementsMinor, oneTimeReimbursementsMinor], "Total reimbursements");
-    const employerContributionsMinor = safeSum(recurringByCategory("employer_contribution"), "Employer contributions");
-    const taxableEarningsMinor = safeSum([
-      ...recurringComponents.filter((item) => item.category === "earning" && item.taxable).map((item) => Number(item.payableAmountMinor)),
-      ...oneTimeInputs.filter((item) => ["earning", "arrear"].includes(item.inputType) && item.taxable).map((item) => Number(item.amountMinor)),
-    ], "Taxable earnings");
+    const recurringEmployerContributionsMinor = safeSum(recurringByCategory("employer_contribution"), "Recurring employer contributions");
+    const statutoryEmployerContributionsMinor = safeSum(
+      statutoryContributions.filter((item) => item.side === "employer_contribution").map((item) => Number(item.amountMinor)),
+      "Statutory employer contributions"
+    );
+    const employerContributionsMinor = safeSum(
+      [recurringEmployerContributionsMinor, statutoryEmployerContributionsMinor],
+      "Employer contributions"
+    );
+    const taxableEarningsMinor = currentTaxableEarningsMinor;
     const netPayMinor = safeSum([grossEarningsMinor, -totalDeductionsMinor, totalReimbursementsMinor], "Net pay");
     const employerCostMinor = safeSum([grossEarningsMinor, employerContributionsMinor, totalReimbursementsMinor], "Employer cost");
     if (netPayMinor < 0) {
@@ -289,12 +504,16 @@ export function buildDraftPayrollResults(options: {
       arrearsMinor,
       grossEarningsMinor,
       recurringDeductionsMinor,
+      statutoryEmployeeDeductionsMinor,
+      incomeTaxWithholdingMinor,
       oneTimeDeductionsMinor,
       recoveriesMinor,
       totalDeductionsMinor,
       recurringReimbursementsMinor,
       oneTimeReimbursementsMinor,
       totalReimbursementsMinor,
+      recurringEmployerContributionsMinor,
+      statutoryEmployerContributionsMinor,
       employerContributionsMinor,
       taxableEarningsMinor,
       netPayMinor,
@@ -328,6 +547,7 @@ export function buildDraftPayrollResults(options: {
       payrollDays: { paidDays, unpaidDays, totalDays, approvedOvertimeMinutes },
       recurringComponents,
       oneTimeInputs,
+      statutoryContributions,
       totals,
       issues,
       hasErrors: issues.some((issue) => issue.severity === "error"),
@@ -355,7 +575,7 @@ export function buildDraftPayrollResults(options: {
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
     .populate(
-      "createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy calculatedBy",
+      "createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy calculatedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy",
       "name username code role"
     )
     .lean();
@@ -410,6 +630,12 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
       if (oneTimeInputs.length !== Number(run.oneTimeInputCount || 0)) {
         throw generateError("Active one-time input count does not match the payroll run", 409);
       }
+      const priorTaxHistoryByEmployee = await resolvePriorTaxHistoryForRun({
+        company: companyObjectId,
+        run,
+        employees: payrollInputs.map((input) => input.employee),
+        session,
+      });
       const built = buildDraftPayrollResults({
         run,
         payrollInputs,
@@ -417,6 +643,7 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
         oneTimeInputs,
         actorId,
         calculationVersion,
+        priorTaxHistoryByEmployee,
       });
       for (let index = 0; index < built.documents.length; index += 500) {
         await EmployeePayrollResult.insertMany(built.documents.slice(index, index + 500), { session, ordered: true });

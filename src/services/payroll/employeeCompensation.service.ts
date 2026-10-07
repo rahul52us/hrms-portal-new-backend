@@ -233,6 +233,7 @@ export function buildCompensationSnapshot(version: any, overrideInput: any) {
       categorySnapshot: amount.category,
       taxableSnapshot: Boolean(rule.taxableSnapshot),
       prorateOnUnpaidDaysSnapshot: Boolean(rule.prorateOnUnpaidDaysSnapshot),
+      statutoryWageBasesSnapshot: rule.statutoryWageBasesSnapshot || [],
       monthlyAmountMinor: amount.monthlyAmountMinor,
       annualAmountMinor: amount.annualAmountMinor,
       overridden: overrideMap[amount.salaryComponent] !== undefined,

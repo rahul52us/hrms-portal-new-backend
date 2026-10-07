@@ -36,7 +36,7 @@ export const update_office_location_repo = async (id: string, data: any) => {
   return OfficeLocation.findOneAndUpdate(
     { _id: id, deletedAt: null },
     { ...data, updatedAt: new Date() },
-    { new: true }
+    { new: true, runValidators: true }
   );
 };
 

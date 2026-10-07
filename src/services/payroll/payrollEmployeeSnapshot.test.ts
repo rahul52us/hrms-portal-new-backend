@@ -15,6 +15,7 @@ function fixture() {
   const employee = objectId();
   const incompleteEmployee = objectId();
   const earningComponent = objectId();
+  const officeLocation = objectId();
   const run = {
     _id: runId,
     company,
@@ -34,7 +35,7 @@ function fixture() {
       departmentNameSnapshot: "Engineering",
       teamId: objectId(),
       teamNameSnapshot: "Platform",
-      officeLocation: objectId(),
+      officeLocation,
       officeLocationNameSnapshot: "Delhi",
       reportingManager: objectId(),
       reportingManagerNameSnapshot: "Manager One",
@@ -106,7 +107,15 @@ function fixture() {
       monthlyEmployerCostMinor: 5000000,
     },
   }];
-  return { run, payrollInputs, users, banks, profiles, compensationAssignments, actorId };
+  const officeLocations = [{
+    _id: officeLocation,
+    name: "Delhi Office",
+    code: "DEL",
+    city: "New Delhi",
+    state: "Delhi",
+    country: "India",
+  }];
+  return { run, payrollInputs, users, banks, profiles, compensationAssignments, officeLocations, actorId };
 }
 
 function testBuildSnapshotsAndIssues() {
@@ -122,6 +131,8 @@ function testBuildSnapshotsAndIssues() {
   const complete = built.documents[0];
   assert.equal(complete.identity.name, "Asha Sharma");
   assert.equal(complete.organization.departmentName, "Engineering");
+  assert.equal(complete.organization.officeLocationState, "Delhi");
+  assert.equal(complete.organization.officeLocationCode, "DEL");
   assert.equal(complete.bank.accountNumber, "123456789012");
   assert.equal(complete.statutory.panNumber, "ABCDE1234F");
   assert.equal(complete.compensation.assigned, true);
@@ -165,8 +176,33 @@ function testSensitiveListSerialization() {
   assert.equal(serialized.compensation.componentCount, 1);
 }
 
+function testStateStatutoryRequiresOfficeState() {
+  const source = fixture();
+  source.officeLocations = [];
+  const employee = source.payrollInputs[0].employee;
+  const built = buildPayrollEmployeeSnapshots({
+    ...source,
+    statutoryAssignments: [{
+      _id: objectId(),
+      employee,
+      countryCode: "IN",
+      providerKey: "india_standard",
+      providerImplementationVersion: "1.4.0",
+      statutoryProfileVersionNumber: 1,
+      enabledModulesSnapshot: ["professional_tax"],
+      applicability: { professionalTax: true },
+      identifiers: { panNumber: "ABCDE1234F" },
+    }],
+    snapshotVersion: 3,
+  });
+  const employeeSnapshot = built.documents.find((item) => String(item.employee) === String(employee));
+  assert.ok(employeeSnapshot?.issues.some((issue) => issue.code === "missing_office_state_for_state_statutory"));
+  assert.equal(employeeSnapshot?.hasErrors, true);
+}
+
 testBuildSnapshotsAndIssues();
 testSchemaAndVersionedIndex();
 testSensitiveListSerialization();
+testStateStatutoryRequiresOfficeState();
 
 console.log("Payroll employee snapshot versioning, issues, compensation totals, and sensitive serialization tests passed");

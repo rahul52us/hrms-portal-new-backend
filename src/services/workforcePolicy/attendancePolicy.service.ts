@@ -8,6 +8,7 @@ import AttendancePolicyVersion, {
 } from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { normalizeAllowedNetworks } from "../attendance/attendancePunchAccess.utils";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -35,6 +36,21 @@ const DEFAULT_RULES: AttendanceRules = {
     approvalWorkflow: null,
     approvalWorkflowVersion: null,
     approvalWorkflowVersionNumber: null,
+  },
+  officeGeofence: {
+    enabled: false,
+    radiusMeters: 200,
+    validateOn: "punch_in",
+    unavailableAction: "block",
+  },
+  punchNetwork: {
+    enabled: false,
+    allowedNetworks: [],
+    scope: "office_only",
+  },
+  trustedDevice: {
+    enabled: false,
+    scope: "all_punches",
   },
   autoFinalize: {
     enabled: false,
@@ -156,6 +172,67 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
   if (overtimeApprovalRequired && !overtimeEnabled) {
     throw generateError("Enable overtime calculation before requiring overtime approval", 422);
   }
+  const currentOfficeGeofence = base.officeGeofence?.toObject
+    ? base.officeGeofence.toObject()
+    : base.officeGeofence || DEFAULT_RULES.officeGeofence;
+  const officeGeofenceInput = input.officeGeofence || {};
+  const geofenceRadiusMeters = normalizeNumber(
+    officeGeofenceInput.radiusMeters,
+    Number(currentOfficeGeofence.radiusMeters || 200),
+    "Office geofence radius",
+    50
+  );
+  if (geofenceRadiusMeters > 10000) {
+    throw generateError("Office geofence radius cannot exceed 10000 meters", 400);
+  }
+  const geofenceValidateOn = normalizeText(
+    officeGeofenceInput.validateOn || currentOfficeGeofence.validateOn || "punch_in"
+  ).toLowerCase();
+  if (!["punch_in", "punch_in_and_out"].includes(geofenceValidateOn)) {
+    throw generateError("Invalid office geofence punch event", 400);
+  }
+  const geofenceUnavailableAction = normalizeText(
+    officeGeofenceInput.unavailableAction || currentOfficeGeofence.unavailableAction || "block"
+  ).toLowerCase();
+  if (!["block", "allow"].includes(geofenceUnavailableAction)) {
+    throw generateError("Invalid unavailable-location action", 400);
+  }
+  const currentPunchNetwork = base.punchNetwork?.toObject
+    ? base.punchNetwork.toObject()
+    : base.punchNetwork || DEFAULT_RULES.punchNetwork;
+  const punchNetworkInput = input.punchNetwork || {};
+  const punchNetworkEnabled = typeof punchNetworkInput.enabled === "boolean"
+    ? punchNetworkInput.enabled
+    : Boolean(currentPunchNetwork.enabled);
+  let allowedNetworks: string[];
+  try {
+    allowedNetworks = normalizeAllowedNetworks(
+      punchNetworkInput.allowedNetworks === undefined
+        ? currentPunchNetwork.allowedNetworks || []
+        : punchNetworkInput.allowedNetworks
+    );
+  } catch (error: any) {
+    throw generateError(error?.message || "Invalid allowed network", 400);
+  }
+  if (punchNetworkEnabled && !allowedNetworks.length) {
+    throw generateError("Add at least one allowed IP address or CIDR before enabling network restriction", 422);
+  }
+  const punchNetworkScope = normalizeText(
+    punchNetworkInput.scope || currentPunchNetwork.scope || "office_only"
+  ).toLowerCase();
+  if (!["office_only", "all_punches"].includes(punchNetworkScope)) {
+    throw generateError("Invalid punch network scope", 400);
+  }
+  const currentTrustedDevice = base.trustedDevice?.toObject
+    ? base.trustedDevice.toObject()
+    : base.trustedDevice || DEFAULT_RULES.trustedDevice;
+  const trustedDeviceInput = input.trustedDevice || {};
+  const trustedDeviceScope = normalizeText(
+    trustedDeviceInput.scope || currentTrustedDevice.scope || "all_punches"
+  ).toLowerCase();
+  if (!["office_only", "all_punches"].includes(trustedDeviceScope)) {
+    throw generateError("Invalid trusted-device scope", 400);
+  }
 
   return {
     gracePeriodMinutesLate: normalizeNumber(
@@ -193,6 +270,25 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
         overtimeApprovalInput.approvalWorkflowVersionNumber === undefined
           ? currentOvertimeApproval.approvalWorkflowVersionNumber || null
           : Number(overtimeApprovalInput.approvalWorkflowVersionNumber || 0) || null,
+    },
+    officeGeofence: {
+      enabled: typeof officeGeofenceInput.enabled === "boolean"
+        ? officeGeofenceInput.enabled
+        : Boolean(currentOfficeGeofence.enabled),
+      radiusMeters: geofenceRadiusMeters,
+      validateOn: geofenceValidateOn as any,
+      unavailableAction: geofenceUnavailableAction as any,
+    },
+    punchNetwork: {
+      enabled: punchNetworkEnabled,
+      allowedNetworks,
+      scope: punchNetworkScope as any,
+    },
+    trustedDevice: {
+      enabled: typeof trustedDeviceInput.enabled === "boolean"
+        ? trustedDeviceInput.enabled
+        : Boolean(currentTrustedDevice.enabled),
+      scope: trustedDeviceScope as any,
     },
     autoFinalize: {
       enabled: typeof autoFinalizeInput.enabled === "boolean"

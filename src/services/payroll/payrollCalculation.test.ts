@@ -20,6 +20,7 @@ function fixture() {
     category,
     taxable,
     prorateOnUnpaidDays,
+    statutoryWageBases: [],
     monthlyAmountMinor,
     annualAmountMinor: monthlyAmountMinor * 12,
     overridden: false,
@@ -30,6 +31,9 @@ function fixture() {
     periodKey: "2026-09",
     version: 5,
     employeeSnapshotVersion: 2,
+    cycleEndDate: "2026-09-25",
+    statutoryProviderKey: "",
+    statutoryEnabledModules: [] as string[],
     currency: "INR",
     currencyMinorUnits: 2,
     roundingMode: "nearest",
@@ -72,14 +76,25 @@ function fixture() {
         ? "deduction"
         : "reimbursement",
     componentTaxableSnapshot: taxable,
+    componentStatutoryWageBasesSnapshot: [],
     inputType,
     amountMinor,
     reason: `${inputType} reason`,
     reference: `${inputType}-1`,
   });
+  const correctionSourceRun = objectId();
+  const correctionSourceResult = objectId();
+  const arrear = {
+    ...oneTime("arrear", 50000, true),
+    sourceType: "finalized_correction",
+    sourcePayrollRun: correctionSourceRun,
+    sourcePeriodKey: "2026-08",
+    sourceFinalizationVersion: 1,
+    sourceFinalizedResult: correctionSourceResult,
+  };
   const oneTimeInputs = [
     oneTime("earning", 100000, true),
-    oneTime("arrear", 50000, true),
+    arrear,
     oneTime("deduction", 20000),
     oneTime("recovery", 10000),
     oneTime("reimbursement", 30000),
@@ -93,6 +108,11 @@ function testProrationAndTotals() {
   assert.equal(built.errorCount, 0);
   assert.equal(built.warningCount, 1);
   const result = built.documents[0];
+  const routedArrear = result.oneTimeInputs.find((item: any) => item.inputType === "arrear");
+  assert.ok(routedArrear);
+  assert.equal(routedArrear.sourceType, "finalized_correction");
+  assert.equal(routedArrear.sourcePeriodKey, "2026-08");
+  assert.equal(routedArrear.sourceFinalizationVersion, 1);
   assert.equal(result.recurringComponents.find((item: any) => item.componentCode === "BASIC").payableAmountMinor, 2000000);
   assert.equal(result.recurringComponents.find((item: any) => item.componentCode === "ALLOWANCE").payableAmountMinor, 500000);
   assert.equal(result.totals.scheduledEarningsMinor, 3500000);
@@ -127,6 +147,102 @@ function testInvalidSourceBecomesResultIssue() {
   assert.ok(result.issues.some((issue: any) => issue.code === "invalid_payroll_days"));
 }
 
+function testStatutoryContributionsAffectNetPayAndEmployerCost() {
+  const source = fixture();
+  source.run.cycleEndDate = "2026-09-25";
+  source.run.statutoryProviderKey = "india_standard";
+  source.run.statutoryEnabledModules = ["provident_fund"];
+  source.employeeSnapshots[0].statutory = {
+    providerKey: "india_standard",
+    enabledModules: ["provident_fund"],
+    applicability: { providentFund: true, providentFundHigherWages: false, employeesPensionScheme: true },
+  };
+  source.employeeSnapshots[0].compensation.componentAmounts[0].statutoryWageBases = ["provident_fund"];
+  const result = buildDraftPayrollResults({ ...source, calculationVersion: 4 }).documents[0];
+  assert.equal(result.statutoryContributions.length, 4);
+  assert.equal(result.totals.statutoryEmployeeDeductionsMinor, 240000);
+  assert.equal(result.totals.statutoryEmployerContributionsMinor, 250000);
+  assert.equal(result.totals.netPayMinor, 2270000);
+  assert.equal(result.totals.employerCostMinor, 3140000);
+  assert.equal(result.statutoryContributions[0].ruleVersion, "IN_SOCIAL_SECURITY_2025_11");
+}
+
+function testIncomeTaxUsesProjectionAndPriorFinalizedWithholding() {
+  const source = fixture();
+  source.run.statutoryProviderKey = "india_standard";
+  source.run.statutoryEnabledModules = ["income_tax_withholding"];
+  (source.run as any).statutoryConfigurationSnapshot = { incomeTaxDefaultRegime: "new" };
+  source.employeeSnapshots[0].identity.dateOfBirth = "1990-01-01";
+  source.employeeSnapshots[0].statutory = {
+    providerKey: "india_standard",
+    enabledModules: ["income_tax_withholding"],
+    panNumber: "ABCDE1234F",
+    applicability: {},
+    taxDeclaration: {
+      taxYear: "2026-27",
+      versionNumber: 1,
+      taxRegime: "new",
+      declarations: {},
+    },
+  };
+  source.employeeSnapshots[0].compensation.componentAmounts[0].monthlyAmountMinor = 15000000;
+  source.employeeSnapshots[0].compensation.componentAmounts[1].monthlyAmountMinor = 1000000;
+  const priorTaxHistoryByEmployee = new Map([[String(source.payrollInputs[0].employee), {
+    taxableEarningsMinor: 70000000,
+    taxWithheldMinor: 2000000,
+  }]]);
+  const result = buildDraftPayrollResults({
+    ...source,
+    calculationVersion: 5,
+    priorTaxHistoryByEmployee,
+  }).documents[0];
+  const tds = result.statutoryContributions.find((item: any) => item.code === "IN_TDS_SALARY");
+  assert.ok(tds);
+  assert.ok(tds.amountMinor > 0);
+  assert.equal(tds.metadata.priorCurrentEmployerWithholdingMinor, 2000000);
+  assert.equal(result.totals.incomeTaxWithholdingMinor, tds.amountMinor);
+  assert.ok(result.totals.statutoryEmployeeDeductionsMinor >= result.totals.incomeTaxWithholdingMinor);
+}
+
+function testStateStatutoryContributionsUseSnapshottedOfficeState() {
+  const source = fixture();
+  source.run.cycleEndDate = "2026-12-25";
+  source.run.statutoryProviderKey = "india_standard";
+  source.run.statutoryEnabledModules = ["professional_tax", "labour_welfare_fund"];
+  source.employeeSnapshots[0].identity.gender = 1;
+  source.employeeSnapshots[0].organization.officeLocationState = "Karnataka";
+  source.employeeSnapshots[0].organization.officeLocationCountry = "India";
+  source.employeeSnapshots[0].statutory = {
+    providerKey: "india_standard",
+    enabledModules: ["professional_tax", "labour_welfare_fund"],
+    applicability: { professionalTax: true, labourWelfareFund: true },
+  };
+  const result = buildDraftPayrollResults({ ...source, calculationVersion: 6 }).documents[0];
+  assert.equal(result.statutoryContributions.find((item: any) => item.code === "IN_PT_EMPLOYEE")?.amountMinor, 20000);
+  assert.equal(result.statutoryContributions.find((item: any) => item.code === "IN_LWF_EMPLOYEE")?.amountMinor, 5000);
+  assert.equal(result.statutoryContributions.find((item: any) => item.code === "IN_LWF_EMPLOYER")?.amountMinor, 10000);
+  assert.equal(result.totals.statutoryEmployeeDeductionsMinor, 25000);
+  assert.equal(result.totals.statutoryEmployerContributionsMinor, 10000);
+  assert.equal(result.totals.netPayMinor, 2485000);
+  assert.equal(result.totals.employerCostMinor, 2900000);
+}
+
+function testStatutoryProviderVersionMismatchBlocksCalculation() {
+  const source = fixture();
+  source.run.statutoryProviderKey = "india_standard";
+  source.run.statutoryEnabledModules = ["income_tax_withholding"];
+  (source.run as any).statutoryProviderImplementationVersion = "1.2.0";
+  source.employeeSnapshots[0].statutory = {
+    providerKey: "india_standard",
+    enabledModules: ["income_tax_withholding"],
+    panNumber: "ABCDE1234F",
+    applicability: {},
+  };
+  const result = buildDraftPayrollResults({ ...source, calculationVersion: 6 }).documents[0];
+  assert.equal(result.statutoryContributions.length, 0);
+  assert.ok(result.issues.some((issue: any) => issue.code === "statutory_provider_implementation_mismatch" && issue.severity === "error"));
+}
+
 function testSchemaVersioningAndRunDefaults() {
   const built = buildDraftPayrollResults({ ...fixture(), calculationVersion: 3 });
   const document = new EmployeePayrollResult(built.documents[0]);
@@ -151,6 +267,10 @@ function testRoundingModes() {
 
 testProrationAndTotals();
 testInvalidSourceBecomesResultIssue();
+testStatutoryContributionsAffectNetPayAndEmployerCost();
+testIncomeTaxUsesProjectionAndPriorFinalizedWithholding();
+testStateStatutoryContributionsUseSnapshottedOfficeState();
+testStatutoryProviderVersionMismatchBlocksCalculation();
 testSchemaVersioningAndRunDefaults();
 testRoundingModes();
 

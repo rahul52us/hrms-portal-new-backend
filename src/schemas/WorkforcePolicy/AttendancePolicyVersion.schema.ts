@@ -10,6 +10,9 @@ export interface AttendanceRules {
   overtimeEnabled: boolean;
   overtimeStartsAfterMinutes: number;
   overtimeApproval: AttendanceOvertimeApprovalRules;
+  officeGeofence: AttendanceOfficeGeofenceRules;
+  punchNetwork: AttendancePunchNetworkRules;
+  trustedDevice: AttendanceTrustedDeviceRules;
   autoFinalize: AttendanceAutoFinalizeRules;
   regularization: AttendanceRegularizationRules;
 }
@@ -19,6 +22,24 @@ export interface AttendanceOvertimeApprovalRules {
   approvalWorkflow?: mongoose.Types.ObjectId | null;
   approvalWorkflowVersion?: mongoose.Types.ObjectId | null;
   approvalWorkflowVersionNumber?: number | null;
+}
+
+export interface AttendanceOfficeGeofenceRules {
+  enabled: boolean;
+  radiusMeters: number;
+  validateOn: "punch_in" | "punch_in_and_out";
+  unavailableAction: "block" | "allow";
+}
+
+export interface AttendancePunchNetworkRules {
+  enabled: boolean;
+  allowedNetworks: string[];
+  scope: "office_only" | "all_punches";
+}
+
+export interface AttendanceTrustedDeviceRules {
+  enabled: boolean;
+  scope: "office_only" | "all_punches";
 }
 
 export interface AttendanceAutoFinalizeRules {
@@ -88,6 +109,58 @@ const AttendanceRulesSchema = new Schema<AttendanceRules>(
             default: null,
           },
           approvalWorkflowVersionNumber: { type: Number, min: 1, default: null },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
+    officeGeofence: {
+      type: new Schema<AttendanceOfficeGeofenceRules>(
+        {
+          enabled: { type: Boolean, default: false },
+          radiusMeters: { type: Number, min: 50, max: 10000, default: 200 },
+          validateOn: {
+            type: String,
+            enum: ["punch_in", "punch_in_and_out"],
+            default: "punch_in",
+          },
+          unavailableAction: {
+            type: String,
+            enum: ["block", "allow"],
+            default: "block",
+          },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
+    punchNetwork: {
+      type: new Schema<AttendancePunchNetworkRules>(
+        {
+          enabled: { type: Boolean, default: false },
+          allowedNetworks: { type: [{ type: String, trim: true }], default: [] },
+          scope: {
+            type: String,
+            enum: ["office_only", "all_punches"],
+            default: "office_only",
+          },
+        },
+        { _id: false }
+      ),
+      required: true,
+      default: () => ({}),
+    },
+    trustedDevice: {
+      type: new Schema<AttendanceTrustedDeviceRules>(
+        {
+          enabled: { type: Boolean, default: false },
+          scope: {
+            type: String,
+            enum: ["office_only", "all_punches"],
+            default: "all_punches",
+          },
         },
         { _id: false }
       ),

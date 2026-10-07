@@ -23,11 +23,18 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+const trustProxy = String(process.env.TRUST_PROXY || "").trim().toLowerCase();
+if (trustProxy === "true") {
+  app.set("trust proxy", true);
+} else if (/^\d+$/.test(trustProxy)) {
+  app.set("trust proxy", Number(trustProxy));
+}
+
 const corsOptions = {
   origin: "*",
   methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
   credentials: false,
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Attendance-Device-Id"],
 };
 
 app.use(cors(corsOptions));

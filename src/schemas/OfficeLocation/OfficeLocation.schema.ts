@@ -9,6 +9,8 @@ export interface OfficeLocationI extends Document {
   state?: string;
   country?: string;
   pinCode?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   is_active: boolean;
   deletedAt?: Date | null;
   createdAt?: Date;
@@ -44,6 +46,8 @@ const OfficeLocationSchema = new Schema<OfficeLocationI>(
     state: { type: String, trim: true },
     country: { type: String, trim: true },
     pinCode: { type: String, trim: true },
+    latitude: { type: Number, min: -90, max: 90, default: null },
+    longitude: { type: Number, min: -180, max: 180, default: null },
     is_active: {
       type: Boolean,
       default: true,

@@ -1,6 +1,7 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { PAYROLL_ONE_TIME_INPUT_TYPES } from "./PayrollOneTimeInput.schema";
 import { SALARY_COMPONENT_CATEGORIES } from "./SalaryComponent.schema";
+import { SALARY_COMPONENT_STATUTORY_WAGE_BASES } from "./SalaryComponent.schema";
 
 export const PAYROLL_RESULT_ISSUE_SEVERITIES = ["error", "warning"] as const;
 export const PAYROLL_RESULT_ISSUE_CATEGORIES = [
@@ -29,6 +30,7 @@ export interface EmployeePayrollResultI extends Document {
   payrollDays: Record<string, number>;
   recurringComponents: Array<Record<string, unknown>>;
   oneTimeInputs: Array<Record<string, unknown>>;
+  statutoryContributions: Array<Record<string, unknown>>;
   totals: Record<string, number>;
   issues: Array<Record<string, string>>;
   hasErrors: boolean;
@@ -61,6 +63,10 @@ const OrganizationSchema = new Schema(
     teamName: { type: String, trim: true },
     officeLocation: { type: Schema.Types.ObjectId, ref: "OfficeLocation", default: null },
     officeLocationName: { type: String, trim: true },
+    officeLocationCode: { type: String, trim: true, uppercase: true },
+    officeLocationCity: { type: String, trim: true },
+    officeLocationState: { type: String, trim: true },
+    officeLocationCountry: { type: String, trim: true },
   },
   { _id: false }
 );
@@ -83,6 +89,7 @@ const RecurringComponentSchema = new Schema(
     category: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true },
     taxable: { type: Boolean, required: true },
     prorateOnUnpaidDays: { type: Boolean, required: true },
+    statutoryWageBases: { type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }], default: [] },
     overridden: { type: Boolean, required: true },
     scheduledAmountMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     payableAmountMinor: { type: Number, required: true, min: 0, validate: safeInteger },
@@ -99,10 +106,16 @@ const OneTimeInputSchema = new Schema(
     componentName: { type: String, required: true, trim: true },
     category: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true },
     taxable: { type: Boolean, required: true },
+    statutoryWageBases: { type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }], default: [] },
     inputType: { type: String, enum: PAYROLL_ONE_TIME_INPUT_TYPES, required: true },
     amountMinor: { type: Number, required: true, min: 1, validate: safeInteger },
     reason: { type: String, required: true, trim: true },
     reference: { type: String, trim: true },
+    sourceType: { type: String, enum: ["manual", "finalized_correction"], required: true, default: "manual" },
+    sourcePayrollRun: { type: Schema.Types.ObjectId, ref: "PayrollRun", default: null },
+    sourcePeriodKey: { type: String, match: /^\d{4}-(0[1-9]|1[0-2])$/ },
+    sourceFinalizationVersion: { type: Number, min: 1, default: null },
+    sourceFinalizedResult: { type: Schema.Types.ObjectId, ref: "PayrollFinalizedResult", default: null },
   },
   { _id: false }
 );
@@ -116,16 +129,39 @@ const TotalsSchema = new Schema(
     arrearsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     grossEarningsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     recurringDeductionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    statutoryEmployeeDeductionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    incomeTaxWithholdingMinor: { type: Number, required: true, min: 0, default: 0, validate: safeInteger },
     oneTimeDeductionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     recoveriesMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     totalDeductionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     recurringReimbursementsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     oneTimeReimbursementsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     totalReimbursementsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    recurringEmployerContributionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    statutoryEmployerContributionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     employerContributionsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     taxableEarningsMinor: { type: Number, required: true, min: 0, validate: safeInteger },
     netPayMinor: { type: Number, required: true, validate: safeInteger },
     employerCostMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+  },
+  { _id: false }
+);
+
+const StatutoryContributionSchema = new Schema(
+  {
+    providerKey: { type: String, required: true, trim: true, lowercase: true },
+    providerImplementationVersion: { type: String, required: true, trim: true },
+    moduleKey: { type: String, required: true, trim: true },
+    code: { type: String, required: true, trim: true, uppercase: true },
+    name: { type: String, required: true, trim: true },
+    side: { type: String, enum: ["employee_deduction", "employer_contribution"], required: true },
+    wageBaseMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    rateBps: { type: Number, required: true, min: 0, validate: safeInteger },
+    amountMinor: { type: Number, required: true, min: 0, validate: safeInteger },
+    roundingMode: { type: String, enum: ["nearest_major_unit", "ceil_major_unit"], required: true },
+    ruleVersion: { type: String, required: true, trim: true },
+    ruleEffectiveFrom: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+    metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { _id: false }
 );
@@ -156,6 +192,7 @@ const EmployeePayrollResultSchema = new Schema<EmployeePayrollResultI>(
     payrollDays: { type: PayrollDaysSchema, required: true, immutable: true },
     recurringComponents: { type: [RecurringComponentSchema], default: [], immutable: true },
     oneTimeInputs: { type: [OneTimeInputSchema], default: [], immutable: true },
+    statutoryContributions: { type: [StatutoryContributionSchema], default: [], immutable: true },
     totals: { type: TotalsSchema, required: true, immutable: true },
     issues: { type: [IssueSchema], default: [], immutable: true },
     hasErrors: { type: Boolean, required: true, default: false, index: true, immutable: true },

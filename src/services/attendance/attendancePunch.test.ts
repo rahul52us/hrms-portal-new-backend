@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildFinalPunchSession,
+  evaluateOfficeGeofence,
   isPunchOutAllowedForAttendanceDay,
   previousAttendanceDate,
 } from "./attendancePunch.utils";
@@ -88,12 +89,31 @@ function testOvernightPunchOutWindow() {
   );
 }
 
+function testOfficeGeofenceDistance() {
+  const sameOffice = evaluateOfficeGeofence({
+    punch: { latitude: 28.6139, longitude: 77.209 },
+    office: { latitude: 28.6139, longitude: 77.209 },
+    radiusMeters: 100,
+  });
+  assert.equal(sameOffice.distanceMeters, 0);
+  assert.equal(sameOffice.withinGeofence, true);
+
+  const outsideOffice = evaluateOfficeGeofence({
+    punch: { latitude: 28.6139, longitude: 77.209 },
+    office: { latitude: 28.6209, longitude: 77.209 },
+    radiusMeters: 200,
+  });
+  assert.ok(outsideOffice.distanceMeters > 700);
+  assert.equal(outsideOffice.withinGeofence, false);
+}
+
 [
   testLatestPunchOutWins,
   testLegacySessionsCollapseToFirstInAndLastOut,
   testPunchOutRequiresPunchIn,
   testPunchOutAttendanceDayWindow,
   testOvernightPunchOutWindow,
+  testOfficeGeofenceDistance,
 ].forEach((test) => test());
 
-console.log("Attendance punch tests passed (5 tests)");
+console.log("Attendance punch tests passed (6 tests)");

@@ -80,7 +80,7 @@ export function validationDecisionTransition(
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
     .populate(
-      "createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy calculatedBy",
+      "createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy calculatedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy",
       "name username code role"
     )
     .lean();

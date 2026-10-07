@@ -3158,6 +3158,51 @@ export async function getPermissionConfigHandler(req: Request, res: Response) {
   }
 }
 
+export async function getCompanySettingsHandler(req: Request, res: Response) {
+  try {
+    const requester = getRequesterContext(req);
+    ensurePermission(
+      requester,
+      PERMISSION_KEYS.COMPANY_SETTINGS,
+      "You do not have permission to view company settings"
+    );
+    const company: any = await ensureCompanyManagementAccess({
+      actor: requester,
+      requestedCompanyId: requester.companyId,
+      actionLabel: "view company settings",
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        _id: company._id,
+        company_name: company.company_name,
+        companyCode: company.companyCode,
+        companyType: company.companyType,
+        tenantSlug: company.tenantSlug,
+        tenantUrl: company.tenantUrl,
+        customDomain: company.customDomain,
+        companyEmail: company.companyEmail,
+        verified_email_allowed: company.verified_email_allowed,
+        logo: company.logo,
+        registeredAddress: company.registeredAddress || {},
+        bio: company.bio,
+        mobileNo: company.mobileNo,
+        workNo: company.workNo,
+        webLink: company.webLink,
+        primaryThemeColor: company.primaryThemeColor,
+        departments: company.departments || [],
+        is_active: company.is_active,
+      },
+    });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      error: error?.message || "Failed to load company settings",
+    });
+  }
+}
+
 export async function updateRolePermissionsHandler(req: Request, res: Response) {
   try {
     const requester = assertSuperAdminRequester(req);

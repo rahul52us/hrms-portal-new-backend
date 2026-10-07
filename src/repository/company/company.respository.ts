@@ -409,12 +409,17 @@ export const createManagedCompany = async (data: any) => {
       githubLink: data.githubLink || undefined,
       telegramLink: data.telegramLink || undefined,
       otherLinks: data.otherLinks || [],
+      registeredAddress: data.registeredAddress || {},
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
     if (data.logo?.filename && data.logo?.buffer) {
-      const url = await uploadFile(data.logo);
+      const extension = data.logo.type === "image/png" ? "png" : "jpg";
+      const url = await uploadFile({
+        ...data.logo,
+        filename: `company-${company._id}-logo-${new mongoose.Types.ObjectId()}.${extension}`,
+      });
       company.logo = {
         name: data.logo.filename,
         url,
@@ -733,6 +738,7 @@ export const getManagedCompanies = async (data: any) => {
           primaryThemeColor: 1,
           verified_email_allowed: 1,
           logo: 1,
+          registeredAddress: 1,
           bio: 1,
           createdBy: 1,
           activeUser: 1,

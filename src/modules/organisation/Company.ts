@@ -12,12 +12,17 @@ import BankDetails from "../../schemas/User/BankDetails";
 import DocumentDetails from "../../schemas/User/Document";
 import CompanyPolicy from "../../schemas/company/CompanyPolicy";
 import FamilyDetails from "../../schemas/User/FamilyDetails";
-import { deleteFile, uploadFile } from "../../repository/uploadDoc.repository";
+import { uploadFile } from "../../repository/uploadDoc.repository";
 import { statusCode } from "../../config/helper/statusCode";
 import mongoose from "mongoose";
 import companyDetails from "../../schemas/company/companyDetails";
 import { createManagedCompanyValidation } from "../../services/company/utils/validations";
 import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
+import { ensureCompanyManagementAccess } from "../../services/company/utils/activityGuards";
+import {
+  ensurePermission,
+  PERMISSION_KEYS,
+} from "../../services/permissions/permission.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
 
@@ -395,6 +400,25 @@ const updateOrganisationCompany = async (
   next: NextFunction
 ) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      throw generateError("Invalid company id", 400);
+    }
+
+    const actor = {
+      ...(req.bodyData || {}),
+      ...(req.user || {}),
+    };
+    ensurePermission(
+      actor,
+      PERMISSION_KEYS.COMPANY_SETTINGS,
+      "You do not have permission to update company settings"
+    );
+    await ensureCompanyManagementAccess({
+      actor,
+      requestedCompanyId: req.params.id,
+      actionLabel: "update company settings",
+    });
+
     const { error, value } = createManagedCompanyValidation.validate(req.body.companyDetails, {
       abortEarly: false,
       stripUnknown: true,
@@ -464,43 +488,47 @@ const updateOrganisationCompany = async (
         throw generateError(`${customDomain} custom domain is already in use`, 400);
       }
 
+      const logoInput = value.logo;
+      const isLogoEdit = value.isLogoEdit;
+      const validatedCompany = { ...value };
+      delete validatedCompany.logo;
+      delete validatedCompany.isLogoEdit;
+      delete validatedCompany.deletedFiles;
+      delete validatedCompany.companyAdmin;
       const updatePayload: any = {
-        ...value,
+        ...validatedCompany,
         company_name: companyName,
         companyCode,
         tenantSlug,
         tenantUrl: buildTenantUrl(tenantSlug, customDomain),
         customDomain: customDomain || undefined,
         primaryThemeColor,
-        logo: value.logo,
         updatedAt: new Date(),
       };
 
+      if (logoInput && isLogoEdit) {
+        const extension = logoInput.type === "image/png" ? "png" : "jpg";
+        const url = await uploadFile({
+          ...logoInput,
+          filename: `company-${_id}-logo-${new mongoose.Types.ObjectId()}.${extension}`,
+        });
+        updatePayload.logo = {
+          name: logoInput.filename,
+          url,
+          type: logoInput.type,
+        };
+      }
+
+      const updateOperation: any = { $set: updatePayload };
+      if (logoInput === null) {
+        updateOperation.$unset = { logo: 1 };
+      }
+
       const updatedCompany: any = await Company.findByIdAndUpdate(
         _id,
-        { $set: updatePayload },
+        updateOperation,
         { new: true }
       );
-
-      for (const file of req.body.companyDetails.deletedFiles || []) {
-        await deleteFile(file);
-      }
-
-      if (req.body.companyDetails.logo && req.body.companyDetails.logo !== "" && req.body.companyDetails.isLogoEdit) {
-        try {
-          let url = await uploadFile(req.body.companyDetails.logo);
-          updatedCompany.logo = {
-            name: req.body.companyDetails.logo.filename,
-            url: url,
-            type: req.body.companyDetails.logo.type,
-          };
-          await updatedCompany.save();
-        }
-        catch { }
-      } else if (req.body.companyDetails.logo === null) {
-        updatedCompany.logo = undefined;
-        await updatedCompany.save();
-      }
 
       res.status(statusCode.success).send({
         message: "Company has been updated successfully",

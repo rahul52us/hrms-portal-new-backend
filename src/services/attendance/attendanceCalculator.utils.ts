@@ -58,6 +58,21 @@ const DEFAULT_RULES: AttendanceRules = {
     approvalWorkflowVersion: null,
     approvalWorkflowVersionNumber: null,
   },
+  officeGeofence: {
+    enabled: false,
+    radiusMeters: 200,
+    validateOn: "punch_in",
+    unavailableAction: "block",
+  },
+  punchNetwork: {
+    enabled: false,
+    allowedNetworks: [],
+    scope: "office_only",
+  },
+  trustedDevice: {
+    enabled: false,
+    scope: "all_punches",
+  },
   autoFinalize: {
     enabled: false,
     graceMinutes: 1440,

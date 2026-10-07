@@ -4,6 +4,7 @@ import { generateError } from "../../config/Error/functions";
 import BankDetail from "../../schemas/User/BankDetails";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import User from "../../schemas/User/User";
+import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import EmployeeCompensationAssignment from "../../schemas/Payroll/EmployeeCompensationAssignment.schema";
 import PayrollEmployeeInput from "../../schemas/Payroll/PayrollEmployeeInput.schema";
 import PayrollEmployeeSnapshot from "../../schemas/Payroll/PayrollEmployeeSnapshot.schema";
@@ -14,6 +15,7 @@ import {
   resolvePayrollCompany,
   writePayrollAudit,
 } from "./payroll.utils";
+import { resolveEmployeeStatutoryForPayroll } from "./employeeStatutory.service";
 
 export const PAYROLL_COMPENSATION_TOTAL_FIELDS = [
   "monthlyGrossMinor",
@@ -76,6 +78,7 @@ function compensationSnapshot(assignment: any) {
       category: component.categorySnapshot,
       taxable: Boolean(component.taxableSnapshot),
       prorateOnUnpaidDays: Boolean(component.prorateOnUnpaidDaysSnapshot),
+      statutoryWageBases: component.statutoryWageBasesSnapshot || [],
       monthlyAmountMinor: Number(component.monthlyAmountMinor || 0),
       annualAmountMinor: Number(component.annualAmountMinor || 0),
       overridden: Boolean(component.overridden),
@@ -90,13 +93,27 @@ export function buildPayrollEmployeeSnapshots(options: {
   users: any[];
   banks: any[];
   profiles: any[];
+  statutoryAssignments?: any[];
+  taxDeclarations?: any[];
+  taxYear?: string;
   compensationAssignments: any[];
+  officeLocations?: any[];
   actorId: mongoose.Types.ObjectId;
   snapshotVersion: number;
   preparedAt?: Date;
 }) {
   const usersById = new Map(options.users.map((item) => [idString(item._id), item]));
   const profilesByEmployee = new Map(options.profiles.map((item) => [idString(item.user), item]));
+  const statutoryAssignmentsByEmployee = new Map<string, any>();
+  for (const item of options.statutoryAssignments || []) {
+    const key = idString(item.employee);
+    if (!statutoryAssignmentsByEmployee.has(key)) statutoryAssignmentsByEmployee.set(key, item);
+  }
+  const taxDeclarationsByEmployee = new Map<string, any>();
+  for (const item of options.taxDeclarations || []) {
+    const key = idString(item.employee);
+    if (!taxDeclarationsByEmployee.has(key)) taxDeclarationsByEmployee.set(key, item);
+  }
   const banksByEmployee = new Map<string, any[]>();
   for (const bank of options.banks) {
     const key = idString(bank.user);
@@ -107,6 +124,9 @@ export function buildPayrollEmployeeSnapshots(options: {
     const key = idString(assignment.employee);
     if (!assignmentsByEmployee.has(key)) assignmentsByEmployee.set(key, assignment);
   }
+  const officeLocationsById = new Map(
+    (options.officeLocations || []).map((location) => [idString(location._id), location])
+  );
   const preparedAt = options.preparedAt || new Date();
   const compensationTotals = Object.fromEntries(PAYROLL_COMPENSATION_TOTAL_FIELDS.map((field) => [field, 0])) as Record<string, number>;
 
@@ -114,9 +134,12 @@ export function buildPayrollEmployeeSnapshots(options: {
     const employeeId = idString(input.employee);
     const user: any = usersById.get(employeeId);
     const profile: any = profilesByEmployee.get(employeeId);
+    const statutoryAssignment: any = statutoryAssignmentsByEmployee.get(employeeId);
+    const taxDeclaration: any = taxDeclarationsByEmployee.get(employeeId);
     const banks = banksByEmployee.get(employeeId) || [];
     const bank: any = banks[0];
     const assignment: any = assignmentsByEmployee.get(employeeId);
+    const officeLocation: any = officeLocationsById.get(idString(input.officeLocation));
     const issues: Array<Record<string, string>> = [];
 
     if (!user) addIssue(issues, "missing_employee_record", "error", "identity", "Employee record is missing from the company");
@@ -130,10 +153,46 @@ export function buildPayrollEmployeeSnapshots(options: {
       if (!text(bank.ifsc)) addIssue(issues, "missing_bank_ifsc", "warning", "bank", "Bank IFSC is missing");
       if (banks.length > 1) addIssue(issues, "multiple_bank_records", "warning", "bank", "Multiple active bank records exist; the latest record was snapshotted");
     }
-    if (!profile) {
+    const effectiveIdentifiers = statutoryAssignment?.identifiers || {};
+    const legacyIdentifiers = profile?.statutoryDetails || {};
+    const statutoryIdentifiers = statutoryAssignment ? effectiveIdentifiers : legacyIdentifiers;
+    if (!statutoryAssignment && !profile) {
       addIssue(issues, "missing_statutory_profile", "warning", "statutory", "Employee statutory profile is missing");
-    } else if (!text(profile.statutoryDetails?.panNumber)) {
+    } else if (!text(statutoryIdentifiers.panNumber)) {
       addIssue(issues, "missing_pan", "warning", "statutory", "PAN is missing from statutory details");
+    }
+    if (statutoryAssignment?.applicability?.providentFund && !text(effectiveIdentifiers.uan)) {
+      addIssue(issues, "missing_uan", "warning", "statutory", "UAN is missing while provident fund applies");
+    }
+    if (statutoryAssignment?.applicability?.providentFund && !text(effectiveIdentifiers.nameAsPerUan)) {
+      addIssue(issues, "missing_name_as_per_uan", "warning", "statutory", "Name as per UAN is missing while provident fund applies");
+    }
+    if (statutoryAssignment?.applicability?.employeeStateInsurance && !text(effectiveIdentifiers.esiInsuranceNumber)) {
+      addIssue(issues, "missing_esi_number", "warning", "statutory", "ESI insurance number is missing while ESI applies");
+    }
+    if (statutoryAssignment?.applicability?.employeeStateInsurance && !text(effectiveIdentifiers.nameAsPerEsi)) {
+      addIssue(issues, "missing_name_as_per_esi", "warning", "statutory", "Name as per ESIC is missing while ESI applies");
+    }
+    if (
+      (statutoryAssignment?.applicability?.professionalTax || statutoryAssignment?.applicability?.labourWelfareFund)
+      && !text(officeLocation?.state)
+    ) {
+      addIssue(
+        issues,
+        "missing_office_state_for_state_statutory",
+        "error",
+        "statutory",
+        "Office state is required while professional tax or labour welfare fund applies"
+      );
+    }
+    if (statutoryAssignment?.enabledModulesSnapshot?.includes("income_tax_withholding") && !taxDeclaration) {
+      addIssue(
+        issues,
+        "missing_verified_tax_declaration",
+        "warning",
+        "statutory",
+        "No verified tax declaration is available for tax year " + (options.taxYear || "")
+      );
     }
     if (!assignment) {
       addIssue(issues, "missing_compensation_assignment", "error", "compensation", `No compensation assignment is effective on ${options.run.cycleEndDate}`);
@@ -179,6 +238,10 @@ export function buildPayrollEmployeeSnapshots(options: {
         teamName: text(input.teamNameSnapshot),
         officeLocation: input.officeLocation || null,
         officeLocationName: text(input.officeLocationNameSnapshot),
+        officeLocationCode: text(officeLocation?.code).toUpperCase(),
+        officeLocationCity: text(officeLocation?.city),
+        officeLocationState: text(officeLocation?.state),
+        officeLocationCountry: text(officeLocation?.country),
         reportingManager: input.reportingManager || null,
         reportingManagerName: text(input.reportingManagerNameSnapshot),
       },
@@ -191,12 +254,37 @@ export function buildPayrollEmployeeSnapshots(options: {
         ifsc: text(bank?.ifsc).toUpperCase(),
       },
       profileDetails: profile?._id || null,
+      employeeStatutoryAssignment: statutoryAssignment?._id || null,
+      employeeTaxDeclaration: taxDeclaration?._id || null,
       statutory: {
-        aadharNumber: text(profile?.statutoryDetails?.aadharNumber),
-        nameAsPerAadhar: text(profile?.statutoryDetails?.nameAsPerAadhar),
-        panNumber: text(profile?.statutoryDetails?.panNumber).toUpperCase(),
-        nameAsPerPan: text(profile?.statutoryDetails?.nameAsPerPan),
-        nationality: text(profile?.statutoryDetails?.nationality || profile?.personalDetails?.nationality).toLowerCase(),
+        source: statutoryAssignment ? "effective_assignment" : profile ? "legacy_profile" : "missing",
+        countryCode: text(statutoryAssignment?.countryCode).toUpperCase() || undefined,
+        providerKey: text(statutoryAssignment?.providerKey).toLowerCase() || undefined,
+        providerImplementationVersion: text(statutoryAssignment?.providerImplementationVersion) || undefined,
+        statutoryProfileVersionNumber: statutoryAssignment?.statutoryProfileVersionNumber || undefined,
+        enabledModules: statutoryAssignment?.enabledModulesSnapshot || [],
+        effectiveFrom: statutoryAssignment?.effectiveFrom || null,
+        aadharNumber: text(statutoryIdentifiers.aadhaarNumber || statutoryIdentifiers.aadharNumber),
+        nameAsPerAadhar: text(statutoryIdentifiers.nameAsPerAadhaar || statutoryIdentifiers.nameAsPerAadhar),
+        panNumber: text(statutoryIdentifiers.panNumber).toUpperCase(),
+        nameAsPerPan: text(statutoryIdentifiers.nameAsPerPan),
+        uan: text(statutoryIdentifiers.uan),
+        nameAsPerUan: text(statutoryIdentifiers.nameAsPerUan),
+        pfMemberId: text(statutoryIdentifiers.pfMemberId).toUpperCase(),
+        esiInsuranceNumber: text(statutoryIdentifiers.esiInsuranceNumber),
+        nameAsPerEsi: text(statutoryIdentifiers.nameAsPerEsi),
+        nationality: text(statutoryIdentifiers.nationality || profile?.personalDetails?.nationality).toLowerCase(),
+        applicability: statutoryAssignment?.applicability || {},
+        taxDeclaration: taxDeclaration
+          ? {
+              taxYear: taxDeclaration.taxYear,
+              versionNumber: taxDeclaration.versionNumber,
+              taxRegime: taxDeclaration.taxRegime,
+              currency: taxDeclaration.currency,
+              currencyMinorUnits: taxDeclaration.currencyMinorUnits,
+              declarations: taxDeclaration.declarations || {},
+            }
+          : undefined,
       },
       compensationAssignment: assignment?._id || null,
       compensation: compensationSnapshot(assignment),
@@ -248,9 +336,27 @@ export function serializePayrollEmployeeSnapshot(snapshot: any) {
       ifsc: snapshot.bank?.ifsc || "",
     },
     statutory: {
+      source: snapshot.statutory?.source || "missing",
+      countryCode: snapshot.statutory?.countryCode || "",
+      providerKey: snapshot.statutory?.providerKey || "",
+      statutoryProfileVersionNumber: snapshot.statutory?.statutoryProfileVersionNumber || null,
+      effectiveFrom: snapshot.statutory?.effectiveFrom || null,
       panNumberMasked: maskEnd(snapshot.statutory?.panNumber, 3),
       aadharNumberMasked: maskEnd(snapshot.statutory?.aadharNumber),
+      uanMasked: maskEnd(snapshot.statutory?.uan),
+      esiInsuranceNumberMasked: maskEnd(snapshot.statutory?.esiInsuranceNumber),
       nationality: snapshot.statutory?.nationality || "",
+      applicability: snapshot.statutory?.applicability || {},
+      taxDeclaration: snapshot.statutory?.taxDeclaration
+        ? {
+            taxYear: snapshot.statutory.taxDeclaration.taxYear || "",
+            versionNumber: snapshot.statutory.taxDeclaration.versionNumber || null,
+            taxRegime: snapshot.statutory.taxDeclaration.taxRegime || "",
+            currency: snapshot.statutory.taxDeclaration.currency || "",
+            currencyMinorUnits: snapshot.statutory.taxDeclaration.currencyMinorUnits ?? 2,
+            declarations: snapshot.statutory.taxDeclaration.declarations || {},
+          }
+        : null,
     },
     compensation: {
       assigned: Boolean(snapshot.compensation?.assigned),
@@ -272,7 +378,7 @@ export function serializePayrollEmployeeSnapshot(snapshot: any) {
 
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
-    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy", "name username code role")
+    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy", "name username code role")
     .lean();
 }
 
@@ -311,6 +417,9 @@ export async function preparePayrollEmployeeSnapshotsService(req: any, res: Resp
         throw generateError("Payroll employee input count does not match the run snapshot", 409);
       }
       const employeeIds = payrollInputs.map((input) => input.employee);
+      const officeLocationIds = payrollInputs
+        .map((input) => input.officeLocation)
+        .filter((value) => value && mongoose.Types.ObjectId.isValid(String(value)));
       const users: any[] = await User.find({ company: companyObjectId, _id: { $in: employeeIds } })
         .select("_id name username mobileNumber code role gender dateOfBirth joiningDate confirmationDate employmentEndDate")
         .session(session)
@@ -323,6 +432,16 @@ export async function preparePayrollEmployeeSnapshotsService(req: any, res: Resp
         .select("_id user personalDetails.nationality statutoryDetails")
         .session(session)
         .lean();
+      const officeLocations: any[] = await OfficeLocation.find({
+        company: companyObjectId,
+        _id: { $in: officeLocationIds },
+      }).select("_id name code city state country").session(session).lean();
+      const statutory = await resolveEmployeeStatutoryForPayroll(
+        companyObjectId,
+        employeeIds,
+        run.cycleEndDate,
+        session
+      );
       const compensationAssignments: any[] = await EmployeeCompensationAssignment.find({
         company: companyObjectId,
         employee: { $in: employeeIds },
@@ -335,7 +454,11 @@ export async function preparePayrollEmployeeSnapshotsService(req: any, res: Resp
         users,
         banks,
         profiles,
+        statutoryAssignments: statutory.assignments,
+        taxDeclarations: statutory.declarations,
+        taxYear: statutory.taxYear,
         compensationAssignments,
+        officeLocations,
         actorId,
         snapshotVersion,
       });

@@ -50,6 +50,11 @@ import {
   rejectAttendanceOvertimeReviewService,
 } from "../services/attendance/attendanceOvertime.service";
 import {
+  listAttendanceTrustedDevicesService,
+  registerAttendanceTrustedDeviceService,
+  updateAttendanceTrustedDeviceStatusService,
+} from "../services/attendance/attendanceTrustedDevice.service";
+import {
   exportAttendancePayrollService,
   exportAttendanceReportService,
   getAttendanceExceptionsReportService,
@@ -106,6 +111,9 @@ attendanceRouting.get("/payroll/:periodKey/export", exportAttendancePayrollServi
 attendanceRouting.get("/overtime/reviews", listAttendanceOvertimeReviewsService);
 attendanceRouting.post("/overtime/reviews/:reviewId/approve", approveAttendanceOvertimeReviewService);
 attendanceRouting.post("/overtime/reviews/:reviewId/reject", rejectAttendanceOvertimeReviewService);
+attendanceRouting.get("/trusted-devices", listAttendanceTrustedDevicesService);
+attendanceRouting.post("/trusted-devices/register", registerAttendanceTrustedDeviceService);
+attendanceRouting.patch("/trusted-devices/:deviceId/status", updateAttendanceTrustedDeviceStatusService);
 attendanceRouting.get("/regularization/eligibility", getAttendanceRegularizationEligibilityService);
 attendanceRouting.post("/regularization/requests", createAttendanceRegularizationRequestService);
 attendanceRouting.get("/regularization/requests", listAttendanceRegularizationRequestsService);

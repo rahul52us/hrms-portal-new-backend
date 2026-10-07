@@ -60,6 +60,19 @@ export function ensureEmployeeCompensationManager(req: any) {
   );
 }
 
+export function ensureEmployeeStatutoryManager(req: any) {
+  const actor = getPayrollActor(req);
+  const role = normalizePayrollRole(actor?.role);
+  if (!["superadmin", "admin", "hradmin"].includes(role)) {
+    throw generateError("Only company administrators and HR Admin can manage employee statutory data", 403);
+  }
+  ensurePermission(
+    actor,
+    PERMISSION_KEYS.MANAGE_EMPLOYEE_STATUTORY,
+    "You do not have permission to manage employee statutory data"
+  );
+}
+
 export function ensurePayrollRunManager(req: any) {
   const actor = getPayrollActor(req);
   const role = normalizePayrollRole(actor?.role);
@@ -70,6 +83,45 @@ export function ensurePayrollRunManager(req: any) {
     actor,
     PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
     "You do not have permission to manage payroll runs"
+  );
+}
+
+export function ensurePayrollRunApprover(req: any) {
+  const actor = getPayrollActor(req);
+  const role = normalizePayrollRole(actor?.role);
+  if (!['superadmin', 'admin', 'hradmin'].includes(role)) {
+    throw generateError('Only company administrators and HR Admin can approve payroll runs', 403);
+  }
+  ensurePermission(
+    actor,
+    PERMISSION_KEYS.APPROVE_PAYROLL_RUNS,
+    'You do not have permission to approve payroll runs'
+  );
+}
+
+export function ensurePayrollRunFinalizer(req: any) {
+  const actor = getPayrollActor(req);
+  const role = normalizePayrollRole(actor?.role);
+  if (!["superadmin", "admin", "hradmin"].includes(role)) {
+    throw generateError("Only company administrators and HR Admin can finalize payroll runs", 403);
+  }
+  ensurePermission(
+    actor,
+    PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS,
+    "You do not have permission to finalize payroll runs"
+  );
+}
+
+export function ensurePayrollRunReopener(req: any) {
+  const actor = getPayrollActor(req);
+  const role = normalizePayrollRole(actor?.role);
+  if (!["superadmin", "admin", "hradmin"].includes(role)) {
+    throw generateError("Only company administrators and HR Admin can reopen payroll runs", 403);
+  }
+  ensurePermission(
+    actor,
+    PERMISSION_KEYS.REOPEN_PAYROLL_RUNS,
+    "You do not have permission to reopen payroll runs"
   );
 }
 
@@ -120,7 +172,7 @@ export async function resolvePayrollCompany(
 
 export async function writePayrollAudit(options: {
   company: mongoose.Types.ObjectId;
-  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "compensation_import" | "payroll_run" | "payroll_input" | "payslip";
+  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "employee_statutory" | "employee_tax_declaration" | "compensation_import" | "payroll_run" | "payroll_input" | "statutory_profile" | "statutory_filing" | "payslip";
   entityId: mongoose.Types.ObjectId;
   action: string;
   actor: mongoose.Types.ObjectId;
@@ -133,4 +185,3 @@ export async function writePayrollAudit(options: {
   }
   await PayrollAuditLog.create(options);
 }
-

@@ -29,6 +29,33 @@ export interface AttendancePunchSessionI {
   latitude?: number | null;
   longitude?: number | null;
   deviceInfo?: string;
+  punchInLocation?: AttendancePunchLocationI | null;
+  punchOutLocation?: AttendancePunchLocationI | null;
+  punchInAccess?: AttendancePunchAccessI | null;
+  punchOutAccess?: AttendancePunchAccessI | null;
+}
+
+export interface AttendancePunchLocationI {
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracyMeters?: number | null;
+  verificationStatus: "within_geofence" | "unavailable_allowed" | "remote_work_bypass" | "not_required";
+  distanceMeters?: number | null;
+  radiusMeters?: number | null;
+  officeLocation?: mongoose.Types.ObjectId | null;
+  officeLocationNameSnapshot?: string;
+  officeLatitudeSnapshot?: number | null;
+  officeLongitudeSnapshot?: number | null;
+}
+
+export interface AttendancePunchAccessI {
+  clientIp?: string;
+  networkStatus: "not_required" | "allowed" | "remote_work_bypass";
+  matchedNetworkSnapshot?: string;
+  deviceStatus: "not_required" | "trusted" | "remote_work_bypass";
+  trustedDevice?: mongoose.Types.ObjectId | null;
+  deviceIdSuffix?: string;
+  deviceNameSnapshot?: string;
 }
 
 export interface AttendanceRecordI extends Document {
@@ -101,6 +128,26 @@ export interface AttendanceRecordI extends Document {
   updatedAt?: Date;
 }
 
+const AttendancePunchLocationSchema = new Schema<AttendancePunchLocationI>(
+  {
+    latitude: { type: Number, min: -90, max: 90, default: null },
+    longitude: { type: Number, min: -180, max: 180, default: null },
+    accuracyMeters: { type: Number, min: 0, default: null },
+    verificationStatus: {
+      type: String,
+      enum: ["within_geofence", "unavailable_allowed", "remote_work_bypass", "not_required"],
+      required: true,
+    },
+    distanceMeters: { type: Number, min: 0, default: null },
+    radiusMeters: { type: Number, min: 0, default: null },
+    officeLocation: { type: Schema.Types.ObjectId, ref: "OfficeLocation", default: null },
+    officeLocationNameSnapshot: { type: String, trim: true },
+    officeLatitudeSnapshot: { type: Number, min: -90, max: 90, default: null },
+    officeLongitudeSnapshot: { type: Number, min: -180, max: 180, default: null },
+  },
+  { _id: false }
+);
+
 const AttendancePunchSessionSchema = new Schema<AttendancePunchSessionI>(
   {
     punchIn: { type: Date, default: null },
@@ -113,6 +160,54 @@ const AttendancePunchSessionSchema = new Schema<AttendancePunchSessionI>(
     latitude: { type: Number, min: -90, max: 90, default: null },
     longitude: { type: Number, min: -180, max: 180, default: null },
     deviceInfo: { type: String, trim: true },
+    punchInLocation: { type: AttendancePunchLocationSchema, default: null },
+    punchOutLocation: { type: AttendancePunchLocationSchema, default: null },
+    punchInAccess: {
+      type: new Schema<AttendancePunchAccessI>(
+        {
+          clientIp: { type: String, trim: true, default: "" },
+          networkStatus: {
+            type: String,
+            enum: ["not_required", "allowed", "remote_work_bypass"],
+            required: true,
+          },
+          matchedNetworkSnapshot: { type: String, trim: true, default: "" },
+          deviceStatus: {
+            type: String,
+            enum: ["not_required", "trusted", "remote_work_bypass"],
+            required: true,
+          },
+          trustedDevice: { type: Schema.Types.ObjectId, ref: "AttendanceTrustedDevice", default: null },
+          deviceIdSuffix: { type: String, trim: true, default: "" },
+          deviceNameSnapshot: { type: String, trim: true, default: "" },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
+    punchOutAccess: {
+      type: new Schema<AttendancePunchAccessI>(
+        {
+          clientIp: { type: String, trim: true, default: "" },
+          networkStatus: {
+            type: String,
+            enum: ["not_required", "allowed", "remote_work_bypass"],
+            required: true,
+          },
+          matchedNetworkSnapshot: { type: String, trim: true, default: "" },
+          deviceStatus: {
+            type: String,
+            enum: ["not_required", "trusted", "remote_work_bypass"],
+            required: true,
+          },
+          trustedDevice: { type: Schema.Types.ObjectId, ref: "AttendanceTrustedDevice", default: null },
+          deviceIdSuffix: { type: String, trim: true, default: "" },
+          deviceNameSnapshot: { type: String, trim: true, default: "" },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { _id: true }
 );

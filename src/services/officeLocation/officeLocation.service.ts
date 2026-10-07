@@ -87,16 +87,47 @@ const ensureLocationMutationAllowed = (req: any) => {
   ensurePermission(getActor(req), PERMISSION_KEYS.MANAGE_LOCATIONS, "You do not have permission to manage locations");
 };
 
-const normalizeLocationPayload = (body: any) => ({
-  name: String(body?.name || "").trim(),
-  code: String(body?.code || "").trim().toUpperCase(),
-  address: String(body?.address || "").trim(),
-  city: String(body?.city || "").trim(),
-  state: String(body?.state || "").trim(),
-  country: String(body?.country || "").trim(),
-  pinCode: String(body?.pinCode || body?.postalCode || "").trim(),
-  ...(typeof body?.is_active === "boolean" ? { is_active: body.is_active } : {}),
-});
+function optionalCoordinate(body: any, key: "latitude" | "longitude") {
+  if (!Object.prototype.hasOwnProperty.call(body || {}, key)) return undefined;
+  const value = body?.[key];
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw generateError(`${key === "latitude" ? "Latitude" : "Longitude"} must be a number`, 422);
+  }
+  return parsed;
+}
+
+function validateCoordinates(latitude: number | null | undefined, longitude: number | null | undefined) {
+  const hasLatitude = latitude !== null && latitude !== undefined;
+  const hasLongitude = longitude !== null && longitude !== undefined;
+  if (hasLatitude !== hasLongitude) {
+    throw generateError("Latitude and longitude must be provided together", 422);
+  }
+  if (hasLatitude && (Number(latitude) < -90 || Number(latitude) > 90)) {
+    throw generateError("Latitude must be between -90 and 90", 422);
+  }
+  if (hasLongitude && (Number(longitude) < -180 || Number(longitude) > 180)) {
+    throw generateError("Longitude must be between -180 and 180", 422);
+  }
+}
+
+const normalizeLocationPayload = (body: any) => {
+  const latitude = optionalCoordinate(body, "latitude");
+  const longitude = optionalCoordinate(body, "longitude");
+  return {
+    name: String(body?.name || "").trim(),
+    code: String(body?.code || "").trim().toUpperCase(),
+    address: String(body?.address || "").trim(),
+    city: String(body?.city || "").trim(),
+    state: String(body?.state || "").trim(),
+    country: String(body?.country || "").trim(),
+    pinCode: String(body?.pinCode || body?.postalCode || "").trim(),
+    ...(latitude !== undefined ? { latitude } : {}),
+    ...(longitude !== undefined ? { longitude } : {}),
+    ...(typeof body?.is_active === "boolean" ? { is_active: body.is_active } : {}),
+  };
+};
 
 const ensureNoDuplicateLocation = async ({
   company,
@@ -149,6 +180,7 @@ export const createOfficeLocationService = async (
     if (!payload.name || !payload.code || !payload.city) {
       throw generateError("Location name, code, and city are required", 400);
     }
+    validateCoordinates(payload.latitude, payload.longitude);
 
     await ensureCompanyManagementAccess({
       actor: getActor(req),
@@ -210,10 +242,13 @@ export const updateOfficeLocationService = async (
     const payload = normalizeLocationPayload(req.body);
     const nextName = payload.name || existingLocation.name;
     const nextCode = payload.code || existingLocation.code;
+    const nextLatitude = payload.latitude === undefined ? existingLocation.latitude : payload.latitude;
+    const nextLongitude = payload.longitude === undefined ? existingLocation.longitude : payload.longitude;
 
     if (!nextName || !nextCode || !payload.city && !existingLocation.city) {
       throw generateError("Location name, code, and city are required", 400);
     }
+    validateCoordinates(nextLatitude, nextLongitude);
 
     await ensureNoDuplicateLocation({
       company: String(existingLocation.company || ""),

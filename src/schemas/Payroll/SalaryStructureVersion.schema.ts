@@ -1,5 +1,10 @@
 import mongoose, { Document, Schema } from "mongoose";
-import { SALARY_COMPONENT_CATEGORIES, SalaryComponentCategory } from "./SalaryComponent.schema";
+import {
+  SALARY_COMPONENT_CATEGORIES,
+  SALARY_COMPONENT_STATUTORY_WAGE_BASES,
+  SalaryComponentCategory,
+  SalaryComponentStatutoryWageBase,
+} from "./SalaryComponent.schema";
 
 export const SALARY_RULE_TYPES = ["fixed", "percentage", "variable"] as const;
 export const SALARY_VERSION_STATUSES = ["draft", "published", "cancelled"] as const;
@@ -11,6 +16,7 @@ export interface SalaryStructureRuleI {
   categorySnapshot: SalaryComponentCategory;
   taxableSnapshot: boolean;
   prorateOnUnpaidDaysSnapshot: boolean;
+  statutoryWageBasesSnapshot: SalaryComponentStatutoryWageBase[];
   calculationType: (typeof SALARY_RULE_TYPES)[number];
   monthlyAmountMinor?: number | null;
   percentageBps?: number | null;
@@ -51,6 +57,11 @@ const SalaryStructureRuleSchema = new Schema<SalaryStructureRuleI>(
     categorySnapshot: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true },
     taxableSnapshot: { type: Boolean, required: true },
     prorateOnUnpaidDaysSnapshot: { type: Boolean, required: true },
+    statutoryWageBasesSnapshot: {
+      type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }],
+      required: true,
+      default: [],
+    },
     calculationType: { type: String, enum: SALARY_RULE_TYPES, required: true },
     monthlyAmountMinor: { type: Number, min: 0, default: null },
     percentageBps: { type: Number, min: 1, max: 10000, default: null },

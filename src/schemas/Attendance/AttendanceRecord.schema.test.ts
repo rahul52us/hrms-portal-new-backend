@@ -56,9 +56,50 @@ function testOvertimeApprovalValues() {
   assert.ok(record({ overtimeApprovalStatus: "ignored" }).validateSync()?.errors.overtimeApprovalStatus);
 }
 
+function testPunchLocationEvidence() {
+  assert.equal(
+    record({
+      punchSessions: [{
+        punchIn: new Date(),
+        source: "web",
+        punchInLocation: {
+          latitude: 28.6139,
+          longitude: 77.209,
+          accuracyMeters: 15,
+          verificationStatus: "within_geofence",
+          distanceMeters: 12,
+          radiusMeters: 200,
+          officeLocation: new mongoose.Types.ObjectId(),
+          officeLocationNameSnapshot: "Delhi Head Office",
+          officeLatitudeSnapshot: 28.6139,
+          officeLongitudeSnapshot: 77.209,
+        },
+        punchInAccess: {
+          clientIp: "10.20.4.5",
+          networkStatus: "allowed",
+          matchedNetworkSnapshot: "10.20.0.0/16",
+          deviceStatus: "trusted",
+          trustedDevice: new mongoose.Types.ObjectId(),
+          deviceIdSuffix: "1234abcd",
+          deviceNameSnapshot: "Windows browser",
+        },
+      }],
+    }).validateSync(),
+    undefined
+  );
+  assert.ok(record({
+    punchSessions: [{
+      punchIn: new Date(),
+      source: "web",
+      punchInLocation: { verificationStatus: "outside" },
+    }],
+  }).validateSync()?.errors["punchSessions.0.punchInLocation.verificationStatus"]);
+}
+
 testOptionalEnumDefaults();
 testValidEnumValues();
 testInvalidEnumValues();
 testOvertimeApprovalValues();
+testPunchLocationEvidence();
 
 console.log("AttendanceRecord schema tests passed");

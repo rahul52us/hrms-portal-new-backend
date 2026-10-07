@@ -52,6 +52,7 @@ function testPayloadNormalization() {
     category: "earning",
     taxable: true,
     prorateOnUnpaidDays: false,
+    statutoryWageBases: [],
     displayOrder: 2,
   });
 }
@@ -64,6 +65,7 @@ function testCategoryNormalizationAndPermissions() {
     taxable: true,
   });
   assert.equal(deduction.taxable, false);
+  assert.deepEqual(deduction.statutoryWageBases, []);
   assert.equal(getDefaultPermissionsForRole("admin").view_payroll, true);
   assert.equal(getDefaultPermissionsForRole("hradmin").manage_payroll_configuration, true);
   assert.equal(getDefaultPermissionsForRole("hr").view_payroll, false);

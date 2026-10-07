@@ -10,6 +10,8 @@ export const PAYROLL_RUN_STATUSES = [
   "cancelled",
 ] as const;
 
+export const PAYROLL_PAYOUT_STATUSES = ["not_started", "processing", "paid"] as const;
+
 export interface PayrollRunI extends Document {
   company: mongoose.Types.ObjectId;
   companyNameSnapshot: string;
@@ -56,6 +58,33 @@ export interface PayrollRunI extends Document {
   lastCalculationReason?: string;
   calculatedAt?: Date | null;
   calculatedBy?: mongoose.Types.ObjectId | null;
+  reviewSubmittedAt?: Date | null;
+  reviewSubmittedBy?: mongoose.Types.ObjectId | null;
+  reviewSubmissionReason?: string;
+  reviewCalculationVersion: number;
+  reviewDecision?: "approved" | "returned" | null;
+  reviewDecidedAt?: Date | null;
+  reviewDecidedBy?: mongoose.Types.ObjectId | null;
+  reviewDecisionReason?: string;
+  finalizationVersion: number;
+  finalizedResultCount: number;
+  finalizedTotals: Record<string, number>;
+  finalizedAt?: Date | null;
+  finalizedBy?: mongoose.Types.ObjectId | null;
+  finalizationReason?: string;
+  payoutStatus: (typeof PAYROLL_PAYOUT_STATUSES)[number];
+  reopenedAt?: Date | null;
+  reopenedBy?: mongoose.Types.ObjectId | null;
+  reopenReason?: string;
+  reopenedFromFinalizationVersion: number;
+  statutoryProfile?: mongoose.Types.ObjectId | null;
+  statutoryProfileVersion?: mongoose.Types.ObjectId | null;
+  statutoryProfileVersionNumber: number;
+  statutoryCountryCode?: string;
+  statutoryProviderKey?: string;
+  statutoryProviderImplementationVersion?: string;
+  statutoryEnabledModules: string[];
+  statutoryConfigurationSnapshot: Record<string, string>;
   currency: string;
   currencyMinorUnits: number;
   payFrequency: "monthly";
@@ -127,6 +156,33 @@ const PayrollRunSchema = new Schema<PayrollRunI>(
     lastCalculationReason: { type: String, trim: true, maxlength: 500 },
     calculatedAt: { type: Date, default: null },
     calculatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    reviewSubmittedAt: { type: Date, default: null },
+    reviewSubmittedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    reviewSubmissionReason: { type: String, trim: true, minlength: 3, maxlength: 500 },
+    reviewCalculationVersion: { type: Number, required: true, min: 0, default: 0 },
+    reviewDecision: { type: String, enum: ["approved", "returned"], default: undefined },
+    reviewDecidedAt: { type: Date, default: null },
+    reviewDecidedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    reviewDecisionReason: { type: String, trim: true, minlength: 3, maxlength: 500 },
+    finalizationVersion: { type: Number, required: true, min: 0, default: 0 },
+    finalizedResultCount: { type: Number, required: true, min: 0, default: 0 },
+    finalizedTotals: { type: Schema.Types.Mixed, required: true, default: {} },
+    finalizedAt: { type: Date, default: null },
+    finalizedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    finalizationReason: { type: String, trim: true, minlength: 3, maxlength: 500 },
+    payoutStatus: { type: String, enum: PAYROLL_PAYOUT_STATUSES, required: true, default: "not_started", index: true },
+    reopenedAt: { type: Date, default: null },
+    reopenedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    reopenReason: { type: String, trim: true, minlength: 3, maxlength: 500 },
+    reopenedFromFinalizationVersion: { type: Number, required: true, min: 0, default: 0 },
+    statutoryProfile: { type: Schema.Types.ObjectId, ref: "StatutoryProfile", default: null, immutable: true },
+    statutoryProfileVersion: { type: Schema.Types.ObjectId, ref: "StatutoryProfileVersion", default: null, immutable: true },
+    statutoryProfileVersionNumber: { type: Number, required: true, min: 0, default: 0, immutable: true },
+    statutoryCountryCode: { type: String, trim: true, uppercase: true, match: /^[A-Z]{2}$/, immutable: true },
+    statutoryProviderKey: { type: String, trim: true, lowercase: true, immutable: true },
+    statutoryProviderImplementationVersion: { type: String, trim: true, immutable: true },
+    statutoryEnabledModules: { type: [{ type: String, trim: true }], required: true, default: [], immutable: true },
+    statutoryConfigurationSnapshot: { type: Schema.Types.Mixed, required: true, default: {}, immutable: true },
     currency: { type: String, required: true, trim: true, uppercase: true, match: /^[A-Z]{3}$/, immutable: true },
     currencyMinorUnits: { type: Number, required: true, min: 0, max: 3, immutable: true },
     payFrequency: { type: String, enum: ["monthly"], required: true, immutable: true },

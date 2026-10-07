@@ -64,6 +64,9 @@ function testSchemaAndSnapshots() {
   assert.equal(data.calculationStatus, "pending");
   assert.equal(data.calculationVersion, 0);
   assert.equal(data.payrollResultCount, 0);
+  assert.equal(data.reviewCalculationVersion, 0);
+  assert.equal(data.finalizationVersion, 0);
+  assert.equal(data.finalizedResultCount, 0);
 }
 
 function testRequiredFieldsAndIndexes() {
@@ -80,6 +83,10 @@ function testRequiredFieldsAndIndexes() {
 function testPermissions() {
   assert.equal(getDefaultPermissionsForRole("admin")[PERMISSION_KEYS.MANAGE_PAYROLL_RUNS], true);
   assert.equal(getDefaultPermissionsForRole("hradmin")[PERMISSION_KEYS.MANAGE_PAYROLL_RUNS], true);
+  assert.equal(getDefaultPermissionsForRole("admin")[PERMISSION_KEYS.APPROVE_PAYROLL_RUNS], true);
+  assert.equal(getDefaultPermissionsForRole("hradmin")[PERMISSION_KEYS.APPROVE_PAYROLL_RUNS], true);
+  assert.equal(getDefaultPermissionsForRole("admin")[PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS], true);
+  assert.equal(getDefaultPermissionsForRole("hradmin")[PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS], true);
   assert.equal(getDefaultPermissionsForRole("hr")[PERMISSION_KEYS.MANAGE_PAYROLL_RUNS], false);
 }
 

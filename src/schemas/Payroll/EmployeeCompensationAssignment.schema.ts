@@ -1,5 +1,10 @@
 import mongoose, { Document, Schema } from "mongoose";
-import { SALARY_COMPONENT_CATEGORIES, SalaryComponentCategory } from "./SalaryComponent.schema";
+import {
+  SALARY_COMPONENT_CATEGORIES,
+  SALARY_COMPONENT_STATUTORY_WAGE_BASES,
+  SalaryComponentCategory,
+  SalaryComponentStatutoryWageBase,
+} from "./SalaryComponent.schema";
 
 export interface EmployeeCompensationOverrideI {
   salaryComponent: mongoose.Types.ObjectId;
@@ -15,6 +20,7 @@ export interface EmployeeCompensationAmountI {
   categorySnapshot: SalaryComponentCategory;
   taxableSnapshot: boolean;
   prorateOnUnpaidDaysSnapshot: boolean;
+  statutoryWageBasesSnapshot: SalaryComponentStatutoryWageBase[];
   monthlyAmountMinor: number;
   annualAmountMinor: number;
   overridden: boolean;
@@ -68,6 +74,11 @@ const ComponentAmountSchema = new Schema<EmployeeCompensationAmountI>(
     categorySnapshot: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true },
     taxableSnapshot: { type: Boolean, required: true },
     prorateOnUnpaidDaysSnapshot: { type: Boolean, required: true },
+    statutoryWageBasesSnapshot: {
+      type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }],
+      required: true,
+      default: [],
+    },
     monthlyAmountMinor: { type: Number, required: true, min: 0 },
     annualAmountMinor: { type: Number, required: true, min: 0 },
     overridden: { type: Boolean, required: true, default: false },

@@ -3,7 +3,9 @@ import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import SalaryComponent, {
   SALARY_COMPONENT_CATEGORIES,
+  SALARY_COMPONENT_STATUTORY_WAGE_BASES,
   SalaryComponentCategory,
+  SalaryComponentStatutoryWageBase,
 } from "../../schemas/Payroll/SalaryComponent.schema";
 import PayrollAuditLog, { PAYROLL_AUDIT_ENTITY_TYPES } from "../../schemas/Payroll/PayrollAuditLog.schema";
 import {
@@ -18,6 +20,9 @@ const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$
 
 export function normalizeSalaryComponentPayload(body: any) {
   const category = String(body?.category || "").trim().toLowerCase() as SalaryComponentCategory;
+  const requestedWageBases = Array.isArray(body?.statutoryWageBases)
+    ? body.statutoryWageBases.map((value: unknown) => String(value || "").trim().toLowerCase()).filter(Boolean)
+    : [];
   return {
     name: String(body?.name || "").trim(),
     code: String(body?.code || "").trim().toUpperCase(),
@@ -25,6 +30,9 @@ export function normalizeSalaryComponentPayload(body: any) {
     category,
     taxable: ["earning", "reimbursement"].includes(category) && body?.taxable === true,
     prorateOnUnpaidDays: body?.prorateOnUnpaidDays !== false,
+    statutoryWageBases: category === "earning"
+      ? [...new Set(requestedWageBases)] as SalaryComponentStatutoryWageBase[]
+      : [],
     displayOrder: Number.isFinite(Number(body?.displayOrder)) ? Number(body.displayOrder) : 0,
   };
 }
@@ -45,6 +53,12 @@ export function validateSalaryComponentPayload(payload: ReturnType<typeof normal
   if (!Number.isInteger(payload.displayOrder) || payload.displayOrder < 0) {
     throw generateError("Display order must be a non-negative whole number", 422);
   }
+  const unsupportedWageBases = payload.statutoryWageBases.filter(
+    (value) => !SALARY_COMPONENT_STATUTORY_WAGE_BASES.includes(value)
+  );
+  if (unsupportedWageBases.length) {
+    throw generateError(`Unsupported statutory wage base: ${unsupportedWageBases.join(", ")}`, 422);
+  }
 }
 
 function componentSnapshot(component: any) {
@@ -55,6 +69,7 @@ function componentSnapshot(component: any) {
     category: component.category,
     taxable: Boolean(component.taxable),
     prorateOnUnpaidDays: Boolean(component.prorateOnUnpaidDays),
+    statutoryWageBases: component.statutoryWageBases || [],
     status: component.status,
     displayOrder: component.displayOrder || 0,
   };
@@ -192,6 +207,7 @@ export const updateSalaryComponentService = async (req: any, res: Response, next
     component.description = payload.description;
     component.taxable = payload.taxable;
     component.prorateOnUnpaidDays = payload.prorateOnUnpaidDays;
+    component.statutoryWageBases = payload.statutoryWageBases;
     component.displayOrder = payload.displayOrder;
     component.updatedBy = actorId;
     const session = await mongoose.startSession();

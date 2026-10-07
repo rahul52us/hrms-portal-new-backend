@@ -65,6 +65,60 @@ import {
   decidePayrollValidationIssueService,
   listPayrollValidationIssuesService,
 } from "../services/payroll/payrollValidation.service";
+import {
+  decidePayrollRunReviewService,
+  submitPayrollRunForReviewService,
+} from "../services/payroll/payrollRunReview.service";
+import {
+  finalizePayrollRunService,
+  listFinalizedPayrollResultsService,
+} from "../services/payroll/payrollFinalization.service";
+import { reopenPayrollRunService } from "../services/payroll/payrollReopen.service";
+import {
+  exportPayrollStatutoryReportService,
+  getPayrollStatutoryReportService,
+} from "../services/payroll/payrollStatutoryReport.service";
+import {
+  exportEpfoEcrService,
+  getEpfoEcrReadinessService,
+} from "../services/payroll/payrollStatutoryFiling.service";
+import {
+  createEsicMonthlyFilingInputService,
+  exportEsicMonthlyContributionService,
+  getEsicMonthlyReadinessService,
+} from "../services/payroll/payrollEsicFiling.service";
+import {
+  createPayrollAdjustmentService,
+  getPayrollAdjustmentOptionsService,
+} from "../services/payroll/payrollAdjustment.service";
+import {
+  cancelStatutoryProfileDraftService,
+  createStatutoryProfileService,
+  createStatutoryProfileVersionService,
+  getStatutoryProfileService,
+  listStatutoryProfilesService,
+  listStatutoryProvidersService,
+  publishStatutoryProfileVersionService,
+  updateStatutoryProfileDraftService,
+} from "../services/payroll/statutoryProfile.service";
+import {
+  cancelEmployeeTaxDeclarationDraftService,
+  cancelFutureEmployeeStatutoryAssignmentService,
+  createEmployeeStatutoryAssignmentService,
+  createEmployeeTaxDeclarationService,
+  getEmployeeStatutoryService,
+  listEmployeeStatutoryService,
+  reviewEmployeeTaxDeclarationService,
+  submitEmployeeTaxDeclarationService,
+  updateEmployeeTaxDeclarationService,
+} from "../services/payroll/employeeStatutory.service";
+import {
+  downloadMyPayrollPayslipService,
+  downloadPayrollPayslipService,
+  issuePayrollPayslipsService,
+  listMyPayrollPayslipsService,
+  listPayrollPayslipsService,
+} from "../services/payroll/payrollPayslip.service";
 
 const payrollRouting = express.Router();
 const compensationImport = multer({
@@ -84,6 +138,23 @@ payrollRouting.post("/components/:componentId/archive", archiveSalaryComponentSe
 payrollRouting.post("/components/:componentId/restore", restoreSalaryComponentService);
 payrollRouting.get("/settings", getPayrollSettingsService);
 payrollRouting.patch("/settings", updatePayrollSettingsService);
+payrollRouting.get("/statutory/providers", listStatutoryProvidersService);
+payrollRouting.get("/statutory/profiles", listStatutoryProfilesService);
+payrollRouting.post("/statutory/profiles", createStatutoryProfileService);
+payrollRouting.get("/statutory/profiles/:profileId", getStatutoryProfileService);
+payrollRouting.patch("/statutory/profiles/:profileId/versions/:versionId", updateStatutoryProfileDraftService);
+payrollRouting.post("/statutory/profiles/:profileId/versions", createStatutoryProfileVersionService);
+payrollRouting.post("/statutory/profiles/:profileId/versions/:versionId/publish", publishStatutoryProfileVersionService);
+payrollRouting.post("/statutory/profiles/:profileId/versions/:versionId/cancel", cancelStatutoryProfileDraftService);
+payrollRouting.get("/statutory/employees", listEmployeeStatutoryService);
+payrollRouting.get("/statutory/employees/:employeeId", getEmployeeStatutoryService);
+payrollRouting.post("/statutory/employee-assignments", createEmployeeStatutoryAssignmentService);
+payrollRouting.post("/statutory/employee-assignments/:assignmentId/cancel", cancelFutureEmployeeStatutoryAssignmentService);
+payrollRouting.post("/statutory/tax-declarations", createEmployeeTaxDeclarationService);
+payrollRouting.patch("/statutory/tax-declarations/:declarationId", updateEmployeeTaxDeclarationService);
+payrollRouting.post("/statutory/tax-declarations/:declarationId/submit", submitEmployeeTaxDeclarationService);
+payrollRouting.post("/statutory/tax-declarations/:declarationId/review", reviewEmployeeTaxDeclarationService);
+payrollRouting.post("/statutory/tax-declarations/:declarationId/cancel", cancelEmployeeTaxDeclarationDraftService);
 payrollRouting.get("/structures", listSalaryStructuresService);
 payrollRouting.post("/structures/preview", previewSalaryStructureService);
 payrollRouting.post("/structures", createSalaryStructureService);
@@ -95,6 +166,8 @@ payrollRouting.post("/structures/:structureId/versions/:versionId/cancel", cance
 payrollRouting.post("/structures/:structureId/archive", archiveSalaryStructureService);
 payrollRouting.post("/structures/:structureId/restore", restoreSalaryStructureService);
 payrollRouting.get("/compensation/me", getMyCompensationService);
+payrollRouting.get("/payslips/me", listMyPayrollPayslipsService);
+payrollRouting.get("/payslips/me/:payslipId/download", downloadMyPayrollPayslipService);
 payrollRouting.get("/compensation/employees", listCompensationEmployeesService);
 payrollRouting.get("/compensation/employees/:employeeId", getEmployeeCompensationHistoryService);
 payrollRouting.post("/compensation/preview", previewEmployeeCompensationService);
@@ -114,6 +187,23 @@ payrollRouting.get("/runs/:runId/employee-snapshots", listPayrollEmployeeSnapsho
 payrollRouting.post("/runs/:runId/prepare-employee-snapshots", preparePayrollEmployeeSnapshotsService);
 payrollRouting.get("/runs/:runId/results", listDraftPayrollResultsService);
 payrollRouting.post("/runs/:runId/calculate", calculateDraftPayrollService);
+payrollRouting.post("/runs/:runId/submit-review", submitPayrollRunForReviewService);
+payrollRouting.post("/runs/:runId/review-decision", decidePayrollRunReviewService);
+payrollRouting.post("/runs/:runId/finalize", finalizePayrollRunService);
+payrollRouting.get("/runs/:runId/finalized-results", listFinalizedPayrollResultsService);
+payrollRouting.post("/runs/:runId/payslips/issue", issuePayrollPayslipsService);
+payrollRouting.get("/runs/:runId/payslips", listPayrollPayslipsService);
+payrollRouting.get("/runs/:runId/payslips/:payslipId/download", downloadPayrollPayslipService);
+payrollRouting.get("/runs/:runId/statutory-report", getPayrollStatutoryReportService);
+payrollRouting.get("/runs/:runId/statutory-report/export", exportPayrollStatutoryReportService);
+payrollRouting.get("/runs/:runId/statutory-filings/epfo-ecr", getEpfoEcrReadinessService);
+payrollRouting.get("/runs/:runId/statutory-filings/epfo-ecr/export", exportEpfoEcrService);
+payrollRouting.get("/runs/:runId/statutory-filings/esic-monthly", getEsicMonthlyReadinessService);
+payrollRouting.get("/runs/:runId/statutory-filings/esic-monthly/export", exportEsicMonthlyContributionService);
+payrollRouting.post("/runs/:runId/statutory-filings/esic-monthly/employee-inputs", createEsicMonthlyFilingInputService);
+payrollRouting.post("/runs/:runId/reopen", reopenPayrollRunService);
+payrollRouting.get("/runs/:runId/finalized-results/:resultId/adjustment-options", getPayrollAdjustmentOptionsService);
+payrollRouting.post("/runs/:runId/finalized-results/:resultId/adjustments", createPayrollAdjustmentService);
 payrollRouting.get("/runs/:runId/validation", listPayrollValidationIssuesService);
 payrollRouting.post("/runs/:runId/validation/:resultId/issues/:issueCode/decision", decidePayrollValidationIssueService);
 payrollRouting.get("/runs/:runId/one-time-inputs", listPayrollOneTimeInputsService);
@@ -123,4 +213,3 @@ payrollRouting.get("/runs/:runId", getPayrollRunService);
 payrollRouting.get("/audit", listPayrollAuditLogsService);
 
 export default payrollRouting;
-

@@ -4,6 +4,36 @@ export interface PunchSessionValue {
   [key: string]: any;
 }
 
+export interface CoordinatePoint {
+  latitude: number;
+  longitude: number;
+}
+
+export function distanceBetweenCoordinatesMeters(from: CoordinatePoint, to: CoordinatePoint) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadiusMeters = 6_371_000;
+  const latitudeDelta = radians(to.latitude - from.latitude);
+  const longitudeDelta = radians(to.longitude - from.longitude);
+  const fromLatitude = radians(from.latitude);
+  const toLatitude = radians(to.latitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDelta / 2) ** 2;
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+export function evaluateOfficeGeofence(options: {
+  punch: CoordinatePoint;
+  office: CoordinatePoint;
+  radiusMeters: number;
+}) {
+  const distanceMeters = distanceBetweenCoordinatesMeters(options.punch, options.office);
+  return {
+    distanceMeters: Math.round(distanceMeters),
+    withinGeofence: distanceMeters <= options.radiusMeters,
+  };
+}
+
 function validDate(value: Date | string | null | undefined) {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);

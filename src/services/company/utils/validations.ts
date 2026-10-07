@@ -7,6 +7,20 @@ import {
 const DEFAULT_THEME_COLOR = "#2563EB";
 const HEX_COLOR_PATTERN = /^#(?:[0-9A-Fa-f]{3}){1,2}$/;
 const PHONE_PATTERN = /^[0-9+()\-\s]{7,20}$/;
+const SUPPORTED_LOGO_TYPES = ["image/png", "image/jpeg"];
+const MAX_LOGO_BASE64_LENGTH = 2_800_000;
+
+const optionalAddressField = (maximum: number) =>
+  Joi.string().trim().max(maximum).allow("", null).default("");
+
+const registeredAddressSchema = Joi.object({
+  addressLine1: optionalAddressField(200),
+  addressLine2: optionalAddressField(200),
+  city: optionalAddressField(100),
+  state: optionalAddressField(100),
+  postalCode: optionalAddressField(20),
+  country: optionalAddressField(100),
+}).default({});
 
 const companyAdminSchema = Joi.object({
   create: Joi.boolean().default(false),
@@ -93,12 +107,26 @@ export const createManagedCompanyValidation = Joi.object({
   githubLink: Joi.string().trim().allow("", null).default(""),
   telegramLink: Joi.string().trim().allow("", null).default(""),
   otherLinks: Joi.array().items(Joi.string().trim()).default([]),
+  registeredAddress: registeredAddressSchema,
   logo: Joi.alternatives()
     .try(
       Joi.object({
-        buffer: Joi.any().required(),
+        buffer: Joi.string()
+          .max(MAX_LOGO_BASE64_LENGTH)
+          .pattern(/^data:image\/(?:png|jpeg);base64,[a-z0-9+/=]+$/i)
+          .required()
+          .messages({
+            "string.max": "Company logo cannot exceed 2 MB",
+            "string.pattern.base": "Company logo content must be a PNG or JPEG image",
+          }),
         filename: Joi.string().required(),
-        type: Joi.string().allow("", null).default(""),
+        type: Joi.string()
+          .valid(...SUPPORTED_LOGO_TYPES)
+          .required()
+          .messages({
+            "any.only": "Company logo must be a PNG or JPEG image",
+            "any.required": "Company logo file type is required",
+          }),
       }),
       Joi.object({
         file: Joi.array().max(0).default([]),
@@ -106,5 +134,7 @@ export const createManagedCompanyValidation = Joi.object({
       Joi.object().max(0)
     )
     .allow(null),
+  isLogoEdit: Joi.boolean().optional(),
+  deletedFiles: Joi.array().items(Joi.string()).optional(),
   companyAdmin: companyAdminSchema,
 });

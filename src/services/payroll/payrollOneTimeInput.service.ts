@@ -111,6 +111,7 @@ export function buildPayrollOneTimeInputDocument(options: {
     componentCodeSnapshot: options.component.code,
     componentCategorySnapshot: options.component.category,
     componentTaxableSnapshot: Boolean(options.component.taxable),
+    componentStatutoryWageBasesSnapshot: options.component.statutoryWageBases || [],
     inputType: options.inputType,
     amountMinor: options.amountMinor,
     currency: options.run.currency,
@@ -118,6 +119,7 @@ export function buildPayrollOneTimeInputDocument(options: {
     reason: options.reason,
     reference: options.reference,
     idempotencyKey: options.idempotencyKey,
+    sourceType: "manual" as const,
     status: "active" as const,
     createdBy: options.actorId,
   };
@@ -141,7 +143,7 @@ function sameIdempotentPayload(existing: any, payload: {
 
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
-    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy", "name username code role")
+    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy", "name username code role")
     .lean();
 }
 

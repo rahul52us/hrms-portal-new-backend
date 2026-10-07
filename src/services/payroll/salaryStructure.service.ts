@@ -176,6 +176,7 @@ async function normalizeRules(options: {
       categorySnapshot: component.category,
       taxableSnapshot: Boolean(component.taxable),
       prorateOnUnpaidDaysSnapshot: Boolean(component.prorateOnUnpaidDays),
+      statutoryWageBasesSnapshot: component.statutoryWageBases || [],
       calculationType,
       monthlyAmountMinor: calculationType === "percentage" ? null : monthlyAmountMinor,
       percentageBps: calculationType === "percentage" ? percentageBps : null,

@@ -11,6 +11,7 @@ import {
   resolvePayrollCompany,
   writePayrollAudit,
 } from "./payroll.utils";
+import { resolveCompanyStatutorySnapshot } from "./statutoryProfile.service";
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -34,6 +35,7 @@ export function buildPayrollRunDocument(options: {
   input: any;
   actorId: mongoose.Types.ObjectId;
   reason: string;
+  statutorySnapshot?: Record<string, any> | null;
 }) {
   const settings = options.company?.payrollSettings || {};
   return {
@@ -82,6 +84,20 @@ export function buildPayrollRunDocument(options: {
     payrollResultErrorCount: 0,
     payrollResultWarningCount: 0,
     payrollResultTotals: {},
+    reviewCalculationVersion: 0,
+    finalizationVersion: 0,
+    finalizedResultCount: 0,
+    finalizedTotals: {},
+    payoutStatus: "not_started" as const,
+    reopenedFromFinalizationVersion: 0,
+    statutoryProfile: options.statutorySnapshot?.statutoryProfile || null,
+    statutoryProfileVersion: options.statutorySnapshot?.statutoryProfileVersion || null,
+    statutoryProfileVersionNumber: Number(options.statutorySnapshot?.statutoryProfileVersionNumber || 0),
+    statutoryCountryCode: options.statutorySnapshot?.statutoryCountryCode || undefined,
+    statutoryProviderKey: options.statutorySnapshot?.statutoryProviderKey || undefined,
+    statutoryProviderImplementationVersion: options.statutorySnapshot?.statutoryProviderImplementationVersion || undefined,
+    statutoryEnabledModules: options.statutorySnapshot?.statutoryEnabledModules || [],
+    statutoryConfigurationSnapshot: options.statutorySnapshot?.statutoryConfigurationSnapshot || {},
     currency: text(settings.currency || "INR").toUpperCase(),
     currencyMinorUnits: Number(settings.currencyMinorUnits ?? 2),
     payFrequency: "monthly" as const,
@@ -96,7 +112,10 @@ export function buildPayrollRunDocument(options: {
 
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
-    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy", "name username code role")
+    .populate(
+      "createdBy attendanceLockedBy attendanceInputsPreparedBy employeeSnapshotsPreparedBy calculatedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy",
+      "name username code role"
+    )
     .lean();
 }
 
@@ -123,7 +142,7 @@ export async function listPayrollRunsService(req: any, res: Response, next: Next
         .sort({ periodKey: -1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate("createdBy attendanceLockedBy", "name username code role")
+        .populate("createdBy attendanceLockedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy", "name username code role")
         .lean(),
       PayrollRun.countDocuments(match),
     ]);
@@ -215,8 +234,9 @@ export async function createPayrollRunService(req: any, res: Response, next: Nex
           .session(session)
           .lean();
         if (!company) throw generateError("Company not found", 404);
+        const statutorySnapshot = await resolveCompanyStatutorySnapshot(companyObjectId, input.cycleEndDate, session);
         const [run]: any[] = await PayrollRun.create(
-          [buildPayrollRunDocument({ company, input, actorId, reason })],
+          [buildPayrollRunDocument({ company, input, actorId, reason, statutorySnapshot })],
           { session }
         );
         await writePayrollAudit({
@@ -231,6 +251,8 @@ export async function createPayrollRunService(req: any, res: Response, next: Nex
             attendancePayrollInput: input._id,
             attendancePayrollInputVersion: input.version,
             attendancePeriodVersion: input.attendancePeriodVersion,
+            statutoryProfileVersion: statutorySnapshot?.statutoryProfileVersion || null,
+            statutoryProviderKey: statutorySnapshot?.statutoryProviderKey || null,
           },
         }, session);
         runId = run._id;

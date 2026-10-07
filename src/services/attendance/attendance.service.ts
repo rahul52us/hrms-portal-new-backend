@@ -8,13 +8,20 @@ import AttendanceRecordRevision from "../../schemas/Attendance/AttendanceRecordR
 import AttendanceRegularizationRequest from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import RemoteWorkRequest from "../../schemas/Request/RemoteWorkRequest.schema";
+import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import User from "../../schemas/User/User";
 import { calculateAttendance } from "./attendanceCalculator.utils";
 import {
   buildFinalPunchSession,
+  evaluateOfficeGeofence,
   isPunchOutAllowedForAttendanceDay,
   previousAttendanceDate,
 } from "./attendancePunch.utils";
+import { matchAllowedNetwork, requestClientIp } from "./attendancePunchAccess.utils";
+import {
+  resolveAttendanceTrustedDevice,
+  touchAttendanceTrustedDevice,
+} from "./attendanceTrustedDevice.service";
 import { resolveEmployeeDayContext } from "./employeeDayContext.service";
 import { parseAttendanceDate } from "./employeeDayContext.utils";
 import { assertAttendanceDateWritable } from "./attendancePeriod.service";
@@ -211,16 +218,285 @@ function punchLocation(body: any) {
   if ((latitude === null) !== (longitude === null)) {
     throw generateError("Latitude and longitude must be provided together", 422);
   }
-  return { latitude, longitude };
+  const accuracyMeters = body?.accuracyMeters === undefined || body?.accuracyMeters === null || body?.accuracyMeters === ""
+    ? null
+    : Number(body.accuracyMeters);
+  if (accuracyMeters !== null && (!Number.isFinite(accuracyMeters) || accuracyMeters < 0)) {
+    throw generateError("Location accuracy must be a non-negative number", 422);
+  }
+  return { latitude, longitude, accuracyMeters };
 }
 
-function sessionPayload(req: any, now: Date) {
+type PunchEvent = "punch_in" | "punch_out";
+
+function normalizedOfficeGeofenceRules(rules: any) {
+  const source = rules?.officeGeofence || {};
+  const configuredRadius = Number(source.radiusMeters);
+  return {
+    enabled: source.enabled === true,
+    radiusMeters: Number.isFinite(configuredRadius)
+      ? Math.min(10000, Math.max(50, configuredRadius))
+      : 200,
+    validateOn: source.validateOn === "punch_in_and_out" ? "punch_in_and_out" : "punch_in",
+    unavailableAction: source.unavailableAction === "allow" ? "allow" : "block",
+  } as const;
+}
+
+function geofenceAppliesToEvent(config: any, event: PunchEvent) {
+  return Boolean(
+    config.enabled &&
+      !config.remoteWorkBypass &&
+      (event === "punch_in" || config.validateOn === "punch_in_and_out")
+  );
+}
+
+function normalizedPunchAccessRules(rules: any) {
+  const network = rules?.punchNetwork || {};
+  const device = rules?.trustedDevice || {};
+  return {
+    network: {
+      enabled: network.enabled === true,
+      allowedNetworks: Array.isArray(network.allowedNetworks) ? network.allowedNetworks : [],
+      scope: network.scope === "all_punches" ? "all_punches" : "office_only",
+    },
+    device: {
+      enabled: device.enabled === true,
+      scope: device.scope === "office_only" ? "office_only" : "all_punches",
+    },
+  } as const;
+}
+
+function accessControlApplies(control: { enabled: boolean; scope: string }, remoteWorkBypass: boolean) {
+  return control.enabled && !(remoteWorkBypass && control.scope === "office_only");
+}
+
+async function resolvePunchAccess(options: {
+  req: any;
+  companyId: mongoose.Types.ObjectId;
+  employeeId: mongoose.Types.ObjectId;
+  rules: any;
+  remoteWorkBypass: boolean;
+}) {
+  const rules = normalizedPunchAccessRules(options.rules);
+  const clientIp = requestClientIp(options.req);
+  const networkApplies = accessControlApplies(rules.network, options.remoteWorkBypass);
+  const networkMatch = networkApplies
+    ? matchAllowedNetwork(clientIp, rules.network.allowedNetworks)
+    : { allowed: true, clientIp, matchedNetwork: "" };
+  const deviceApplies = accessControlApplies(rules.device, options.remoteWorkBypass);
+  const requestedDeviceId = options.req?.body?.deviceId || options.req?.headers?.["x-attendance-device-id"];
+  const deviceResolution = deviceApplies
+    ? await resolveAttendanceTrustedDevice({
+        companyId: options.companyId,
+        employeeId: options.employeeId,
+        deviceId: requestedDeviceId,
+      })
+    : { status: "not_required" as const, device: null };
+  const networkReason = networkApplies && !networkMatch.allowed
+    ? clientIp
+      ? `Your current network (${clientIp}) is not allowed for attendance punches.`
+      : "The server could not determine your network address. Ask an administrator to verify TRUST_PROXY configuration."
+    : "";
+  const deviceReason = deviceApplies && deviceResolution.status !== "trusted"
+    ? deviceResolution.status === "pending"
+      ? "This browser is waiting for HR approval."
+      : deviceResolution.status === "revoked"
+        ? "This browser has been revoked. Contact HR to trust it again."
+        : deviceResolution.status === "invalid"
+          ? "This browser has an invalid attendance device identifier."
+          : deviceResolution.status === "missing"
+            ? "This browser does not have an attendance device identifier."
+            : "This browser is not registered for attendance."
+    : "";
+  const evidence = rules.network.enabled || rules.device.enabled
+    ? {
+        clientIp,
+        networkStatus: rules.network.enabled
+          ? networkApplies
+            ? "allowed"
+            : "remote_work_bypass"
+          : "not_required",
+        matchedNetworkSnapshot: networkMatch.matchedNetwork,
+        deviceStatus: rules.device.enabled
+          ? deviceApplies
+            ? "trusted"
+            : "remote_work_bypass"
+          : "not_required",
+        trustedDevice: optionalObjectId(deviceResolution.device?._id),
+        deviceIdSuffix: text(deviceResolution.device?.deviceIdSuffix),
+        deviceNameSnapshot: text(deviceResolution.device?.deviceName),
+      }
+    : null;
+  return {
+    rules,
+    network: {
+      enabled: rules.network.enabled,
+      applies: networkApplies,
+      allowed: networkMatch.allowed,
+      scope: rules.network.scope,
+      clientIp,
+      reason: networkReason,
+    },
+    trustedDevice: {
+      enabled: rules.device.enabled,
+      applies: deviceApplies,
+      status: deviceResolution.status,
+      scope: rules.device.scope,
+      reason: deviceReason,
+    },
+    evidence,
+    device: deviceResolution.device,
+    blockedReason: networkReason || deviceReason,
+  };
+}
+
+function assertPunchAccess(access: any) {
+  if (!access.blockedReason) return;
+  throw generateError(access.blockedReason, 403);
+}
+
+function serializePunchAccess(access: any) {
+  return {
+    network: access.network,
+    trustedDevice: access.trustedDevice,
+    blockedReason: access.blockedReason,
+  };
+}
+
+async function resolveOfficeGeofence(options: {
+  companyId: mongoose.Types.ObjectId;
+  rules: any;
+  officeLocationId: unknown;
+  remoteWorkBypass: boolean;
+}) {
+  const rules = normalizedOfficeGeofenceRules(options.rules);
+  const base = {
+    ...rules,
+    remoteWorkBypass: options.remoteWorkBypass,
+    officeLocation: null as any,
+    setupError: "",
+  };
+  if (!rules.enabled || options.remoteWorkBypass) return base;
+
+  const officeLocationId = optionalObjectId(options.officeLocationId);
+  if (!officeLocationId) {
+    return { ...base, setupError: "Office geofence is enabled, but you do not have an assigned office location." };
+  }
+  const officeLocation = await OfficeLocation.findOne({
+    _id: officeLocationId,
+    company: options.companyId,
+    deletedAt: null,
+    is_active: true,
+  })
+    .select("_id name code latitude longitude")
+    .lean();
+  if (!officeLocation) {
+    return { ...base, setupError: "Your assigned office location is inactive or unavailable." };
+  }
+  const hasLatitude = officeLocation.latitude !== null && officeLocation.latitude !== undefined;
+  const hasLongitude = officeLocation.longitude !== null && officeLocation.longitude !== undefined;
+  const latitude = Number(officeLocation.latitude);
+  const longitude = Number(officeLocation.longitude);
+  if (!hasLatitude || !hasLongitude || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return {
+      ...base,
+      officeLocation,
+      setupError: `Office coordinates are not configured for ${officeLocation.name}.`,
+    };
+  }
+  return { ...base, officeLocation: { ...officeLocation, latitude, longitude } };
+}
+
+function serializeOfficeGeofence(config: any) {
+  return {
+    enabled: config.enabled,
+    radiusMeters: config.radiusMeters,
+    validateOn: config.validateOn,
+    unavailableAction: config.unavailableAction,
+    collectOnPunchIn: geofenceAppliesToEvent(config, "punch_in"),
+    collectOnPunchOut: geofenceAppliesToEvent(config, "punch_out"),
+    officeLocationName: text(config.officeLocation?.name),
+    setupError: config.setupError || "",
+    remoteWorkBypass: config.remoteWorkBypass === true,
+  };
+}
+
+function verifyPunchLocation(options: {
+  req: any;
+  event: PunchEvent;
+  geofence: any;
+}) {
+  const location = punchLocation(options.req.body || {});
+  const applies = geofenceAppliesToEvent(options.geofence, options.event);
+  if (!applies) {
+    if (options.geofence.enabled && options.geofence.remoteWorkBypass) {
+      return {
+        ...location,
+        verificationStatus: "remote_work_bypass" as const,
+        radiusMeters: options.geofence.radiusMeters,
+        officeLocation: optionalObjectId(options.geofence.officeLocation?._id),
+        officeLocationNameSnapshot: text(options.geofence.officeLocation?.name),
+        officeLatitudeSnapshot: options.geofence.officeLocation?.latitude ?? null,
+        officeLongitudeSnapshot: options.geofence.officeLocation?.longitude ?? null,
+      };
+    }
+    return location.latitude !== null
+      ? { ...location, verificationStatus: "not_required" as const }
+      : null;
+  }
+  if (options.geofence.setupError) {
+    throw generateError(options.geofence.setupError, 422);
+  }
+  if (location.latitude === null || location.longitude === null) {
+    if (options.geofence.unavailableAction === "allow") {
+      return {
+        ...location,
+        verificationStatus: "unavailable_allowed" as const,
+        radiusMeters: options.geofence.radiusMeters,
+        officeLocation: optionalObjectId(options.geofence.officeLocation?._id),
+        officeLocationNameSnapshot: text(options.geofence.officeLocation?.name),
+        officeLatitudeSnapshot: options.geofence.officeLocation?.latitude ?? null,
+        officeLongitudeSnapshot: options.geofence.officeLocation?.longitude ?? null,
+      };
+    }
+    throw generateError("Location access is required to punch. Allow browser location access and try again.", 422);
+  }
+  const result = evaluateOfficeGeofence({
+    punch: { latitude: location.latitude, longitude: location.longitude },
+    office: {
+      latitude: options.geofence.officeLocation.latitude,
+      longitude: options.geofence.officeLocation.longitude,
+    },
+    radiusMeters: options.geofence.radiusMeters,
+  });
+  if (!result.withinGeofence) {
+    throw generateError(
+      `You are ${result.distanceMeters} meters from ${options.geofence.officeLocation.name}. Punching requires you to be within ${options.geofence.radiusMeters} meters.`,
+      403
+    );
+  }
+  return {
+    ...location,
+    verificationStatus: "within_geofence" as const,
+    distanceMeters: result.distanceMeters,
+    radiusMeters: options.geofence.radiusMeters,
+    officeLocation: optionalObjectId(options.geofence.officeLocation._id),
+    officeLocationNameSnapshot: text(options.geofence.officeLocation.name),
+    officeLatitudeSnapshot: options.geofence.officeLocation.latitude,
+    officeLongitudeSnapshot: options.geofence.officeLocation.longitude,
+  };
+}
+
+function sessionPayload(req: any, now: Date, punchInLocation: any, punchInAccess: any) {
   const location = punchLocation(req.body || {});
   return {
     punchIn: now,
     punchOut: null,
     source: "web" as const,
-    ...location,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    punchInLocation,
+    punchInAccess,
     deviceInfo: text(req.body?.deviceInfo || req.headers?.["user-agent"]).slice(0, 500),
   };
 }
@@ -386,6 +662,38 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
     const todayHasPunchIn = record?.punchSessions?.some(
       (session: any) => Boolean(session?.punchIn)
     );
+    const actionRecord = effectiveRecord?.punchSessions?.some((session: any) => Boolean(session?.punchIn))
+      ? effectiveRecord
+      : null;
+    const actionContext = actionRecord
+      ? await resolveEmployeeDayContext({
+          companyId: actor.companyId,
+          employeeId: actor.employeeId,
+          attendanceDate: actionRecord.attendanceDate,
+        })
+      : context;
+    const actionRules = actionRecord
+      ? await calculationRules(actionRecord, actionContext)
+      : context.policies?.attendancePolicy?.version?.rules || {};
+    const geofence = await resolveOfficeGeofence({
+      companyId: actor.companyId,
+      rules: actionRules,
+      officeLocationId: actionRecord?.officeLocation || actionContext.organizationAssignment?.officeLocation,
+      remoteWorkBypass: actionRecord
+        ? actionRecord.workModeSource === "remote_work_request"
+        : Boolean(remoteWorkAuthorization),
+    });
+    const punchAccess = await resolvePunchAccess({
+      req,
+      companyId: actor.companyId,
+      employeeId: actor.employeeId,
+      rules: actionRules,
+      remoteWorkBypass: actionRecord
+        ? actionRecord.workModeSource === "remote_work_request"
+        : Boolean(remoteWorkAuthorization),
+    });
+    const blocksPunchIn = geofenceAppliesToEvent(geofence, "punch_in") && Boolean(geofence.setupError);
+    const blocksPunchOut = geofenceAppliesToEvent(geofence, "punch_out") && Boolean(geofence.setupError);
     return res.status(200).json({
       success: true,
       data: {
@@ -405,6 +713,8 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
           warnings: context.warnings,
         },
         remoteWorkAuthorization,
+        officeGeofence: serializeOfficeGeofence(geofence),
+        punchAccess: serializePunchAccess(punchAccess),
         actions: {
           canPunchIn: Boolean(
             !activeRecord &&
@@ -412,12 +722,16 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
               record?.state !== "finalized" &&
               !record?.leaveRequest &&
               context.policies?.attendancePolicy?.version &&
-              context.policies?.workSchedule?.version
+              context.policies?.workSchedule?.version &&
+              !blocksPunchIn &&
+              !punchAccess.blockedReason
           ),
           canPunchOut: Boolean(
             effectivePunchIn &&
               effectiveRecord?.state !== "finalized" &&
-              !effectiveRecord?.leaveRequest
+              !effectiveRecord?.leaveRequest &&
+              !blocksPunchOut &&
+              !punchAccess.blockedReason
           ),
         },
       },
@@ -476,7 +790,22 @@ export async function punchInService(req: any, res: Response, next: NextFunction
       );
     }
 
-    const session = sessionPayload(req, now);
+    const geofence = await resolveOfficeGeofence({
+      companyId: actor.companyId,
+      rules: context.policies?.attendancePolicy?.version?.rules || {},
+      officeLocationId: context.organizationAssignment?.officeLocation,
+      remoteWorkBypass: Boolean(remoteWorkAuthorization),
+    });
+    const punchInLocation = verifyPunchLocation({ req, event: "punch_in", geofence });
+    const punchAccess = await resolvePunchAccess({
+      req,
+      companyId: actor.companyId,
+      employeeId: actor.employeeId,
+      rules: context.policies?.attendancePolicy?.version?.rules || {},
+      remoteWorkBypass: Boolean(remoteWorkAuthorization),
+    });
+    assertPunchAccess(punchAccess);
+    const session = sessionPayload(req, now, punchInLocation, punchAccess.evidence);
     let mutated: any;
     if (existing) {
       mutated = await AttendanceRecord.findOneAndUpdate(
@@ -530,6 +859,9 @@ export async function punchInService(req: any, res: Response, next: NextFunction
       }
     }
     const calculated = await calculateAndPersist(mutated, context);
+    if (punchAccess.device?._id) {
+      await touchAttendanceTrustedDevice(punchAccess.device._id, punchAccess.network.clientIp).catch(() => undefined);
+    }
     await appendPunchRevision({ record: calculated, actorId: actor.employeeId, operation: "punch_in", occurredAt: now });
     return res.status(201).json({ success: true, data: calculated, message: "Punched in" });
   } catch (error) {
@@ -581,6 +913,22 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
       employeeId: actor.employeeId,
       attendanceDate: record.attendanceDate,
     });
+    const attendanceRules = await calculationRules(record, context);
+    const geofence = await resolveOfficeGeofence({
+      companyId: actor.companyId,
+      rules: attendanceRules,
+      officeLocationId: record.officeLocation || context.organizationAssignment?.officeLocation,
+      remoteWorkBypass: record.workModeSource === "remote_work_request",
+    });
+    const punchOutLocation = verifyPunchLocation({ req, event: "punch_out", geofence });
+    const punchAccess = await resolvePunchAccess({
+      req,
+      companyId: actor.companyId,
+      employeeId: actor.employeeId,
+      rules: attendanceRules,
+      remoteWorkBypass: record.workModeSource === "remote_work_request",
+    });
+    assertPunchAccess(punchAccess);
     const mutated = await AttendanceRecord.findOneAndUpdate(
       {
         _id: record._id,
@@ -591,7 +939,11 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
       },
       {
         $set: {
-          punchSessions: [punchUpdate.session],
+          punchSessions: [{
+            ...punchUpdate.session,
+            ...(punchOutLocation ? { punchOutLocation } : {}),
+            ...(punchAccess.evidence ? { punchOutAccess: punchAccess.evidence } : {}),
+          }],
           source: "punch",
           updatedBy: actor.employeeId,
         },
@@ -604,6 +956,9 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
     );
     if (!mutated) throw generateError("Attendance changed while punching out. Refresh and try again", 409);
     const calculated = await calculateAndPersist(mutated, context);
+    if (punchAccess.device?._id) {
+      await touchAttendanceTrustedDevice(punchAccess.device._id, punchAccess.network.clientIp).catch(() => undefined);
+    }
     await appendPunchRevision({
       record: calculated,
       actorId: actor.employeeId,

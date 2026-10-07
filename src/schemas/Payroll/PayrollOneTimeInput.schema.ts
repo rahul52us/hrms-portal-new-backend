@@ -1,5 +1,10 @@
 import mongoose, { Document, Schema } from "mongoose";
-import { SALARY_COMPONENT_CATEGORIES, SalaryComponentCategory } from "./SalaryComponent.schema";
+import {
+  SALARY_COMPONENT_CATEGORIES,
+  SALARY_COMPONENT_STATUTORY_WAGE_BASES,
+  SalaryComponentCategory,
+  SalaryComponentStatutoryWageBase,
+} from "./SalaryComponent.schema";
 
 export const PAYROLL_ONE_TIME_INPUT_TYPES = [
   "earning",
@@ -10,6 +15,8 @@ export const PAYROLL_ONE_TIME_INPUT_TYPES = [
 ] as const;
 
 export type PayrollOneTimeInputType = (typeof PAYROLL_ONE_TIME_INPUT_TYPES)[number];
+export const PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES = ["manual", "finalized_correction"] as const;
+export type PayrollOneTimeInputSourceType = (typeof PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES)[number];
 
 export interface PayrollOneTimeInputI extends Document {
   company: mongoose.Types.ObjectId;
@@ -23,6 +30,7 @@ export interface PayrollOneTimeInputI extends Document {
   componentCodeSnapshot: string;
   componentCategorySnapshot: SalaryComponentCategory;
   componentTaxableSnapshot: boolean;
+  componentStatutoryWageBasesSnapshot: SalaryComponentStatutoryWageBase[];
   inputType: PayrollOneTimeInputType;
   amountMinor: number;
   currency: string;
@@ -30,6 +38,11 @@ export interface PayrollOneTimeInputI extends Document {
   reason: string;
   reference?: string;
   idempotencyKey: string;
+  sourceType: PayrollOneTimeInputSourceType;
+  sourcePayrollRun?: mongoose.Types.ObjectId | null;
+  sourcePeriodKey?: string;
+  sourceFinalizationVersion?: number | null;
+  sourceFinalizedResult?: mongoose.Types.ObjectId | null;
   status: "active" | "cancelled";
   createdBy: mongoose.Types.ObjectId;
   cancelledAt?: Date | null;
@@ -52,6 +65,12 @@ const PayrollOneTimeInputSchema = new Schema<PayrollOneTimeInputI>(
     componentCodeSnapshot: { type: String, required: true, trim: true, uppercase: true, immutable: true },
     componentCategorySnapshot: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true, immutable: true },
     componentTaxableSnapshot: { type: Boolean, required: true, immutable: true },
+    componentStatutoryWageBasesSnapshot: {
+      type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }],
+      required: true,
+      default: [],
+      immutable: true,
+    },
     inputType: { type: String, enum: PAYROLL_ONE_TIME_INPUT_TYPES, required: true, index: true, immutable: true },
     amountMinor: {
       type: Number,
@@ -68,6 +87,34 @@ const PayrollOneTimeInputSchema = new Schema<PayrollOneTimeInputI>(
     reason: { type: String, required: true, trim: true, minlength: 3, maxlength: 500, immutable: true },
     reference: { type: String, trim: true, maxlength: 100, immutable: true },
     idempotencyKey: { type: String, required: true, trim: true, minlength: 8, maxlength: 100, immutable: true },
+    sourceType: { type: String, enum: PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES, required: true, default: "manual", index: true, immutable: true },
+    sourcePayrollRun: {
+      type: Schema.Types.ObjectId,
+      ref: "PayrollRun",
+      default: null,
+      required: function(this: PayrollOneTimeInputI) { return this.sourceType === "finalized_correction"; },
+      immutable: true,
+    },
+    sourcePeriodKey: {
+      type: String,
+      match: /^\d{4}-(0[1-9]|1[0-2])$/,
+      required: function(this: PayrollOneTimeInputI) { return this.sourceType === "finalized_correction"; },
+      immutable: true,
+    },
+    sourceFinalizationVersion: {
+      type: Number,
+      min: 1,
+      default: null,
+      required: function(this: PayrollOneTimeInputI) { return this.sourceType === "finalized_correction"; },
+      immutable: true,
+    },
+    sourceFinalizedResult: {
+      type: Schema.Types.ObjectId,
+      ref: "PayrollFinalizedResult",
+      default: null,
+      required: function(this: PayrollOneTimeInputI) { return this.sourceType === "finalized_correction"; },
+      immutable: true,
+    },
     status: { type: String, enum: ["active", "cancelled"], required: true, default: "active", index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
     cancelledAt: { type: Date, default: null },
@@ -80,6 +127,7 @@ const PayrollOneTimeInputSchema = new Schema<PayrollOneTimeInputI>(
 PayrollOneTimeInputSchema.index({ company: 1, payrollRun: 1, idempotencyKey: 1 }, { unique: true });
 PayrollOneTimeInputSchema.index({ company: 1, payrollRun: 1, status: 1, createdAt: -1 });
 PayrollOneTimeInputSchema.index({ company: 1, payrollRun: 1, employee: 1, status: 1 });
+PayrollOneTimeInputSchema.index({ company: 1, sourcePayrollRun: 1, sourceFinalizedResult: 1, createdAt: -1 });
 
 const PayrollOneTimeInput =
   (mongoose.models.PayrollOneTimeInput as mongoose.Model<PayrollOneTimeInputI>) ||

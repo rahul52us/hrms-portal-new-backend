@@ -20,6 +20,14 @@ interface CompanyI extends Document {
     url?: string;
     type?: string;
   };
+  registeredAddress?: {
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
   bio?: string;
   mobileNo?: string;
   workNo?: string;
@@ -31,12 +39,6 @@ interface CompanyI extends Document {
   telegramLink?: string;
   otherLinks?: string[];
   webLink?: string;
-  address1?: string;
-  address2?: string;
-  pinCode?: string;
-  country?: string;
-  state?: string;
-  city?: string;
   deletedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -128,6 +130,38 @@ const companySchema = new mongoose.Schema<CompanyI>({
     type: {
       type: String
     }
+  },
+  registeredAddress: {
+    addressLine1: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+    },
+    addressLine2: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+    },
+    city: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
+    state: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
+    postalCode: {
+      type: String,
+      trim: true,
+      maxlength: 20,
+    },
+    country: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
   },
   bio: {
     type: String,

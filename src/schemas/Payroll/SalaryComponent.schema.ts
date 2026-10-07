@@ -8,9 +8,14 @@ export const SALARY_COMPONENT_CATEGORIES = [
 ] as const;
 
 export const SALARY_COMPONENT_STATUSES = ["active", "archived"] as const;
+export const SALARY_COMPONENT_STATUTORY_WAGE_BASES = [
+  "provident_fund",
+  "employee_state_insurance",
+] as const;
 
 export type SalaryComponentCategory = (typeof SALARY_COMPONENT_CATEGORIES)[number];
 export type SalaryComponentStatus = (typeof SALARY_COMPONENT_STATUSES)[number];
+export type SalaryComponentStatutoryWageBase = (typeof SALARY_COMPONENT_STATUTORY_WAGE_BASES)[number];
 
 export interface SalaryComponentI extends Document {
   company: mongoose.Types.ObjectId;
@@ -20,6 +25,7 @@ export interface SalaryComponentI extends Document {
   category: SalaryComponentCategory;
   taxable: boolean;
   prorateOnUnpaidDays: boolean;
+  statutoryWageBases: SalaryComponentStatutoryWageBase[];
   status: SalaryComponentStatus;
   displayOrder: number;
   createdBy: mongoose.Types.ObjectId;
@@ -47,6 +53,16 @@ const SalaryComponentSchema = new Schema<SalaryComponentI>(
     category: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true, immutable: true },
     taxable: { type: Boolean, default: false },
     prorateOnUnpaidDays: { type: Boolean, default: true },
+    statutoryWageBases: {
+      type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }],
+      default: [],
+      validate: {
+        validator(this: SalaryComponentI, value: string[]) {
+          return this.category === "earning" || value.length === 0;
+        },
+        message: "Only earning components can form a statutory wage base",
+      },
+    },
     status: { type: String, enum: SALARY_COMPONENT_STATUSES, default: "active", index: true },
     displayOrder: { type: Number, min: 0, default: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },

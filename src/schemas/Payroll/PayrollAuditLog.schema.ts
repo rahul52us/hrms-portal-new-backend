@@ -5,9 +5,13 @@ export const PAYROLL_AUDIT_ENTITY_TYPES = [
   "salary_component",
   "salary_structure",
   "employee_compensation",
+  "employee_statutory",
+  "employee_tax_declaration",
   "compensation_import",
   "payroll_run",
   "payroll_input",
+  "statutory_profile",
+  "statutory_filing",
   "payslip",
 ] as const;
 

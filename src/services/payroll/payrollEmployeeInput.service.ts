@@ -147,7 +147,7 @@ export function validatePayrollEmployeeInputReconciliation(options: {
 
 async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Types.ObjectId | string) {
   return PayrollRun.findOne({ _id: runId, company })
-    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy", "name username code role")
+    .populate("createdBy attendanceLockedBy attendanceInputsPreparedBy reviewSubmittedBy reviewDecidedBy finalizedBy reopenedBy", "name username code role")
     .lean();
 }
 

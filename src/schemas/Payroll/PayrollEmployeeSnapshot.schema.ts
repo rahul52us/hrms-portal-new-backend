@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
-import { SALARY_COMPONENT_CATEGORIES } from "./SalaryComponent.schema";
+import { SALARY_COMPONENT_CATEGORIES, SALARY_COMPONENT_STATUTORY_WAGE_BASES } from "./SalaryComponent.schema";
 
 export const PAYROLL_SNAPSHOT_ISSUE_SEVERITIES = ["error", "warning"] as const;
 export const PAYROLL_SNAPSHOT_ISSUE_CATEGORIES = [
@@ -23,6 +23,8 @@ export interface PayrollEmployeeSnapshotI extends Document {
   bankDetail?: mongoose.Types.ObjectId | null;
   bank: Record<string, unknown>;
   profileDetails?: mongoose.Types.ObjectId | null;
+  employeeStatutoryAssignment?: mongoose.Types.ObjectId | null;
+  employeeTaxDeclaration?: mongoose.Types.ObjectId | null;
   statutory: Record<string, unknown>;
   compensationAssignment?: mongoose.Types.ObjectId | null;
   compensation: Record<string, unknown>;
@@ -59,6 +61,10 @@ const OrganizationSchema = new Schema(
     teamName: { type: String, trim: true },
     officeLocation: { type: Schema.Types.ObjectId, ref: "OfficeLocation", default: null },
     officeLocationName: { type: String, trim: true },
+    officeLocationCode: { type: String, trim: true, uppercase: true },
+    officeLocationCity: { type: String, trim: true },
+    officeLocationState: { type: String, trim: true },
+    officeLocationCountry: { type: String, trim: true },
     reportingManager: { type: Schema.Types.ObjectId, ref: "User", default: null },
     reportingManagerName: { type: String, trim: true },
   },
@@ -78,11 +84,32 @@ const BankSchema = new Schema(
 
 const StatutorySchema = new Schema(
   {
+    source: { type: String, enum: ["effective_assignment", "legacy_profile", "missing"], required: true },
+    countryCode: { type: String, trim: true, uppercase: true },
+    providerKey: { type: String, trim: true, lowercase: true },
+    providerImplementationVersion: { type: String, trim: true },
+    statutoryProfileVersionNumber: { type: Number, min: 1 },
+    enabledModules: { type: [{ type: String, trim: true }], default: [] },
+    effectiveFrom: { type: Date, default: null },
     aadharNumber: { type: String, trim: true },
     nameAsPerAadhar: { type: String, trim: true },
     panNumber: { type: String, trim: true, uppercase: true },
     nameAsPerPan: { type: String, trim: true },
+    uan: { type: String, trim: true },
+    nameAsPerUan: { type: String, trim: true },
+    pfMemberId: { type: String, trim: true, uppercase: true },
+    esiInsuranceNumber: { type: String, trim: true },
+    nameAsPerEsi: { type: String, trim: true },
     nationality: { type: String, trim: true, lowercase: true },
+    applicability: { type: Schema.Types.Mixed, default: {} },
+    taxDeclaration: {
+      taxYear: { type: String, trim: true },
+      versionNumber: { type: Number, min: 1 },
+      taxRegime: { type: String, trim: true, lowercase: true },
+      currency: { type: String, trim: true, uppercase: true },
+      currencyMinorUnits: { type: Number, min: 0, max: 3 },
+      declarations: { type: Schema.Types.Mixed, default: {} },
+    },
   },
   { _id: false }
 );
@@ -95,6 +122,11 @@ const CompensationComponentSchema = new Schema(
     category: { type: String, enum: SALARY_COMPONENT_CATEGORIES, required: true },
     taxable: { type: Boolean, required: true },
     prorateOnUnpaidDays: { type: Boolean, required: true },
+    statutoryWageBases: {
+      type: [{ type: String, enum: SALARY_COMPONENT_STATUTORY_WAGE_BASES }],
+      required: true,
+      default: [],
+    },
     monthlyAmountMinor: { type: Number, required: true, min: 0 },
     annualAmountMinor: { type: Number, required: true, min: 0 },
     overridden: { type: Boolean, required: true },
@@ -143,6 +175,8 @@ const PayrollEmployeeSnapshotSchema = new Schema<PayrollEmployeeSnapshotI>(
     bankDetail: { type: Schema.Types.ObjectId, ref: "BankDetail", default: null, immutable: true },
     bank: { type: BankSchema, required: true, immutable: true },
     profileDetails: { type: Schema.Types.ObjectId, ref: "ProfileDetails", default: null, immutable: true },
+    employeeStatutoryAssignment: { type: Schema.Types.ObjectId, ref: "EmployeeStatutoryAssignment", default: null, immutable: true },
+    employeeTaxDeclaration: { type: Schema.Types.ObjectId, ref: "EmployeeTaxDeclaration", default: null, immutable: true },
     statutory: { type: StatutorySchema, required: true, immutable: true },
     compensationAssignment: { type: Schema.Types.ObjectId, ref: "EmployeeCompensationAssignment", default: null, immutable: true },
     compensation: { type: CompensationSchema, required: true, immutable: true },
