@@ -18,6 +18,7 @@ assert.equal(deriveAttendanceStatus({ record: { status: "present" }, leaveDay: {
 
 assert.equal(deriveAttendanceWorkMode({ remoteWorkDay: { portion: "full" } }), "remote");
 assert.equal(deriveAttendanceWorkMode({ remoteWorkDay: { portion: "first_half" } }), "hybrid");
+assert.equal(deriveAttendanceWorkMode({ scheduledWorkMode: "remote" }), "remote");
 assert.equal(deriveAttendanceWorkMode({ record: { workMode: "field" }, remoteWorkDay: { portion: "full" } }), "field");
 
 const punches = {

@@ -393,6 +393,7 @@ async function applyApprovedRequest(request: any, actorId: mongoose.Types.Object
   const changes: any = request.requestedChanges || {};
   const previousState = record?.state;
   if (!record) {
+    const scheduledWorkMode = context.schedule?.defaultWorkMode === "remote" ? "remote" : "office";
     record = new AttendanceRecord({
       company: request.company,
       employee: request.employee,
@@ -400,8 +401,12 @@ async function applyApprovedRequest(request: any, actorId: mongoose.Types.Object
       timezone: context.timezone || "Asia/Kolkata",
       state: "open",
       status: "pending",
-      workMode: changes.workMode || "office",
-      workModeSource: changes.workMode ? "manual" : "default",
+      workMode: changes.workMode || scheduledWorkMode,
+      workModeSource: changes.workMode
+        ? "manual"
+        : scheduledWorkMode === "remote"
+          ? "work_schedule"
+          : "default",
       punchSessions: [],
       revisionNumber: 0,
       calculationVersion: 0,

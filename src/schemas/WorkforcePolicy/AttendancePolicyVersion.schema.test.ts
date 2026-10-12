@@ -19,6 +19,7 @@ function testDefaults() {
   assert.equal(policyVersion.rules.autoFinalize.enabled, false);
   assert.equal(policyVersion.rules.autoFinalize.graceMinutes, 1440);
   assert.equal(policyVersion.rules.autoFinalize.mode, "clean_only");
+  assert.equal(policyVersion.rules.statusCalculationBasis, "total_worked");
   assert.equal(policyVersion.rules.overtimeApproval.required, false);
   assert.equal(policyVersion.rules.officeGeofence.enabled, false);
   assert.equal(policyVersion.rules.officeGeofence.radiusMeters, 200);
@@ -27,6 +28,15 @@ function testDefaults() {
   assert.equal(policyVersion.rules.punchNetwork.enabled, false);
   assert.deepEqual(policyVersion.rules.punchNetwork.allowedNetworks, []);
   assert.equal(policyVersion.rules.trustedDevice.enabled, false);
+}
+
+function testStatusCalculationBasisValidation() {
+  const scheduledWindow = version();
+  scheduledWindow.rules.statusCalculationBasis = "scheduled_window";
+  assert.equal(scheduledWindow.validateSync(), undefined);
+
+  scheduledWindow.rules.statusCalculationBasis = "flexible_hours" as any;
+  assert.ok(scheduledWindow.validateSync()?.errors["rules.statusCalculationBasis"]);
 }
 
 function testValidAutoFinalization() {
@@ -119,5 +129,6 @@ testInvalidAutoFinalization();
 testOvertimeApprovalSnapshot();
 testOfficeGeofenceValidation();
 testPunchAccessPolicyValues();
+testStatusCalculationBasisValidation();
 
 console.log("AttendancePolicyVersion schema tests passed");

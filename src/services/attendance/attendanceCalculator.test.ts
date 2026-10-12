@@ -9,6 +9,7 @@ const base = {
     gracePeriodMinutesEarly: 5,
     minimumFullDayMinutes: 480,
     minimumHalfDayMinutes: 240,
+    statusCalculationBasis: "total_worked" as const,
     requirePunchOut: true,
     missingPunchTreatment: "flag_incomplete" as const,
     overtimeEnabled: true,
@@ -120,6 +121,42 @@ function testNoPunchUsesDayClassification() {
   assert.equal(result.state, "calculated");
 }
 
+function testScheduledWindowDoesNotLetAfterShiftWorkRecoverLateArrival() {
+  const result = calculateAttendance({
+    ...base,
+    schedule: { startTime: "09:30", endTime: "18:00" },
+    attendanceRules: {
+      ...base.attendanceRules,
+      statusCalculationBasis: "scheduled_window",
+    },
+    punchSessions: [{ punchIn: local("12:00"), punchOut: local("20:00") }],
+  });
+
+  assert.equal(result.workedMinutes, 480);
+  assert.equal(result.lateMinutes, 140);
+  assert.equal(result.status, "half_day");
+}
+
+function testScheduledWindowAcrossMidnight() {
+  const result = calculateAttendance({
+    ...base,
+    expectedWorkMinutes: 420,
+    schedule: { startTime: "19:00", endTime: "02:00" },
+    attendanceRules: {
+      ...base.attendanceRules,
+      statusCalculationBasis: "scheduled_window",
+    },
+    punchSessions: [{
+      punchIn: local("19:00"),
+      punchOut: new Date("2026-08-25T02:00:00+05:30"),
+    }],
+  });
+
+  assert.equal(result.workedMinutes, 420);
+  assert.equal(result.status, "present");
+  assert.equal(result.earlyExitMinutes, 0);
+}
+
 [
   testCompleteDay,
   testMultipleSessionsAndBreak,
@@ -128,7 +165,9 @@ function testNoPunchUsesDayClassification() {
   testClosedDayMaterialization,
   testHolidayWork,
   testNoPunchUsesDayClassification,
+  testScheduledWindowDoesNotLetAfterShiftWorkRecoverLateArrival,
+  testScheduledWindowAcrossMidnight,
 ].forEach((test) => test());
 
-console.log("Attendance calculator tests passed (7 tests)");
+console.log("Attendance calculator tests passed (9 tests)");
 

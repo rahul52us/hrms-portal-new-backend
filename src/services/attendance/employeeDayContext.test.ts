@@ -10,6 +10,7 @@ const DEFAULT_SCHEDULE = {
   effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
   rules: {
     timezone: "Asia/Kolkata",
+    defaultWorkMode: "office" as const,
     workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     saturdayRule: "second_and_fourth_off" as const,
     customSaturdayOffWeeks: [],
@@ -41,6 +42,22 @@ const tests: Array<{ name: string; run: () => void }> = [
       assert.equal(result.dayType, "working_day");
       assert.equal(result.schedule.scheduledMinutes, 480);
       assert.equal(result.expectedWorkMinutes, 480);
+      assert.equal(result.requiresAttendance, true);
+      assert.equal(result.schedule.defaultWorkMode, "office");
+    },
+  },
+  {
+    name: "preserves permanent WFH from the effective work schedule",
+    run: () => {
+      const result = classifyEmployeeDay({
+        attendanceDate: "2026-08-03",
+        workScheduleVersion: {
+          ...DEFAULT_SCHEDULE,
+          rules: { ...DEFAULT_SCHEDULE.rules, defaultWorkMode: "remote" },
+        },
+      });
+      assert.equal(result.dayType, "working_day");
+      assert.equal(result.schedule.defaultWorkMode, "remote");
       assert.equal(result.requiresAttendance, true);
     },
   },

@@ -6,6 +6,7 @@ import { PDFDocument } from "pdf-lib";
 import PayrollPayslip, { PAYSLIP_TEMPLATE_VERSION } from "../../schemas/Payroll/PayrollPayslip.schema";
 import {
   buildPayrollPayslipDocuments,
+  normalizePayslipPeriodFilter,
   payrollPayslipNumber,
   payslipContentHash,
   renderPayrollPayslipPdf,
@@ -142,7 +143,21 @@ function testNumberNormalizationAndIndexes() {
   ));
 }
 
+function testPayslipPeriodFilter() {
+  assert.equal(normalizePayslipPeriodFilter(undefined), "");
+  assert.equal(normalizePayslipPeriodFilter("2026-09"), "2026-09");
+  assert.throws(
+    () => normalizePayslipPeriodFilter("09-2026"),
+    /Payslip month must use YYYY-MM format/
+  );
+  assert.throws(
+    () => normalizePayslipPeriodFilter("2026-13"),
+    /Payslip month must use YYYY-MM format/
+  );
+}
+
 Promise.resolve()
   .then(testPayslipDocumentsAndPdf)
   .then(testNumberNormalizationAndIndexes)
+  .then(testPayslipPeriodFilter)
   .then(() => console.log("Versioned payroll payslip schema, integrity, and PDF tests passed"));

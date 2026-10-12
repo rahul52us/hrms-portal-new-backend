@@ -4,6 +4,7 @@ import { generateError } from "../../config/Error/functions";
 import WorkSchedule from "../../schemas/WorkforcePolicy/WorkSchedule.schema";
 import WorkScheduleVersion, {
   WorkScheduleRules,
+  WORK_SCHEDULE_DEFAULT_WORK_MODES,
   WORK_SCHEDULE_DAYS,
   WORK_SCHEDULE_SATURDAY_RULES,
 } from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
@@ -23,6 +24,7 @@ import {
 
 const DEFAULT_RULES: WorkScheduleRules = {
   timezone: "Asia/Kolkata",
+  defaultWorkMode: "office",
   workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
   saturdayRule: "all_off",
   customSaturdayOffWeeks: [],
@@ -125,8 +127,14 @@ function normalizeWorkScheduleRules(input: any = {}, current?: any): WorkSchedul
     throw generateError("Unpaid break must be shorter than the scheduled shift", 400);
   }
 
+  const defaultWorkMode = normalizeText(input.defaultWorkMode || base.defaultWorkMode).toLowerCase();
+  if (!WORK_SCHEDULE_DEFAULT_WORK_MODES.includes(defaultWorkMode as any)) {
+    throw generateError("Default work mode must be office or remote", 400);
+  }
+
   return {
     timezone: validateTimezone(input.timezone, base.timezone),
+    defaultWorkMode: defaultWorkMode as WorkScheduleRules["defaultWorkMode"],
     workingDays: requestedWorkingDays,
     saturdayRule: saturdayRule as WorkScheduleRules["saturdayRule"],
     customSaturdayOffWeeks:

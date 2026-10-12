@@ -376,8 +376,21 @@ const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
 
 export const PERMISSION_CATALOG = PERMISSION_DEFINITIONS.filter((permission) => !permission.systemOnly);
 export const ALL_PERMISSION_KEYS = Object.values(PERMISSION_KEYS);
+const SYSTEM_ONLY_PERMISSION_KEYS = new Set(
+  PERMISSION_DEFINITIONS.filter((permission) => permission.systemOnly).map(
+    (permission) => permission.key
+  )
+);
 
-export const CONFIGURABLE_PERMISSION_ROLES = ["admin", "hradmin", "hr", "departmenthead"] as const;
+export const CONFIGURABLE_PERMISSION_ROLES = [
+  "admin",
+  "hradmin",
+  "hr",
+  "departmenthead",
+  "payrollexecutive",
+] as const;
+
+export const ASSIGNABLE_ACCESS_ROLES = ["payrollexecutive"] as const;
 
 const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, PermissionDefinition>>(
   (acc, permission) => {
@@ -436,6 +449,7 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_BATCHES,
   PERMISSION_KEYS.MANAGE_BATCHES,
   PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
+  PERMISSION_KEYS.MANAGE_PERMISSIONS,
   PERMISSION_KEYS.COMPANY_SETTINGS,
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
@@ -481,6 +495,7 @@ const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.MANAGE_REMOTE_WORK_REQUESTS,
   PERMISSION_KEYS.VIEW_BATCHES,
   PERMISSION_KEYS.MANAGE_BATCHES,
+  PERMISSION_KEYS.MANAGE_PERMISSIONS,
   PERMISSION_KEYS.COMPANY_SETTINGS,
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
@@ -539,12 +554,25 @@ const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
 
+const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PAYROLL,
+  PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
+  PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
+  PERMISSION_KEYS.MANAGE_EMPLOYEE_STATUTORY,
+  PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
+  PERMISSION_KEYS.APPROVE_PAYROLL_RUNS,
+  PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS,
+  PERMISSION_KEYS.REOPEN_PAYROLL_RUNS,
+  PERMISSION_KEYS.VIEW_PROFILE,
+];
+
 const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
   superadmin: ALL_PERMISSION_KEYS,
   admin: ADMIN_ALLOWED_PERMISSION_KEYS,
   hradmin: HR_ADMIN_ALLOWED_PERMISSION_KEYS,
   hr: HR_ALLOWED_PERMISSION_KEYS,
   departmenthead: DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS,
+  payrollexecutive: PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS,
   default: [PERMISSION_KEYS.VIEW_PROFILE],
 };
 
@@ -605,7 +633,8 @@ function normalizeRole(value: unknown) {
     .replace(/^department[-\s]?head$/i, "departmenthead")
     .replace(/^head[-\s]?hr$/i, "hradmin")
     .replace(/^hr[-\s]?admin$/i, "hradmin")
-    .replace(/^hr[-\s]?executive$/i, "hr");
+    .replace(/^hr[-\s]?executive$/i, "hr")
+    .replace(/^payroll[-\s]?executive$/i, "payrollexecutive");
 }
 
 function buildEmptyPermissionRecord() {
@@ -638,6 +667,10 @@ function getRoleLabel(roleInput: unknown) {
 
   if (role === "superadmin") {
     return "Super Admin";
+  }
+
+  if (role === "payrollexecutive") {
+    return "Payroll Executive";
   }
 
   return role ? `${role.charAt(0).toUpperCase()}${role.slice(1)}` : "Role";
@@ -715,6 +748,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.VIEW_BATCHES,
       PERMISSION_KEYS.MANAGE_BATCHES,
       PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
+      PERMISSION_KEYS.MANAGE_PERMISSIONS,
       PERMISSION_KEYS.COMPANY_SETTINGS,
       PERMISSION_KEYS.VIEW_PROFILE,
     ]);
@@ -762,6 +796,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.MANAGE_REMOTE_WORK_REQUESTS,
       PERMISSION_KEYS.VIEW_BATCHES,
       PERMISSION_KEYS.MANAGE_BATCHES,
+      PERMISSION_KEYS.MANAGE_PERMISSIONS,
       PERMISSION_KEYS.COMPANY_SETTINGS,
       PERMISSION_KEYS.VIEW_PROFILE,
     ]);
@@ -820,6 +855,17 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
       PERMISSION_KEYS.VIEW_BATCHES,
       PERMISSION_KEYS.MANAGE_BATCHES,
       PERMISSION_KEYS.VIEW_LEARNER_PROGRESS_RESULTS,
+      PERMISSION_KEYS.VIEW_PROFILE,
+    ]);
+  }
+
+  if (role === "payrollexecutive") {
+    return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PAYROLL,
+      PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
+      PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
+      PERMISSION_KEYS.MANAGE_EMPLOYEE_STATUTORY,
+      PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
       PERMISSION_KEYS.VIEW_PROFILE,
     ]);
   }
@@ -883,6 +929,7 @@ export function sanitizePermissionRecordForRole(roleInput: unknown, value: any) 
   const role = normalizeRole(roleInput);
   const allowedKeys = new Set(getAllowedPermissionKeysForRole(role));
   const requestedPermissions = buildCompletePermissionRecord(value);
+  const roleDefaults = getDefaultPermissionsForRole(role);
 
   if (role === "superadmin") {
     return createPermissionRecord(ALL_PERMISSION_KEYS);
@@ -890,7 +937,11 @@ export function sanitizePermissionRecordForRole(roleInput: unknown, value: any) 
 
   const next = buildEmptyPermissionRecord();
   for (const permissionKey of ALL_PERMISSION_KEYS) {
-    next[permissionKey] = allowedKeys.has(permissionKey) ? requestedPermissions[permissionKey] : false;
+    next[permissionKey] = allowedKeys.has(permissionKey)
+      ? SYSTEM_ONLY_PERMISSION_KEYS.has(permissionKey)
+        ? roleDefaults[permissionKey]
+        : requestedPermissions[permissionKey]
+      : false;
   }
 
   return applyPermissionDependencies(next);
@@ -905,9 +956,9 @@ export function validatePermissionRecordForRole(options: {
   const requestedPermissions = buildCompletePermissionRecord(options.permissions);
   const allowedKeys = new Set(getAllowedPermissionKeysForRole(role));
 
-    if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-      errors.push(`${getRoleLabel(role)} permissions cannot be configured here.`);
-    }
+  if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
+    errors.push(`${getRoleLabel(role)} permissions cannot be configured here.`);
+  }
 
   for (const permissionKey of ALL_PERMISSION_KEYS) {
     if (!requestedPermissions[permissionKey]) {
@@ -962,6 +1013,8 @@ export function normalizeRolePermissionMap(value: any) {
 export function computeEffectivePermissions(options: {
   role: unknown;
   rolePermissionOverrides?: any;
+  accessRole?: unknown;
+  accessRolePermissionOverrides?: any;
   userOverrides?: any;
 }) {
   const role = normalizeRole(options.role);
@@ -970,21 +1023,35 @@ export function computeEffectivePermissions(options: {
     return createPermissionRecord(ALL_PERMISSION_KEYS);
   }
 
-  const defaults = getDefaultPermissionsForRole(role);
-  const mergedPermissions = { ...defaults };
-
-  if (options.rolePermissionOverrides && typeof options.rolePermissionOverrides === "object") {
-    Object.assign(
-      mergedPermissions,
-      sanitizePermissionRecordForRole(role, {
-        ...mergedPermissions,
-        ...options.rolePermissionOverrides,
-      })
-    );
+  const accessRole = normalizeRole(options.accessRole);
+  const permissionRoles = [role];
+  if (
+    accessRole &&
+    accessRole !== role &&
+    ASSIGNABLE_ACCESS_ROLES.includes(accessRole as (typeof ASSIGNABLE_ACCESS_ROLES)[number])
+  ) {
+    permissionRoles.push(accessRole);
   }
 
+  const mergedPermissions = buildEmptyPermissionRecord();
+  const allowedKeys = new Set<PermissionKey>();
+  permissionRoles.forEach((permissionRole) => {
+    getAllowedPermissionKeysForRole(permissionRole).forEach((key) => allowedKeys.add(key));
+    const overrides = permissionRole === role
+      ? options.rolePermissionOverrides
+      : options.accessRolePermissionOverrides;
+    const rolePermissions = sanitizePermissionRecordForRole(permissionRole, {
+      ...getDefaultPermissionsForRole(permissionRole),
+      ...(overrides && typeof overrides === "object" ? overrides : {}),
+    });
+    for (const permissionKey of ALL_PERMISSION_KEYS) {
+      if (rolePermissions[permissionKey]) {
+        mergedPermissions[permissionKey] = true;
+      }
+    }
+  });
+
   if (options.userOverrides && typeof options.userOverrides === "object") {
-    const allowedKeys = new Set(getAllowedPermissionKeysForRole(role));
     const normalizedUserOverrides = normalizePermissionRecord(options.userOverrides);
 
     for (const [permissionKey, permissionValue] of Object.entries(normalizedUserOverrides)) {
@@ -994,7 +1061,11 @@ export function computeEffectivePermissions(options: {
     }
   }
 
-  return sanitizePermissionRecordForRole(role, mergedPermissions);
+  const sanitized = buildEmptyPermissionRecord();
+  for (const permissionKey of ALL_PERMISSION_KEYS) {
+    sanitized[permissionKey] = allowedKeys.has(permissionKey) && Boolean(mergedPermissions[permissionKey]);
+  }
+  return applyPermissionDependencies(sanitized);
 }
 
 export function attachEffectivePermissions(options: {
@@ -1004,9 +1075,12 @@ export function attachEffectivePermissions(options: {
   const user = options.user || {};
   const normalizedRolePermissions = normalizeRolePermissionMap(options.company?.rolePermissions);
   const role = normalizeRole(user?.role);
+  const accessRole = normalizeRole(user?.accessRole);
   const rolePermissionDefaults = computeEffectivePermissions({
     role,
     rolePermissionOverrides: normalizedRolePermissions[role],
+    accessRole,
+    accessRolePermissionOverrides: normalizedRolePermissions[accessRole],
   });
   const permissionOverrides = normalizePermissionRecord(user?.permissions);
   const effectivePermissions =
@@ -1015,11 +1089,14 @@ export function attachEffectivePermissions(options: {
       : computeEffectivePermissions({
           role,
           rolePermissionOverrides: normalizedRolePermissions[role],
+          accessRole,
+          accessRolePermissionOverrides: normalizedRolePermissions[accessRole],
           userOverrides: permissionOverrides,
         });
 
   return {
     ...user,
+    accessRole: accessRole || null,
     permissions: permissionOverrides,
     permissionOverrides,
     rolePermissionDefaults,
@@ -1043,6 +1120,7 @@ export function hasPermission(user: any, permissionKey: string) {
 
   return computeEffectivePermissions({
     role,
+    accessRole: user?.accessRole,
     userOverrides: user?.permissions,
   })[permissionKey];
 }
@@ -1088,6 +1166,16 @@ export function getPermissionRoleOptions() {
     { value: "hradmin", label: "HR Admin" },
     { value: "hr", label: "HR" },
     { value: "departmenthead", label: "Department Head" },
+    { value: "payrollexecutive", label: "Payroll Executive" },
+  ].map((option) => ({
+    ...option,
+    allowedPermissionKeys: getAllowedPermissionKeysForRole(option.value),
+  }));
+}
+
+export function getAssignableAccessRoleOptions() {
+  return [
+    { value: "payrollexecutive", label: "Payroll Executive" },
   ];
 }
 

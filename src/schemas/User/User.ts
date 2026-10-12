@@ -39,6 +39,7 @@ export interface UserInterface extends Document {
   profile_details: Schema.Types.ObjectId;
   is_enabled: boolean;
   role: string;
+  accessRole?: string | null;
   password?: string;
   setupToken?: string;
   setupTokenExpiry?: Date;
@@ -124,6 +125,13 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
     required: true,
     trim: true,
     lowercase: true,
+    index: true,
+  },
+  accessRole: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: null,
     index: true,
   },
   department: { type: String, trim: true },

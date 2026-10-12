@@ -48,6 +48,7 @@ const DEFAULT_RULES: AttendanceRules = {
   gracePeriodMinutesEarly: 0,
   minimumFullDayMinutes: 480,
   minimumHalfDayMinutes: 240,
+  statusCalculationBasis: "total_worked",
   requirePunchOut: true,
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
@@ -186,6 +187,16 @@ export function calculateAttendance(
   }, 0);
 
   const schedule = scheduleScalars(input.attendanceDate, input.schedule);
+  const scheduledWindowMinutes = schedule
+    ? completeSessions.reduce((total, session) => {
+        const sessionStart = wallClockScalar(session.punchIn, input.timezone);
+        const sessionEnd = wallClockScalar(session.punchOut, input.timezone);
+        return total + Math.max(
+          0,
+          Math.min(sessionEnd, schedule.end) - Math.max(sessionStart, schedule.start)
+        );
+      }, 0)
+    : workedMinutes;
   const firstPunch = sessions
     .map((session) => session.punchIn)
     .filter((value): value is Date => Boolean(value))
@@ -257,10 +268,14 @@ export function calculateAttendance(
         Math.max(1, Number(rules.minimumHalfDayMinutes || 1)),
         fullDayThreshold
       );
+      const statusMinutes =
+        rules.statusCalculationBasis === "scheduled_window" && schedule
+          ? scheduledWindowMinutes
+          : workedMinutes;
       status =
-        workedMinutes >= fullDayThreshold
+        statusMinutes >= fullDayThreshold
           ? "present"
-          : workedMinutes >= halfDayThreshold
+          : statusMinutes >= halfDayThreshold
             ? "half_day"
             : "absent";
     }

@@ -66,7 +66,7 @@ export interface AttendanceRecordI extends Document {
   state: (typeof ATTENDANCE_RECORD_STATES)[number];
   status: (typeof ATTENDANCE_RECORD_STATUSES)[number];
   workMode: (typeof ATTENDANCE_WORK_MODES)[number];
-  workModeSource: "default" | "remote_work_request" | "manual" | "import";
+  workModeSource: "default" | "work_schedule" | "remote_work_request" | "manual" | "import";
   remoteWorkRequest?: mongoose.Types.ObjectId | null;
   remoteWorkPortion?: "full" | "first_half" | "second_half" | null;
   remoteWorkPolicyAssignment?: mongoose.Types.ObjectId | null;
@@ -246,7 +246,7 @@ const AttendanceRecordSchema = new Schema<AttendanceRecordI>(
     },
     workModeSource: {
       type: String,
-      enum: ["default", "remote_work_request", "manual", "import"],
+      enum: ["default", "work_schedule", "remote_work_request", "manual", "import"],
       required: true,
       default: "default",
     },

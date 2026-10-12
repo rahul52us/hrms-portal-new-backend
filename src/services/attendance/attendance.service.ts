@@ -17,7 +17,11 @@ import {
   isPunchOutAllowedForAttendanceDay,
   previousAttendanceDate,
 } from "./attendancePunch.utils";
-import { matchAllowedNetwork, requestClientIp } from "./attendancePunchAccess.utils";
+import {
+  hasAttendanceRemoteAuthorization,
+  matchAllowedNetwork,
+  requestClientIp,
+} from "./attendancePunchAccess.utils";
 import {
   resolveAttendanceTrustedDevice,
   touchAttendanceTrustedDevice,
@@ -184,12 +188,22 @@ async function approvedRemoteWorkAuthorization(options: {
   };
 }
 
-function remoteWorkRecordFields(authorization: any) {
+function scheduledWorkModeRecordFields(context: any) {
+  const workMode = context?.schedule?.defaultWorkMode === "remote" ? "remote" : "office";
+  return {
+    workMode,
+    workModeSource: workMode === "remote" ? "work_schedule" : "default",
+    remoteWorkRequest: null,
+    remoteWorkPortion: null,
+    remoteWorkPolicyAssignment: null,
+    remoteWorkPolicy: null,
+    remoteWorkPolicyVersion: null,
+  };
+}
+
+function remoteWorkRecordFields(authorization: any, context: any) {
   if (!authorization) {
-    return {
-      workMode: "office",
-      workModeSource: "default",
-    };
+    return scheduledWorkModeRecordFields(context);
   }
   return {
     workMode: authorization.workMode,
@@ -200,6 +214,14 @@ function remoteWorkRecordFields(authorization: any) {
     remoteWorkPolicy: authorization.remoteWorkPolicy,
     remoteWorkPolicyVersion: authorization.remoteWorkPolicyVersion,
   };
+}
+
+function recordHasRemoteWorkBypass(record: any) {
+  return hasAttendanceRemoteAuthorization(record);
+}
+
+function contextHasRemoteWorkBypass(context: any, authorization: any) {
+  return Boolean(authorization || context?.schedule?.defaultWorkMode === "remote");
 }
 
 function punchLocation(body: any) {
@@ -680,8 +702,8 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
       rules: actionRules,
       officeLocationId: actionRecord?.officeLocation || actionContext.organizationAssignment?.officeLocation,
       remoteWorkBypass: actionRecord
-        ? actionRecord.workModeSource === "remote_work_request"
-        : Boolean(remoteWorkAuthorization),
+        ? recordHasRemoteWorkBypass(actionRecord)
+        : contextHasRemoteWorkBypass(actionContext, remoteWorkAuthorization),
     });
     const punchAccess = await resolvePunchAccess({
       req,
@@ -689,8 +711,8 @@ export async function getTodayAttendanceService(req: any, res: Response, next: N
       employeeId: actor.employeeId,
       rules: actionRules,
       remoteWorkBypass: actionRecord
-        ? actionRecord.workModeSource === "remote_work_request"
-        : Boolean(remoteWorkAuthorization),
+        ? recordHasRemoteWorkBypass(actionRecord)
+        : contextHasRemoteWorkBypass(actionContext, remoteWorkAuthorization),
     });
     const blocksPunchIn = geofenceAppliesToEvent(geofence, "punch_in") && Boolean(geofence.setupError);
     const blocksPunchOut = geofenceAppliesToEvent(geofence, "punch_out") && Boolean(geofence.setupError);
@@ -794,7 +816,7 @@ export async function punchInService(req: any, res: Response, next: NextFunction
       companyId: actor.companyId,
       rules: context.policies?.attendancePolicy?.version?.rules || {},
       officeLocationId: context.organizationAssignment?.officeLocation,
-      remoteWorkBypass: Boolean(remoteWorkAuthorization),
+      remoteWorkBypass: contextHasRemoteWorkBypass(context, remoteWorkAuthorization),
     });
     const punchInLocation = verifyPunchLocation({ req, event: "punch_in", geofence });
     const punchAccess = await resolvePunchAccess({
@@ -802,7 +824,7 @@ export async function punchInService(req: any, res: Response, next: NextFunction
       companyId: actor.companyId,
       employeeId: actor.employeeId,
       rules: context.policies?.attendancePolicy?.version?.rules || {},
-      remoteWorkBypass: Boolean(remoteWorkAuthorization),
+      remoteWorkBypass: contextHasRemoteWorkBypass(context, remoteWorkAuthorization),
     });
     assertPunchAccess(punchAccess);
     const session = sessionPayload(req, now, punchInLocation, punchAccess.evidence);
@@ -824,9 +846,9 @@ export async function punchInService(req: any, res: Response, next: NextFunction
             status: "pending",
             source: "punch",
             updatedBy: actor.employeeId,
-            ...(existing.workModeSource === "manual"
+            ...(["manual", "import"].includes(existing.workModeSource)
               ? {}
-              : remoteWorkRecordFields(remoteWorkAuthorization)),
+              : remoteWorkRecordFields(remoteWorkAuthorization, context)),
           },
           $inc: { revisionNumber: 1 },
         },
@@ -842,7 +864,7 @@ export async function punchInService(req: any, res: Response, next: NextFunction
           timezone,
           state: "open",
           status: "pending",
-          ...remoteWorkRecordFields(remoteWorkAuthorization),
+          ...remoteWorkRecordFields(remoteWorkAuthorization, context),
           punchSessions: [session],
           revisionNumber: 1,
           calculationVersion: 0,
@@ -918,7 +940,7 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
       companyId: actor.companyId,
       rules: attendanceRules,
       officeLocationId: record.officeLocation || context.organizationAssignment?.officeLocation,
-      remoteWorkBypass: record.workModeSource === "remote_work_request",
+      remoteWorkBypass: recordHasRemoteWorkBypass(record),
     });
     const punchOutLocation = verifyPunchLocation({ req, event: "punch_out", geofence });
     const punchAccess = await resolvePunchAccess({
@@ -926,7 +948,7 @@ export async function punchOutService(req: any, res: Response, next: NextFunctio
       companyId: actor.companyId,
       employeeId: actor.employeeId,
       rules: attendanceRules,
-      remoteWorkBypass: record.workModeSource === "remote_work_request",
+      remoteWorkBypass: recordHasRemoteWorkBypass(record),
     });
     assertPunchAccess(punchAccess);
     const mutated = await AttendanceRecord.findOneAndUpdate(

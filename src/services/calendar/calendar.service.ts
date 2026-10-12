@@ -182,6 +182,33 @@ async function visitCalendarRows(ctx: Awaited<ReturnType<typeof context>>, visit
         const events = (eventsByDay.get(`${calendarId(employee)}:${date}`) || []).map(({ kind, request, day }) =>
           calendarRequestEvent(ctx.actor, ctx.scope, employee, organization, kind, request, day)
         ).filter((event) => event && (ctx.includePending || event.status === "approved"));
+        if (
+          classification.requiresAttendance === true &&
+          classification.schedule?.defaultWorkMode === "remote" &&
+          !events.some((event: any) => event.kind === "wfh" && event.status === "approved")
+        ) {
+          events.unshift({
+            id: `work-schedule:${calendarId(employee)}:${date}`,
+            kind: "wfh",
+            status: "approved",
+            title: "Permanent WFH",
+            code: "",
+            fromDate: date,
+            toDate: date,
+            portion: "full",
+            units: 1,
+            unit: "days",
+            reason: "Assigned through the effective work schedule",
+            canApprove: false,
+            canWithdraw: false,
+            cancellationPending: false,
+            employee: {
+              id: calendarId(employee),
+              name: employee.name || "Employee",
+              code: employee.code || "",
+            },
+          });
+        }
         const stop = visit({ date, employee: { id: calendarId(employee), name: employee.name || "Employee", code: employee.code || "" },
           department: organization?.departmentNameSnapshot || "", team: organization?.teamNameSnapshot || "", officeLocation: organization?.officeLocationNameSnapshot || "",
           dayType: classification.dayType, holiday: classification.holiday, schedule: classification.schedule,

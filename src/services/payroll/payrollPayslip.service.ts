@@ -31,6 +31,14 @@ function pageNumber(value: unknown, fallback: number, maximum: number) {
   return Math.min(maximum, Math.max(1, Number.isFinite(parsed) ? parsed : fallback));
 }
 
+export function normalizePayslipPeriodFilter(value: unknown) {
+  const periodKey = text(value);
+  if (periodKey && !/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) {
+    throw generateError("Payslip month must use YYYY-MM format", 400);
+  }
+  return periodKey;
+}
+
 function requiredReason(value: unknown) {
   const reason = text(value);
   if (reason.length < 3 || reason.length > 500) {
@@ -631,7 +639,12 @@ export async function listMyPayrollPayslipsService(req: any, res: Response, next
     const { companyObjectId } = await resolvePayrollCompany(req);
     const page = pageNumber(req.query?.page, 1, 100_000);
     const limit = pageNumber(req.query?.limit, 12, 50);
-    const match = { company: companyObjectId, employee: actorId };
+    const periodKey = normalizePayslipPeriodFilter(req.query?.periodKey);
+    const match = {
+      company: companyObjectId,
+      employee: actorId,
+      ...(periodKey ? { periodKey } : {}),
+    };
     const [items, total] = await Promise.all([
       PayrollPayslip.find(match).sort({ periodKey: -1, finalizationVersion: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       PayrollPayslip.countDocuments(match),

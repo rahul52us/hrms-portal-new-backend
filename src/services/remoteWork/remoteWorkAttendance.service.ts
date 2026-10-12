@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import AttendanceRecord from "../../schemas/Attendance/AttendanceRecord.schema";
+import WorkScheduleVersion from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
 import { assertAttendanceDatesWritable } from "../attendance/attendancePeriod.service";
 
 export async function applyApprovedRemoteWorkToAttendance(options: {
@@ -33,7 +34,7 @@ export async function applyApprovedRemoteWorkToAttendance(options: {
         attendanceDate: day.attendanceDate,
         state: { $ne: "finalized" },
         leaveRequest: null,
-        workModeSource: { $in: ["default", "remote_work_request"] },
+        workModeSource: { $in: ["default", "work_schedule", "remote_work_request"] },
       },
       {
         $set: {
@@ -70,24 +71,52 @@ export async function removeCancelledRemoteWorkFromAttendance(options: {
   if (finalized) {
     throw generateError("Finalized attendance exists. Reopen it before cancelling WFH", 409);
   }
-  await AttendanceRecord.updateMany(
-    {
-      company: options.request.company,
-      remoteWorkRequest: options.request._id,
-      state: { $ne: "finalized" },
-    },
-    {
-      $set: {
-        workMode: "office",
-        workModeSource: "default",
-        remoteWorkRequest: null,
-        remoteWorkPortion: null,
-        remoteWorkPolicyAssignment: null,
-        remoteWorkPolicy: null,
-        remoteWorkPolicyVersion: null,
-        updatedBy: options.actor,
-      },
-    },
-    { session: options.session }
+  const records = await AttendanceRecord.find({
+    company: options.request.company,
+    remoteWorkRequest: options.request._id,
+    state: { $ne: "finalized" },
+  })
+    .select("_id workScheduleVersion")
+    .session(options.session)
+    .lean();
+  const scheduleVersionIds = records
+    .map((record: any) => record.workScheduleVersion)
+    .filter(Boolean);
+  const scheduleVersions = scheduleVersionIds.length
+    ? await WorkScheduleVersion.find({ _id: { $in: scheduleVersionIds } })
+        .select("_id rules.defaultWorkMode")
+        .session(options.session)
+        .lean()
+    : [];
+  const workModeByVersion = new Map(
+    scheduleVersions.map((version: any) => [
+      String(version._id),
+      version.rules?.defaultWorkMode === "remote" ? "remote" : "office",
+    ])
   );
+  if (records.length) {
+    await AttendanceRecord.bulkWrite(
+      records.map((record: any) => {
+        const workMode = workModeByVersion.get(String(record.workScheduleVersion || "")) || "office";
+        return {
+          updateOne: {
+            filter: { _id: record._id, state: { $ne: "finalized" } },
+            update: {
+              $set: {
+                workMode,
+                workModeSource: workMode === "remote" ? "work_schedule" : "default",
+                remoteWorkRequest: null,
+                remoteWorkPortion: null,
+                remoteWorkPolicyAssignment: null,
+                remoteWorkPolicy: null,
+                remoteWorkPolicyVersion: null,
+                updatedBy: options.actor,
+              },
+            },
+          },
+        };
+      }),
+      { session: options.session }
+    );
+  }
 }

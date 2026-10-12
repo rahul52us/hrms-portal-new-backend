@@ -355,6 +355,7 @@ export async function getAttendanceOverviewService(req: any, res: Response, next
         const workMode = deriveAttendanceWorkMode({
           record,
           remoteWorkDay: remoteWork?.day,
+          scheduledWorkMode: classification.schedule?.defaultWorkMode,
         });
         const row = {
           attendanceDate: ctx.attendanceDate,
@@ -394,6 +395,7 @@ export async function getAttendanceOverviewService(req: any, res: Response, next
             configured: classification.schedule?.configured !== false,
             startTime: classification.schedule?.startTime || null,
             endTime: classification.schedule?.endTime || null,
+            defaultWorkMode: classification.schedule?.defaultWorkMode || "office",
           },
           setupGaps: [
             ...(!classification.attendancePolicyConfigured ? ["attendance_policy"] : []),

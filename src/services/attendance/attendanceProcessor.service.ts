@@ -255,7 +255,7 @@ function applyLeave(record: any, request: any, day: any, context: any) {
 
 function applyRemoteWork(record: any, request: any, day: any) {
   if (!request || !day || record.leaveRequest) return;
-  if (!["default", "remote_work_request"].includes(record.workModeSource || "default")) return;
+  if (!["default", "work_schedule", "remote_work_request"].includes(record.workModeSource || "default")) return;
   record.workMode = day.portion === "full" ? "remote" : "hybrid";
   record.workModeSource = "remote_work_request";
   record.remoteWorkRequest = request._id;
@@ -263,6 +263,18 @@ function applyRemoteWork(record: any, request: any, day: any) {
   record.remoteWorkPolicyAssignment = request.remoteWorkPolicyAssignment;
   record.remoteWorkPolicy = request.remoteWorkPolicy;
   record.remoteWorkPolicyVersion = request.remoteWorkPolicyVersion;
+}
+
+function applyScheduledWorkMode(record: any, context: any) {
+  if (["manual", "import"].includes(record.workModeSource)) return;
+  const workMode = context?.schedule?.defaultWorkMode === "remote" ? "remote" : "office";
+  record.workMode = workMode;
+  record.workModeSource = workMode === "remote" ? "work_schedule" : "default";
+  record.remoteWorkRequest = null;
+  record.remoteWorkPortion = null;
+  record.remoteWorkPolicyAssignment = null;
+  record.remoteWorkPolicy = null;
+  record.remoteWorkPolicyVersion = null;
 }
 
 async function processEmployeeDay(options: {
@@ -372,8 +384,8 @@ async function processEmployeeDay(options: {
         timezone,
         state: "open",
         status: defaultStatus(null, context),
-        workMode: "office",
-        workModeSource: "default",
+        workMode: context.schedule?.defaultWorkMode === "remote" ? "remote" : "office",
+        workModeSource: context.schedule?.defaultWorkMode === "remote" ? "work_schedule" : "default",
         punchSessions: [],
         revisionNumber: 0,
         calculationVersion: 0,
@@ -388,6 +400,7 @@ async function processEmployeeDay(options: {
     const preserveManualValues = ["manual", "import"].includes(record.source);
     if (!preserveManualValues) {
       const hasLeave = applyLeave(record, leaveRequest, leaveDay, context);
+      applyScheduledWorkMode(record, context);
       applyRemoteWork(record, remoteWorkRequest, remoteWorkDay);
 
       if (hasLeave || record.leaveRequest) {

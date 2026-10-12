@@ -79,6 +79,7 @@
     "test:payroll-review": "ts-node src/services/payroll/payrollRunReview.test.ts",
     "test:payroll-finalization": "ts-node src/services/payroll/payrollFinalization.test.ts",
     "test:payroll-payslips": "ts-node src/services/payroll/payrollPayslip.test.ts",
+    "test:payroll-access-role": "ts-node src/services/payroll/payrollAccessRole.test.ts",
     "test:payroll-reopen": "ts-node src/services/payroll/payrollReopen.test.ts",
     "test:payroll-adjustments": "ts-node src/services/payroll/payrollAdjustment.test.ts",
     "test:payroll-statutory-profiles": "ts-node src/services/payroll/statutoryProfile.test.ts",
@@ -89,6 +90,7 @@
     "test:payroll-statutory-reports": "ts-node src/services/payroll/payrollStatutoryReport.test.ts",
     "test:payroll-statutory-filings": "ts-node src/services/payroll/payrollStatutoryFiling.test.ts && ts-node src/services/payroll/payrollEsicFiling.test.ts",
     "test:user-schema": "ts-node src/schemas/User/User.schema.test.ts",
+    "test:permissions": "ts-node src/services/permissions/permission.utils.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"

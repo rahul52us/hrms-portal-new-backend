@@ -61,9 +61,12 @@ export function deriveAttendanceStatus(options: {
 export function deriveAttendanceWorkMode(options: {
   record?: any;
   remoteWorkDay?: any;
+  scheduledWorkMode?: any;
 }) {
   if (options.record?.workMode) return String(options.record.workMode);
-  if (!options.remoteWorkDay) return "office";
+  if (!options.remoteWorkDay) {
+    return options.scheduledWorkMode === "remote" ? "remote" : "office";
+  }
   return options.remoteWorkDay.portion === "full" ? "remote" : "hybrid";
 }
 

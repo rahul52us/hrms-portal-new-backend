@@ -18,8 +18,11 @@ export const WORK_SCHEDULE_SATURDAY_RULES = [
   "custom_weeks_off",
 ] as const;
 
+export const WORK_SCHEDULE_DEFAULT_WORK_MODES = ["office", "remote"] as const;
+
 export interface WorkScheduleRules {
   timezone: string;
+  defaultWorkMode: (typeof WORK_SCHEDULE_DEFAULT_WORK_MODES)[number];
   workingDays: string[];
   saturdayRule: (typeof WORK_SCHEDULE_SATURDAY_RULES)[number];
   customSaturdayOffWeeks: number[];
@@ -46,6 +49,12 @@ export interface WorkScheduleVersionI extends Document {
 const WorkScheduleRulesSchema = new Schema<WorkScheduleRules>(
   {
     timezone: { type: String, required: true, trim: true, default: "Asia/Kolkata" },
+    defaultWorkMode: {
+      type: String,
+      enum: WORK_SCHEDULE_DEFAULT_WORK_MODES,
+      required: true,
+      default: "office",
+    },
     workingDays: {
       type: [String],
       enum: WORK_SCHEDULE_DAYS,

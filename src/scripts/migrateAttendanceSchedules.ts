@@ -70,6 +70,7 @@ function normalizeScheduleRules(rules: any): WorkScheduleRules {
 
   return {
     timezone: String(rules?.timezone || "Asia/Kolkata"),
+    defaultWorkMode: "office",
     workingDays,
     saturdayRule,
     customSaturdayOffWeeks,

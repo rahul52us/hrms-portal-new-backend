@@ -220,6 +220,15 @@ async function calculateRequest(options: {
   );
   const eligible = contexts.filter((context) => context.requiresAttendance === true);
   if (!eligible.length) throw generateError("The selected range has no scheduled working days", 422);
+  const permanentRemoteDate = eligible.find(
+    (context) => context.schedule?.defaultWorkMode === "remote"
+  );
+  if (permanentRemoteDate) {
+    throw generateError(
+      `${permanentRemoteDate.attendanceDate} already uses Permanent WFH through the assigned work schedule`,
+      409
+    );
+  }
   const firstPolicy = eligible[0].policies?.remoteWorkPolicy;
   const firstReference = eligible[0].policyReferences?.remoteWorkPolicy;
   if (!firstPolicy?.version || !firstReference?.assignmentId || !firstReference.resourceId || !firstReference.versionId) {
@@ -388,12 +397,23 @@ export async function getRemoteWorkEligibilityService(req: any, res: Response, n
     const attendanceDate = parseAttendanceDate(text(req.query?.date || currentDateKey())).dateKey;
     const context = await resolveEmployeeDayContext({ companyId: company, employeeId: employee._id, attendanceDate });
     const resolved = context.policies?.remoteWorkPolicy;
+    const permanentWorkFromHome = context.schedule?.defaultWorkMode === "remote";
     return res.status(200).json({
       success: true,
       data: {
         employee: { _id: employee._id, name: employee.name, code: employee.code },
         attendanceDate,
-        eligible: Boolean(resolved?.version && context.requiresAttendance === true),
+        eligible: Boolean(
+          resolved?.version && context.requiresAttendance === true && !permanentWorkFromHome
+        ),
+        reason: permanentWorkFromHome
+          ? "Permanent WFH already applies through the assigned work schedule. No WFH request is required."
+          : !resolved?.version
+            ? "No WFH policy is assigned for this date."
+            : context.requiresAttendance !== true
+              ? "The selected date is not a scheduled working day."
+              : "",
+        permanentWorkFromHome,
         dayType: context.dayType,
         requiresAttendance: context.requiresAttendance,
         policy: resolved

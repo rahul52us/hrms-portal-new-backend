@@ -271,6 +271,7 @@ async function mutateAttendance(options: {
         throw generateError("Create or mark attendance before using this action", 409);
       }
       if (!record) {
+        const scheduledWorkMode = context.schedule?.defaultWorkMode === "remote" ? "remote" : "office";
         record = new AttendanceRecord({
           company,
           employee: employeeId,
@@ -278,8 +279,13 @@ async function mutateAttendance(options: {
           timezone: context.timezone || "Asia/Kolkata",
           state: "open",
           status: context.defaultAttendanceStatus || "pending",
-          workMode: "office",
-          workModeSource: input.source === "import" ? "import" : "manual",
+          workMode: scheduledWorkMode,
+          workModeSource:
+            input.source === "import"
+              ? "import"
+              : scheduledWorkMode === "remote"
+                ? "work_schedule"
+                : "default",
           punchSessions: [],
           revisionNumber: 0,
           calculationVersion: 0,
@@ -342,6 +348,11 @@ async function mutateAttendance(options: {
           session,
         });
         record.set(refreshedPolicySnapshot(context));
+        if (!["manual", "import", "remote_work_request"].includes(record.workModeSource)) {
+          const scheduledWorkMode = context.schedule?.defaultWorkMode === "remote" ? "remote" : "office";
+          record.workMode = scheduledWorkMode;
+          record.workModeSource = scheduledWorkMode === "remote" ? "work_schedule" : "default";
+        }
         await recalculateRecord(record, context, session);
       }
 

@@ -31,6 +31,10 @@ function testValidEnumValues() {
     record({ remoteWorkPortion: "first_half", leaveUnit: "hours" }).validateSync(),
     undefined
   );
+  assert.equal(
+    record({ workMode: "remote", workModeSource: "work_schedule" }).validateSync(),
+    undefined
+  );
 }
 
 function testInvalidEnumValues() {

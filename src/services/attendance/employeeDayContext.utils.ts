@@ -67,6 +67,7 @@ export interface EmployeeDayClassification {
   defaultAttendanceStatus: DefaultAttendanceStatus;
   schedule: {
     configured: boolean;
+    defaultWorkMode: "office" | "remote";
     isWorkingDay: boolean | null;
     weeklyOffReason: string | null;
     startTime: string | null;
@@ -275,6 +276,7 @@ export function classifyEmployeeDay(options: {
     defaultAttendanceStatus,
     schedule: {
       configured: Boolean(rules),
+      defaultWorkMode: rules?.defaultWorkMode === "remote" ? "remote" : "office",
       isWorkingDay: scheduledDay.isWorkingDay,
       weeklyOffReason: scheduledDay.weeklyOffReason,
       startTime: rules?.startTime || null,

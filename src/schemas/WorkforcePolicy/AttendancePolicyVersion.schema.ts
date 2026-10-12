@@ -5,6 +5,7 @@ export interface AttendanceRules {
   gracePeriodMinutesEarly: number;
   minimumFullDayMinutes: number;
   minimumHalfDayMinutes: number;
+  statusCalculationBasis: "total_worked" | "scheduled_window";
   requirePunchOut: boolean;
   missingPunchTreatment: "flag_incomplete" | "half_day" | "absent";
   overtimeEnabled: boolean;
@@ -90,6 +91,11 @@ const AttendanceRulesSchema = new Schema<AttendanceRules>(
     gracePeriodMinutesEarly: { type: Number, min: 0, default: 0 },
     minimumFullDayMinutes: { type: Number, min: 1, default: 480 },
     minimumHalfDayMinutes: { type: Number, min: 1, default: 240 },
+    statusCalculationBasis: {
+      type: String,
+      enum: ["total_worked", "scheduled_window"],
+      default: "total_worked",
+    },
     requirePunchOut: { type: Boolean, default: true },
     missingPunchTreatment: {
       type: String,

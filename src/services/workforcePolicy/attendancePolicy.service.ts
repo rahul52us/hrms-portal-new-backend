@@ -27,6 +27,7 @@ const DEFAULT_RULES: AttendanceRules = {
   gracePeriodMinutesEarly: 0,
   minimumFullDayMinutes: 480,
   minimumHalfDayMinutes: 240,
+  statusCalculationBasis: "total_worked",
   requirePunchOut: true,
   missingPunchTreatment: "flag_incomplete",
   overtimeEnabled: false,
@@ -103,6 +104,13 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
   );
   if (minimumHalfDayMinutes >= minimumFullDayMinutes) {
     throw generateError("Half-day minutes must be less than full-day minutes", 400);
+  }
+
+  const statusCalculationBasis = normalizeText(
+    input.statusCalculationBasis || base.statusCalculationBasis || "total_worked"
+  ).toLowerCase() as AttendanceRules["statusCalculationBasis"];
+  if (!["total_worked", "scheduled_window"].includes(statusCalculationBasis)) {
+    throw generateError("Invalid attendance status calculation basis", 400);
   }
 
   const missingPunchTreatment = normalizeText(
@@ -247,6 +255,7 @@ function normalizeAttendanceRules(input: any = {}, current?: any): AttendanceRul
     ),
     minimumFullDayMinutes,
     minimumHalfDayMinutes,
+    statusCalculationBasis,
     requirePunchOut:
       typeof input.requirePunchOut === "boolean" ? input.requirePunchOut : base.requirePunchOut,
     missingPunchTreatment,

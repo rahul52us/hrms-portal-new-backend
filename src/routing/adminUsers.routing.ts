@@ -15,6 +15,7 @@ import {
   updateRolePermissionsHandler,
   updateManagedUserHandler,
   updateUserPermissionsHandler,
+  updateUserAccessRoleHandler,
   getManagedUserProfileDetailsHandler,
   updateManagedUserPersonalDetailsHandler,
   updateManagedUserFamilyContactsHandler,
@@ -38,6 +39,7 @@ router.get("/:id/assignment-history", authenticate, getManagedUserAssignmentHist
 router.delete("/:id", authenticate, deleteManagedUserHandler);
 router.put("/permissions/roles/:role", authenticate, updateRolePermissionsHandler);
 router.put("/:id/permissions", authenticate, updateUserPermissionsHandler);
+router.put("/:id/access-role", authenticate, updateUserAccessRoleHandler);
 router.put("/:id/status", authenticate, updateManagedUserStatusHandler);
 router.get("/:id/profile-details", authenticate, getManagedUserProfileDetailsHandler);
 router.put("/:id/profile/personal", authenticate, updateManagedUserPersonalDetailsHandler);

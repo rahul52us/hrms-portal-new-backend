@@ -10,7 +10,25 @@ export function normalizePayrollRole(value: unknown) {
     .trim()
     .toLowerCase()
     .replace(/^head[-\s]?hr$/i, "hradmin")
-    .replace(/^hr[-\s]?admin$/i, "hradmin");
+    .replace(/^hr[-\s]?admin$/i, "hradmin")
+    .replace(/^payroll[-\s]?executive$/i, "payrollexecutive");
+}
+
+export function isPayrollOperationsActor(actor: any) {
+  const role = normalizePayrollRole(actor?.role);
+  return (
+    ["superadmin", "admin", "hradmin"].includes(role) ||
+    (role === "user" && normalizePayrollRole(actor?.accessRole) === "payrollexecutive")
+  );
+}
+
+function ensurePayrollOperationsActor(actor: any) {
+  if (!isPayrollOperationsActor(actor)) {
+    throw generateError(
+      "Only company administrators, HR Admin, or an assigned Payroll Executive can access payroll operations",
+      403
+    );
+  }
 }
 
 export function getPayrollActor(req: any) {
@@ -27,19 +45,13 @@ export function getPayrollActorId(req: any) {
 
 export function ensurePayrollViewer(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and payroll-authorized HR users can view payroll", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(actor, PERMISSION_KEYS.VIEW_PAYROLL, "You do not have permission to view payroll");
 }
 
 export function ensurePayrollConfigurationManager(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can manage payroll configuration", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
@@ -49,10 +61,7 @@ export function ensurePayrollConfigurationManager(req: any) {
 
 export function ensureEmployeeCompensationManager(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can manage employee compensation", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
@@ -62,10 +71,7 @@ export function ensureEmployeeCompensationManager(req: any) {
 
 export function ensureEmployeeStatutoryManager(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can manage employee statutory data", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.MANAGE_EMPLOYEE_STATUTORY,
@@ -75,10 +81,7 @@ export function ensureEmployeeStatutoryManager(req: any) {
 
 export function ensurePayrollRunManager(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can manage payroll runs", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
@@ -88,10 +91,7 @@ export function ensurePayrollRunManager(req: any) {
 
 export function ensurePayrollRunApprover(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!['superadmin', 'admin', 'hradmin'].includes(role)) {
-    throw generateError('Only company administrators and HR Admin can approve payroll runs', 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.APPROVE_PAYROLL_RUNS,
@@ -101,10 +101,7 @@ export function ensurePayrollRunApprover(req: any) {
 
 export function ensurePayrollRunFinalizer(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can finalize payroll runs", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS,
@@ -114,10 +111,7 @@ export function ensurePayrollRunFinalizer(req: any) {
 
 export function ensurePayrollRunReopener(req: any) {
   const actor = getPayrollActor(req);
-  const role = normalizePayrollRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only company administrators and HR Admin can reopen payroll runs", 403);
-  }
+  ensurePayrollOperationsActor(actor);
   ensurePermission(
     actor,
     PERMISSION_KEYS.REOPEN_PAYROLL_RUNS,

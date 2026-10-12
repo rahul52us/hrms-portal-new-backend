@@ -74,3 +74,10 @@ export function matchAllowedNetwork(clientIp: unknown, allowedNetworks: string[]
 export function requestClientIp(req: any) {
   return normalizeClientIp(req?.ip || req?.socket?.remoteAddress || req?.connection?.remoteAddress);
 }
+
+export function hasAttendanceRemoteAuthorization(record: any) {
+  return Boolean(
+    ["remote", "hybrid"].includes(String(record?.workMode || "")) &&
+      ["work_schedule", "remote_work_request"].includes(String(record?.workModeSource || ""))
+  );
+}

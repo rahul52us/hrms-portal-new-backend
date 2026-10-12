@@ -14,9 +14,12 @@ import Department from "../../schemas/Department/Department.schema";
 import {
   PERMISSION_CATALOG,
   PERMISSION_KEYS,
+  ASSIGNABLE_ACCESS_ROLES,
   attachEffectivePermissions,
+  computeEffectivePermissions,
   CONFIGURABLE_PERMISSION_ROLES,
   ensurePermission,
+  getAssignableAccessRoleOptions,
   getPermissionRoleOptions,
   normalizePermissionRecord,
   normalizeRolePermissionMap,
@@ -54,6 +57,20 @@ function normalizeEmail(value: unknown) {
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
+}
+
+function completeRolePermissionMap(value: any) {
+  const configured = normalizeRolePermissionMap(value);
+  return getPermissionRoleOptions().reduce<Record<string, Record<string, boolean>>>(
+    (acc, roleOption) => {
+      acc[roleOption.value] = computeEffectivePermissions({
+        role: roleOption.value,
+        rolePermissionOverrides: configured[roleOption.value],
+      });
+      return acc;
+    },
+    {}
+  );
 }
 
 function normalizePhoneNumber(value: unknown) {
@@ -163,6 +180,10 @@ function normalizeRole(value: unknown) {
 
   if (/^hr[-\s]?executive$/i.test(normalized)) {
     return "hr";
+  }
+
+  if (/^payroll[-\s]?executive$/i.test(normalized)) {
+    return "payrollexecutive";
   }
 
   const managerMatch = normalized.match(/^l\s*(\d+)\s*[-\s]?\s*manager$/i);
@@ -1441,6 +1462,7 @@ function serializeUser(user: any) {
     name: user?.name || "",
     username: user?.username || "",
     role: user?.role || "user",
+    accessRole: userWithPermissions.accessRole || null,
     code: user?.code,
     employeeNumber: user?.employeeNumber || "",
     mobileNumber: user?.mobileNumber || "",
@@ -1790,6 +1812,10 @@ async function saveManagedUser({
 
     const previousRole = normalizeRole(user?.role);
     if (role !== previousRole) {
+      if (user) {
+        user.accessRole = null;
+        user.permissions = {};
+      }
       if (["hr", "hradmin"].includes(role)) {
         ensurePermission(actor, PERMISSION_KEYS.CREATE_HR_USERS, "You do not have permission to assign HR roles");
       } else if (role === "departmenthead") {
@@ -1987,6 +2013,27 @@ function assertSuperAdminRequester(req: any) {
     throw generateError("Only superadmin can manage permission settings", 403);
   }
 
+  return requester;
+}
+
+function assertPermissionManager(req: any, options: { roleDefaults?: boolean } = {}) {
+  const requester = assertAdminAccess(req);
+  ensurePermission(
+    requester,
+    PERMISSION_KEYS.MANAGE_PERMISSIONS,
+    "You do not have permission to manage access roles"
+  );
+  const allowedRoles = options.roleDefaults
+    ? ["superadmin", "admin"]
+    : ["superadmin", "admin", "hradmin"];
+  if (!allowedRoles.includes(requester.role)) {
+    throw generateError(
+      options.roleDefaults
+        ? "Only Super Admin or Company Admin can change role defaults"
+        : "Only Super Admin, Company Admin, or HR Admin can manage access assignments",
+      403
+    );
+  }
   return requester;
 }
 
@@ -3128,7 +3175,7 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
 
 export async function getPermissionConfigHandler(req: Request, res: Response) {
   try {
-    const requester = assertSuperAdminRequester(req);
+    const requester = assertPermissionManager(req);
     const company = await resolvePermissionCompany({
       actor: requester,
       requestedCompanyId: normalizeText(req.query.companyId),
@@ -3138,7 +3185,7 @@ export async function getPermissionConfigHandler(req: Request, res: Response) {
       throw generateError("Company not found", 404);
     }
 
-    const rolePermissions = normalizeRolePermissionMap(company.rolePermissions);
+    const rolePermissions = completeRolePermissionMap(company.rolePermissions);
 
     return res.status(200).json({
       success: true,
@@ -3147,6 +3194,7 @@ export async function getPermissionConfigHandler(req: Request, res: Response) {
         companyName: company.company_name,
         catalog: PERMISSION_CATALOG,
         roles: getPermissionRoleOptions(),
+        assignmentRoles: getAssignableAccessRoleOptions(),
         rolePermissions,
       },
     });
@@ -3205,7 +3253,7 @@ export async function getCompanySettingsHandler(req: Request, res: Response) {
 
 export async function updateRolePermissionsHandler(req: Request, res: Response) {
   try {
-    const requester = assertSuperAdminRequester(req);
+    const requester = assertPermissionManager(req, { roleDefaults: true });
     const company = await resolvePermissionCompany({
       actor: requester,
       requestedCompanyId: normalizeText(req.body?.companyId || req.query.companyId),
@@ -3221,7 +3269,7 @@ export async function updateRolePermissionsHandler(req: Request, res: Response) 
     }
 
     if (!CONFIGURABLE_PERMISSION_ROLES.includes(role as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-      throw generateError("Only admin, HR Admin, HR, and department head permissions can be configured", 400);
+      throw generateError("This permission role cannot be configured", 400);
     }
 
     const permissionValidation = validatePermissionRecordForRole({
@@ -3245,7 +3293,7 @@ export async function updateRolePermissionsHandler(req: Request, res: Response) 
         companyId: company._id,
         role,
         permissions: currentRolePermissions[role],
-        rolePermissions: currentRolePermissions,
+        rolePermissions: completeRolePermissionMap(currentRolePermissions),
       },
     });
   } catch (error: any) {
@@ -3258,7 +3306,7 @@ export async function updateRolePermissionsHandler(req: Request, res: Response) 
 
 export async function updateUserPermissionsHandler(req: Request, res: Response) {
   try {
-    const requester = assertSuperAdminRequester(req);
+    const requester = assertPermissionManager(req);
     const targetUser = await User.findById(req.params.id)
       .populate("company", "company_name companyCode rolePermissions")
       .populate("createdBy", "name username role")
@@ -3268,17 +3316,29 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
       throw generateError("User not found", 404);
     }
 
+    const targetCompanyId = normalizeObjectIdLike(targetUser.company);
+    if (
+      requester.role !== "superadmin" &&
+      (!requester.companyId || targetCompanyId !== requester.companyId)
+    ) {
+      throw generateError("User does not belong to your company", 403);
+    }
+
     if (normalizeRole(targetUser.role) === "superadmin") {
       throw generateError("Superadmin permissions cannot be overridden", 400);
     }
 
     const targetRole = normalizeRole(targetUser.role);
-    if (!CONFIGURABLE_PERMISSION_ROLES.includes(targetRole as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-      throw generateError("Only admin and department head permissions can be overridden", 400);
+    if (requester.role === "hradmin" && targetRole === "admin") {
+      throw generateError("HR Admin cannot change Company Admin permissions", 403);
+    }
+    const permissionRole = normalizeRole(targetUser.accessRole || targetRole);
+    if (!CONFIGURABLE_PERMISSION_ROLES.includes(permissionRole as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
+      throw generateError("Assign an access role before configuring permissions for this employee", 400);
     }
 
     const permissionValidation = validatePermissionRecordForRole({
-      role: targetRole,
+      role: permissionRole,
       permissions: req.body?.permissions,
     });
     if (!permissionValidation.valid) {
@@ -3300,6 +3360,81 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
     return res.status(error?.statusCode || 500).json({
       success: false,
       error: error?.message || "Failed to update user permission overrides",
+    });
+  }
+}
+
+export async function updateUserAccessRoleHandler(req: Request, res: Response) {
+  try {
+    const requester = assertPermissionManager(req);
+    const requestedCompanyId = normalizeText(req.body?.companyId || req.query.companyId);
+    if (!requestedCompanyId || !mongoose.Types.ObjectId.isValid(requestedCompanyId)) {
+      throw generateError("Valid company context is required", 422);
+    }
+    const company = await resolvePermissionCompany({
+      actor: requester,
+      requestedCompanyId,
+    });
+    if (!company) {
+      throw generateError("Company not found", 404);
+    }
+
+    const targetUser: any = await User.findById(req.params.id)
+      .populate("company", "company_name companyCode rolePermissions")
+      .populate("createdBy", "name username role")
+      .populate("reportingManager", "name username role designation");
+    if (!targetUser || targetUser.deletedAt) {
+      throw generateError("User not found", 404);
+    }
+    if (normalizeRole(targetUser.role) !== "user") {
+      throw generateError("Access roles can be assigned only to employees", 400);
+    }
+
+    const targetCompanyId = normalizeObjectIdLike(targetUser.company);
+    if (!targetCompanyId || targetCompanyId !== String(company._id)) {
+      throw generateError("User does not belong to the selected company", 403);
+    }
+
+    const requestedAccessRole = normalizeText(req.body?.accessRole);
+    const accessRole = requestedAccessRole ? normalizeRole(requestedAccessRole) : "";
+    if (
+      accessRole &&
+      !ASSIGNABLE_ACCESS_ROLES.includes(accessRole as (typeof ASSIGNABLE_ACCESS_ROLES)[number])
+    ) {
+      throw generateError("Invalid access role assignment", 400);
+    }
+
+    const currentAccessRole = normalizeText(targetUser.accessRole)
+      ? normalizeRole(targetUser.accessRole)
+      : "";
+    if (currentAccessRole === accessRole) {
+      return res.status(200).json({
+        success: true,
+        message: accessRole ? "Access role is already assigned" : "No access role is assigned",
+        data: {
+          user: serializeUser(targetUser),
+          permissionOverridesReset: false,
+        },
+      });
+    }
+
+    targetUser.accessRole = accessRole || null;
+    targetUser.permissions = {};
+    targetUser.updatedAt = new Date();
+    await targetUser.save();
+
+    return res.status(200).json({
+      success: true,
+      message: accessRole ? "Access role assigned successfully" : "Access role removed successfully",
+      data: {
+        user: serializeUser(targetUser),
+        permissionOverridesReset: true,
+      },
+    });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      error: error?.message || "Failed to update access role",
     });
   }
 }
