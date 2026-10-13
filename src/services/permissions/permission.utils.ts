@@ -510,6 +510,7 @@ const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_DEPARTMENTS,
   PERMISSION_KEYS.VIEW_LOCATIONS,
   PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES,
+  PERMISSION_KEYS.MANAGE_WORKFORCE_POLICIES,
   PERMISSION_KEYS.VIEW_ATTENDANCE,
   PERMISSION_KEYS.ADJUST_ATTENDANCE,
   PERMISSION_KEYS.VIEW_ATTENDANCE_REPORTS,
@@ -566,6 +567,17 @@ const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSION_KEYS.VIEW_PROFILE,
 ];
 
+export const INDIVIDUAL_OVERRIDE_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PAYROLL,
+  PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
+  PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
+  PERMISSION_KEYS.MANAGE_EMPLOYEE_STATUTORY,
+  PERMISSION_KEYS.MANAGE_PAYROLL_RUNS,
+  PERMISSION_KEYS.APPROVE_PAYROLL_RUNS,
+  PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS,
+  PERMISSION_KEYS.REOPEN_PAYROLL_RUNS,
+];
+
 const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
   superadmin: ALL_PERMISSION_KEYS,
   admin: ADMIN_ALLOWED_PERMISSION_KEYS,
@@ -576,7 +588,7 @@ const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
   default: [PERMISSION_KEYS.VIEW_PROFILE],
 };
 
-const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
+export const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
   [PERMISSION_KEYS.CREATE_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_HR_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_MANAGERS]: [PERMISSION_KEYS.VIEW_USERS],
@@ -679,6 +691,26 @@ function getRoleLabel(roleInput: unknown) {
 export function getAllowedPermissionKeysForRole(roleInput: unknown) {
   const role = normalizeRole(roleInput);
   return ROLE_ALLOWED_PERMISSION_KEYS[role] || ROLE_ALLOWED_PERMISSION_KEYS.default;
+}
+
+export function getAllowedUserOverridePermissionKeys(
+  roleInput: unknown,
+  accessRoleInput?: unknown
+) {
+  const role = normalizeRole(roleInput);
+  if (role === "superadmin") return ALL_PERMISSION_KEYS;
+
+  const allowed = new Set<PermissionKey>(getAllowedPermissionKeysForRole(role));
+  const accessRole = normalizeRole(accessRoleInput);
+  if (
+    accessRole &&
+    ASSIGNABLE_ACCESS_ROLES.includes(accessRole as (typeof ASSIGNABLE_ACCESS_ROLES)[number])
+  ) {
+    getAllowedPermissionKeysForRole(accessRole).forEach((key) => allowed.add(key));
+  }
+  INDIVIDUAL_OVERRIDE_PERMISSION_KEYS.forEach((key) => allowed.add(key));
+  SYSTEM_ONLY_PERMISSION_KEYS.forEach((key) => allowed.delete(key));
+  return Array.from(allowed);
 }
 
 function createPermissionRecord(enabledKeys: string[]) {
@@ -995,6 +1027,72 @@ export function validatePermissionRecordForRole(options: {
   };
 }
 
+export function validateUserPermissionOverrides(options: {
+  role: unknown;
+  accessRole?: unknown;
+  permissions: any;
+  rolePermissionOverrides?: any;
+  accessRolePermissionOverrides?: any;
+}) {
+  const errors: string[] = [];
+  const sanitizedPermissions: Record<string, boolean> = {};
+  const allowedKeys = new Set(
+    getAllowedUserOverridePermissionKeys(options.role, options.accessRole)
+  );
+
+  if (
+    !options.permissions ||
+    typeof options.permissions !== "object" ||
+    Array.isArray(options.permissions)
+  ) {
+    errors.push("Permission overrides must be an object.");
+  } else {
+    for (const [permissionKey, permissionValue] of Object.entries(options.permissions)) {
+      if (!ALL_PERMISSION_KEYS.includes(permissionKey as PermissionKey)) {
+        errors.push(`Unknown permission: ${permissionKey}.`);
+        continue;
+      }
+      if (!allowedKeys.has(permissionKey as PermissionKey)) {
+        const label = PERMISSION_METADATA_BY_KEY[permissionKey]?.label || permissionKey;
+        errors.push(`${label} cannot be delegated to this user.`);
+        continue;
+      }
+      if (typeof permissionValue !== "boolean") {
+        errors.push(`${permissionKey} must be true or false.`);
+        continue;
+      }
+      sanitizedPermissions[permissionKey] = permissionValue;
+    }
+  }
+
+  const effectivePermissions = computeEffectivePermissions({
+    role: options.role,
+    rolePermissionOverrides: options.rolePermissionOverrides,
+    accessRole: options.accessRole,
+    accessRolePermissionOverrides: options.accessRolePermissionOverrides,
+    userOverrides: sanitizedPermissions,
+  });
+
+  for (const [permissionKey, permissionValue] of Object.entries(sanitizedPermissions)) {
+    if (!permissionValue || effectivePermissions[permissionKey]) continue;
+    const missingDependencies = (PERMISSION_DEPENDENCIES[permissionKey as PermissionKey] || [])
+      .filter((dependencyKey) => !effectivePermissions[dependencyKey]);
+    if (!missingDependencies.length) continue;
+    const permissionLabel = PERMISSION_METADATA_BY_KEY[permissionKey]?.label || permissionKey;
+    const dependencyLabels = missingDependencies.map(
+      (dependencyKey) => PERMISSION_METADATA_BY_KEY[dependencyKey]?.label || dependencyKey
+    );
+    errors.push(`${permissionLabel} requires ${dependencyLabels.join(", ")}.`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    sanitizedPermissions,
+    effectivePermissions,
+  };
+}
+
 export function normalizeRolePermissionMap(value: any) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {} as Record<string, Record<string, boolean>>;
@@ -1050,6 +1148,7 @@ export function computeEffectivePermissions(options: {
       }
     }
   });
+  INDIVIDUAL_OVERRIDE_PERMISSION_KEYS.forEach((key) => allowedKeys.add(key));
 
   if (options.userOverrides && typeof options.userOverrides === "object") {
     const normalizedUserOverrides = normalizePermissionRecord(options.userOverrides);

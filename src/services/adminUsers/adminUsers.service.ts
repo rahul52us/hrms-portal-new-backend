@@ -13,8 +13,10 @@ import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import Department from "../../schemas/Department/Department.schema";
 import {
   PERMISSION_CATALOG,
+  PERMISSION_DEPENDENCIES,
   PERMISSION_KEYS,
   ASSIGNABLE_ACCESS_ROLES,
+  INDIVIDUAL_OVERRIDE_PERMISSION_KEYS,
   attachEffectivePermissions,
   computeEffectivePermissions,
   CONFIGURABLE_PERMISSION_ROLES,
@@ -25,6 +27,7 @@ import {
   normalizeRolePermissionMap,
   resolvePermissionCompany,
   validatePermissionRecordForRole,
+  validateUserPermissionOverrides,
 } from "../permissions/permission.utils";
 import {
   assertCompanyIsActiveForManagement,
@@ -3193,8 +3196,10 @@ export async function getPermissionConfigHandler(req: Request, res: Response) {
         companyId: company._id,
         companyName: company.company_name,
         catalog: PERMISSION_CATALOG,
+        permissionDependencies: PERMISSION_DEPENDENCIES,
         roles: getPermissionRoleOptions(),
         assignmentRoles: getAssignableAccessRoleOptions(),
+        individualOverridePermissionKeys: INDIVIDUAL_OVERRIDE_PERMISSION_KEYS,
         rolePermissions,
       },
     });
@@ -3332,14 +3337,16 @@ export async function updateUserPermissionsHandler(req: Request, res: Response) 
     if (requester.role === "hradmin" && targetRole === "admin") {
       throw generateError("HR Admin cannot change Company Admin permissions", 403);
     }
-    const permissionRole = normalizeRole(targetUser.accessRole || targetRole);
-    if (!CONFIGURABLE_PERMISSION_ROLES.includes(permissionRole as (typeof CONFIGURABLE_PERMISSION_ROLES)[number])) {
-      throw generateError("Assign an access role before configuring permissions for this employee", 400);
-    }
-
-    const permissionValidation = validatePermissionRecordForRole({
-      role: permissionRole,
+    const accessRole = normalizeRole(targetUser.accessRole);
+    const companyRolePermissions = normalizeRolePermissionMap(
+      (targetUser.company as any)?.rolePermissions
+    );
+    const permissionValidation = validateUserPermissionOverrides({
+      role: targetRole,
+      accessRole,
       permissions: req.body?.permissions,
+      rolePermissionOverrides: companyRolePermissions[targetRole],
+      accessRolePermissionOverrides: companyRolePermissions[accessRole],
     });
     if (!permissionValidation.valid) {
       throw generateError(permissionValidation.errors.join(" "), 400);
@@ -3386,8 +3393,12 @@ export async function updateUserAccessRoleHandler(req: Request, res: Response) {
     if (!targetUser || targetUser.deletedAt) {
       throw generateError("User not found", 404);
     }
-    if (normalizeRole(targetUser.role) !== "user") {
-      throw generateError("Access roles can be assigned only to employees", 400);
+    const targetRole = normalizeRole(targetUser.role);
+    if (!["user", "hr", "departmenthead"].includes(targetRole)) {
+      throw generateError(
+        "Access roles can be assigned only to employees, HR users, and department heads",
+        400
+      );
     }
 
     const targetCompanyId = normalizeObjectIdLike(targetUser.company);

@@ -30,12 +30,14 @@ const delegatedRequest = requestWithPermissions({
 assert.doesNotThrow(() => ensurePayrollViewer(delegatedRequest));
 assert.doesNotThrow(() => ensurePayrollRunManager(delegatedRequest));
 assert.throws(() => ensurePayrollRunApprover(delegatedRequest), /permission to approve payroll runs/i);
+assert.doesNotThrow(() =>
+  ensurePayrollViewer({
+    user: { role: "user", effectivePermissions: { view_payroll: true } },
+  })
+);
 assert.throws(
-  () =>
-    ensurePayrollViewer({
-      user: { role: "user", effectivePermissions: { view_payroll: true } },
-    }),
-  /assigned Payroll Executive/i
+  () => ensurePayrollViewer({ user: { role: "user", effectivePermissions: {} } }),
+  /has not been assigned/i
 );
 
 console.log("Payroll access-role guard tests passed");

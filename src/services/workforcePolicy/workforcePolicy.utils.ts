@@ -87,11 +87,6 @@ export function ensurePolicyViewer(req: any) {
 
 export function ensurePolicyManager(req: any) {
   const actor = getPolicyActor(req);
-  const role = normalizeRole(actor?.role);
-  if (!["superadmin", "admin", "hradmin"].includes(role)) {
-    throw generateError("Only superadmin, company admin, or HR Admin can manage workforce policies", 403);
-  }
-
   ensurePermission(
     actor,
     PERMISSION_KEYS.MANAGE_WORKFORCE_POLICIES,

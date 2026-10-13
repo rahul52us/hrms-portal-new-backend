@@ -4,7 +4,9 @@ import {
   attachEffectivePermissions,
   computeEffectivePermissions,
   getDefaultPermissionsForRole,
+  getAllowedUserOverridePermissionKeys,
   sanitizePermissionRecordForRole,
+  validateUserPermissionOverrides,
 } from "./permission.utils";
 
 function testPayrollExecutiveDefaults() {
@@ -67,9 +69,101 @@ function testHiddenPermissionManagementCannotBeRemovedByVisibleRoleForm() {
   assert.equal(payrollPermissions[PERMISSION_KEYS.MANAGE_PERMISSIONS], false);
 }
 
+function testOmittedUserOverridesContinueToInheritRoleDefaults() {
+  const validation = validateUserPermissionOverrides({
+    role: "hr",
+    permissions: {},
+  });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.sanitizedPermissions, {});
+  assert.equal(
+    validation.effectivePermissions[PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES],
+    true
+  );
+}
+
+function testUserOverrideCanExplicitlyDenyInheritedPermission() {
+  const validation = validateUserPermissionOverrides({
+    role: "hr",
+    permissions: {
+      [PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES]: false,
+    },
+  });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.sanitizedPermissions, {
+    [PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES]: false,
+  });
+  assert.equal(
+    validation.effectivePermissions[PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES],
+    false
+  );
+  assert.equal(validation.effectivePermissions[PERMISSION_KEYS.VIEW_PROFILE], true);
+}
+
+function testPayrollPermissionsCanBeDelegatedIndividually() {
+  const validation = validateUserPermissionOverrides({
+    role: "hr",
+    permissions: {
+      [PERMISSION_KEYS.VIEW_PAYROLL]: true,
+      [PERMISSION_KEYS.MANAGE_PAYROLL_RUNS]: true,
+    },
+  });
+
+  assert.equal(validation.valid, true);
+  assert.equal(validation.effectivePermissions[PERMISSION_KEYS.VIEW_PAYROLL], true);
+  assert.equal(validation.effectivePermissions[PERMISSION_KEYS.MANAGE_PAYROLL_RUNS], true);
+  assert.equal(
+    getAllowedUserOverridePermissionKeys("hr").includes(PERMISSION_KEYS.VIEW_PAYROLL),
+    true
+  );
+}
+
+function testSystemPermissionCannotBeDelegatedIndividually() {
+  const validation = validateUserPermissionOverrides({
+    role: "user",
+    permissions: {
+      [PERMISSION_KEYS.MANAGE_PERMISSIONS]: true,
+    },
+  });
+
+  assert.equal(validation.valid, false);
+  assert.match(validation.errors.join(" "), /cannot be delegated/i);
+  assert.deepEqual(validation.sanitizedPermissions, {});
+}
+
+function testHrCanReceiveWorkforcePolicyManagementOverride() {
+  const defaults = getDefaultPermissionsForRole("hr");
+  assert.equal(defaults[PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES], true);
+  assert.equal(defaults[PERMISSION_KEYS.MANAGE_WORKFORCE_POLICIES], false);
+
+  const validation = validateUserPermissionOverrides({
+    role: "hr",
+    permissions: {
+      [PERMISSION_KEYS.MANAGE_WORKFORCE_POLICIES]: true,
+    },
+  });
+
+  assert.equal(validation.valid, true);
+  assert.equal(
+    validation.effectivePermissions[PERMISSION_KEYS.VIEW_WORKFORCE_POLICIES],
+    true
+  );
+  assert.equal(
+    validation.effectivePermissions[PERMISSION_KEYS.MANAGE_WORKFORCE_POLICIES],
+    true
+  );
+}
+
 testPayrollExecutiveDefaults();
 testEmployeeAccessRoleDoesNotChangeOrganizationalRole();
 testCompanyRoleConfigurationAndIndividualOverride();
 testHiddenPermissionManagementCannotBeRemovedByVisibleRoleForm();
+testOmittedUserOverridesContinueToInheritRoleDefaults();
+testUserOverrideCanExplicitlyDenyInheritedPermission();
+testPayrollPermissionsCanBeDelegatedIndividually();
+testSystemPermissionCannotBeDelegatedIndividually();
+testHrCanReceiveWorkforcePolicyManagementOverride();
 
 console.log("Permission access-role tests passed");

@@ -3,7 +3,11 @@ import { generateError } from "../../config/Error/functions";
 import Company from "../../schemas/company/Company";
 import PayrollAuditLog from "../../schemas/Payroll/PayrollAuditLog.schema";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
-import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
+import {
+  ensurePermission,
+  hasPermission,
+  PERMISSION_KEYS,
+} from "../permissions/permission.utils";
 
 export function normalizePayrollRole(value: unknown) {
   return String(value || "")
@@ -18,14 +22,15 @@ export function isPayrollOperationsActor(actor: any) {
   const role = normalizePayrollRole(actor?.role);
   return (
     ["superadmin", "admin", "hradmin"].includes(role) ||
-    (role === "user" && normalizePayrollRole(actor?.accessRole) === "payrollexecutive")
+    normalizePayrollRole(actor?.accessRole) === "payrollexecutive" ||
+    hasPermission(actor, PERMISSION_KEYS.VIEW_PAYROLL)
   );
 }
 
 function ensurePayrollOperationsActor(actor: any) {
   if (!isPayrollOperationsActor(actor)) {
     throw generateError(
-      "Only company administrators, HR Admin, or an assigned Payroll Executive can access payroll operations",
+      "Payroll access has not been assigned to this user",
       403
     );
   }
