@@ -119,6 +119,17 @@ import {
   listMyPayrollPayslipsService,
   listPayrollPayslipsService,
 } from "../services/payroll/payrollPayslip.service";
+import {
+  exportPayrollReportService,
+  getPayrollReportService,
+} from "../services/payroll/payrollReport.service";
+import {
+  getPayrollOperationalMetricsService,
+  listPayrollOperationalJobsService,
+  retryPayrollOperationalJobService,
+  runPayrollRemindersService,
+} from "../services/payroll/payrollOperations.service";
+import { listPayrollAccessLogsService } from "../services/payroll/payrollAccess.service";
 
 const payrollRouting = express.Router();
 const compensationImport = multer({
@@ -168,6 +179,13 @@ payrollRouting.post("/structures/:structureId/restore", restoreSalaryStructureSe
 payrollRouting.get("/compensation/me", getMyCompensationService);
 payrollRouting.get("/payslips/me", listMyPayrollPayslipsService);
 payrollRouting.get("/payslips/me/:payslipId/download", downloadMyPayrollPayslipService);
+payrollRouting.get("/reports/:reportType", getPayrollReportService);
+payrollRouting.get("/reports/:reportType/export", exportPayrollReportService);
+payrollRouting.get("/operations/jobs", listPayrollOperationalJobsService);
+payrollRouting.get("/operations/metrics", getPayrollOperationalMetricsService);
+payrollRouting.get("/operations/access-logs", listPayrollAccessLogsService);
+payrollRouting.post("/operations/reminders/run", runPayrollRemindersService);
+payrollRouting.post("/operations/jobs/:jobId/retry", retryPayrollOperationalJobService);
 payrollRouting.get("/compensation/employees", listCompensationEmployeesService);
 payrollRouting.get("/compensation/employees/:employeeId", getEmployeeCompensationHistoryService);
 payrollRouting.post("/compensation/preview", previewEmployeeCompensationService);

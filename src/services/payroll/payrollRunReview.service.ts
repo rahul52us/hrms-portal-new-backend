@@ -11,6 +11,11 @@ import {
   resolvePayrollCompany,
   writePayrollAudit,
 } from "./payroll.utils";
+import { PERMISSION_KEYS } from "../permissions/permission.utils";
+import {
+  resolvePayrollPermissionRecipients,
+  sendPayrollNotificationSafely,
+} from "./payrollNotification.service";
 
 const text = (value: unknown) => String(value ?? "").trim();
 
@@ -160,7 +165,7 @@ async function populatedRun(company: mongoose.Types.ObjectId, runId: mongoose.Ty
 export async function submitPayrollRunForReviewService(req: any, res: Response, next: NextFunction) {
   try {
     ensurePayrollRunManager(req);
-    const { companyObjectId } = await resolvePayrollCompany(
+    const { companyObjectId, company } = await resolvePayrollCompany(
       req,
       req.body?.companyId,
       true,
@@ -222,10 +227,31 @@ export async function submitPayrollRunForReviewService(req: any, res: Response, 
       }, session);
     });
 
+    const result = await populatedRun(companyObjectId, runId);
+    const approvers = await resolvePayrollPermissionRecipients({
+      company,
+      permission: PERMISSION_KEYS.APPROVE_PAYROLL_RUNS,
+      exclude: [actorId],
+    });
+    await sendPayrollNotificationSafely({
+      company: companyObjectId,
+      recipients: approvers,
+      actor: actorId,
+      eventType: "payroll_run_awaiting_approval",
+      entityType: "payroll_run",
+      entityId: runId,
+      title: "Payroll is ready for review",
+      message: `${result?.periodKey || "Payroll"} was submitted for an independent review decision.`,
+      actionUrl: "/dashboard/payroll",
+      priority: "high",
+      category: "approval",
+      metadata: { periodKey: result?.periodKey, runVersion: result?.version },
+      dedupeEventKey: `awaiting-approval:${result?.version || version + 1}`,
+    });
     return res.status(200).json({
       success: true,
       message: "Payroll submitted for independent review",
-      data: await populatedRun(companyObjectId, runId),
+      data: result,
     });
   } catch (error) {
     next(error);
@@ -235,7 +261,7 @@ export async function submitPayrollRunForReviewService(req: any, res: Response, 
 export async function decidePayrollRunReviewService(req: any, res: Response, next: NextFunction) {
   try {
     ensurePayrollRunApprover(req);
-    const { companyObjectId } = await resolvePayrollCompany(
+    const { companyObjectId, company } = await resolvePayrollCompany(
       req,
       req.body?.companyId,
       true,
@@ -303,10 +329,51 @@ export async function decidePayrollRunReviewService(req: any, res: Response, nex
       }, session);
     });
 
+    const result: any = await populatedRun(companyObjectId, runId);
+    const submitterId = result?.reviewSubmittedBy?._id || result?.reviewSubmittedBy;
+    await sendPayrollNotificationSafely({
+      company: companyObjectId,
+      recipients: submitterId ? [submitterId] : [],
+      actor: actorId,
+      eventType: action === "approve" ? "payroll_review_approved" : "payroll_review_returned",
+      entityType: "payroll_run",
+      entityId: runId,
+      title: action === "approve" ? "Payroll review approved" : "Payroll returned for correction",
+      message: action === "approve"
+        ? `${result?.periodKey || "Payroll"} passed independent review.`
+        : `${result?.periodKey || "Payroll"} was returned to draft for correction.`,
+      actionUrl: "/dashboard/payroll",
+      priority: "high",
+      category: "system",
+      metadata: { periodKey: result?.periodKey, decision: action, runVersion: result?.version },
+      dedupeEventKey: `review-${action}:${result?.version || version + 1}`,
+    });
+    if (action === "approve") {
+      const finalizers = await resolvePayrollPermissionRecipients({
+        company,
+        permission: PERMISSION_KEYS.FINALIZE_PAYROLL_RUNS,
+        exclude: [actorId],
+      });
+      await sendPayrollNotificationSafely({
+        company: companyObjectId,
+        recipients: finalizers,
+        actor: actorId,
+        eventType: "payroll_run_awaiting_finalization",
+        entityType: "payroll_run",
+        entityId: runId,
+        title: "Payroll is ready to finalize",
+        message: `${result?.periodKey || "Payroll"} completed independent review and is ready to finalize.`,
+        actionUrl: "/dashboard/payroll",
+        priority: "high",
+        category: "approval",
+        metadata: { periodKey: result?.periodKey, runVersion: result?.version },
+        dedupeEventKey: `awaiting-finalization:${result?.version || version + 1}`,
+      });
+    }
     return res.status(200).json({
       success: true,
       message: action === "approve" ? "Payroll review approved" : "Payroll returned to draft",
-      data: await populatedRun(companyObjectId, runId),
+      data: result,
     });
   } catch (error) {
     next(error);

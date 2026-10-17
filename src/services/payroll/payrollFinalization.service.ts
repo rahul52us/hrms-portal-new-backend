@@ -15,6 +15,7 @@ import {
   writePayrollAudit,
 } from "./payroll.utils";
 import { getPayrollReviewStatistics, payrollReviewBlockers } from "./payrollRunReview.service";
+import { sendPayrollNotificationSafely } from "./payrollNotification.service";
 
 const text = (value: unknown) => String(value ?? "").trim();
 const id = (value: any) => String(value?._id || value || "");
@@ -261,10 +262,31 @@ export async function finalizePayrollRunService(req: any, res: Response, next: N
       }, session);
     });
 
+    const result: any = await populatedRun(companyObjectId, runId);
+    if (!alreadyFinalized) {
+      const recipients = [result?.createdBy, result?.reviewSubmittedBy, result?.reviewDecidedBy]
+        .map((value: any) => value?._id || value)
+        .filter((value: any) => value && String(value) !== String(actorId));
+      await sendPayrollNotificationSafely({
+        company: companyObjectId,
+        recipients,
+        actor: actorId,
+        eventType: "payroll_run_finalized",
+        entityType: "payroll_run",
+        entityId: runId,
+        title: "Payroll finalized",
+        message: `${result?.periodKey || "Payroll"} was finalized with immutable employee results.`,
+        actionUrl: "/dashboard/payroll",
+        priority: "high",
+        category: "system",
+        metadata: { periodKey: result?.periodKey, finalizationVersion: result?.finalizationVersion },
+        dedupeEventKey: `finalized:${result?.finalizationVersion || 1}`,
+      });
+    }
     return res.status(200).json({
       success: true,
       message: alreadyFinalized ? "Payroll run is already finalized" : "Payroll finalized with immutable employee results",
-      data: await populatedRun(companyObjectId, runId),
+      data: result,
     });
   } catch (error) {
     next(error);

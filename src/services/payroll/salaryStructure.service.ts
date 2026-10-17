@@ -29,6 +29,11 @@ type PayrollSettings = {
   payDay: number;
   roundingMode: PayrollRoundingMode;
   employeeCompensationVisibility: "hidden" | "current" | "history";
+  payrollReminderDay: number;
+  payrollNotificationsEnabled: boolean;
+  accessLogRetentionDays: number;
+  operationalJobRetentionDays: number;
+  finalizedPayrollRetentionYears: number;
 };
 
 export function settingsFromCompany(company: any): PayrollSettings {
@@ -41,6 +46,11 @@ export function settingsFromCompany(company: any): PayrollSettings {
     employeeCompensationVisibility: (["current", "history"].includes(company?.payrollSettings?.employeeCompensationVisibility)
       ? company.payrollSettings.employeeCompensationVisibility
       : "hidden") as PayrollSettings["employeeCompensationVisibility"],
+    payrollReminderDay: Number(company?.payrollSettings?.payrollReminderDay || 20),
+    payrollNotificationsEnabled: company?.payrollSettings?.payrollNotificationsEnabled !== false,
+    accessLogRetentionDays: Number(company?.payrollSettings?.accessLogRetentionDays || 365),
+    operationalJobRetentionDays: Number(company?.payrollSettings?.operationalJobRetentionDays || 90),
+    finalizedPayrollRetentionYears: Number(company?.payrollSettings?.finalizedPayrollRetentionYears || 8),
   };
 }
 
@@ -54,6 +64,13 @@ export function normalizeSettings(body: any, defaults?: PayrollSettings): Payrol
     employeeCompensationVisibility: String(
       body?.employeeCompensationVisibility ?? defaults?.employeeCompensationVisibility ?? "hidden"
     ).trim().toLowerCase() as PayrollSettings["employeeCompensationVisibility"],
+    payrollReminderDay: Number(body?.payrollReminderDay ?? defaults?.payrollReminderDay ?? 20),
+    payrollNotificationsEnabled: body?.payrollNotificationsEnabled === undefined
+      ? defaults?.payrollNotificationsEnabled !== false
+      : body.payrollNotificationsEnabled === true,
+    accessLogRetentionDays: Number(body?.accessLogRetentionDays ?? defaults?.accessLogRetentionDays ?? 365),
+    operationalJobRetentionDays: Number(body?.operationalJobRetentionDays ?? defaults?.operationalJobRetentionDays ?? 90),
+    finalizedPayrollRetentionYears: Number(body?.finalizedPayrollRetentionYears ?? defaults?.finalizedPayrollRetentionYears ?? 8),
   };
   if (!/^[A-Z]{3}$/.test(settings.currency)) throw generateError("Currency must be a three-letter ISO-style code", 422);
   if (!Number.isInteger(settings.currencyMinorUnits) || settings.currencyMinorUnits < 0 || settings.currencyMinorUnits > 3) {
@@ -67,6 +84,18 @@ export function normalizeSettings(body: any, defaults?: PayrollSettings): Payrol
   }
   if (!["hidden", "current", "history"].includes(settings.employeeCompensationVisibility)) {
     throw generateError("Invalid employee compensation visibility", 422);
+  }
+  if (!Number.isInteger(settings.payrollReminderDay) || settings.payrollReminderDay < 1 || settings.payrollReminderDay > 28) {
+    throw generateError("Payroll reminder day must be between 1 and 28", 422);
+  }
+  if (!Number.isInteger(settings.accessLogRetentionDays) || settings.accessLogRetentionDays < 30 || settings.accessLogRetentionDays > 3650) {
+    throw generateError("Payroll access-log retention must be between 30 and 3650 days", 422);
+  }
+  if (!Number.isInteger(settings.operationalJobRetentionDays) || settings.operationalJobRetentionDays < 7 || settings.operationalJobRetentionDays > 730) {
+    throw generateError("Payroll job retention must be between 7 and 730 days", 422);
+  }
+  if (!Number.isInteger(settings.finalizedPayrollRetentionYears) || settings.finalizedPayrollRetentionYears < 1 || settings.finalizedPayrollRetentionYears > 25) {
+    throw generateError("Finalized payroll retention must be between 1 and 25 years", 422);
   }
   return settings;
 }
@@ -256,6 +285,11 @@ export async function updatePayrollSettingsService(req: any, res: Response, next
             "payrollSettings.payDay": settings.payDay,
             "payrollSettings.roundingMode": settings.roundingMode,
             "payrollSettings.employeeCompensationVisibility": settings.employeeCompensationVisibility,
+            "payrollSettings.payrollReminderDay": settings.payrollReminderDay,
+            "payrollSettings.payrollNotificationsEnabled": settings.payrollNotificationsEnabled,
+            "payrollSettings.accessLogRetentionDays": settings.accessLogRetentionDays,
+            "payrollSettings.operationalJobRetentionDays": settings.operationalJobRetentionDays,
+            "payrollSettings.finalizedPayrollRetentionYears": settings.finalizedPayrollRetentionYears,
             updatedAt: new Date(),
           },
         },

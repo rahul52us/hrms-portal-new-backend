@@ -17,6 +17,10 @@ import {
   runScheduledAttendanceProcessor,
   startAttendanceProcessorScheduler,
 } from "./services/attendance/attendanceProcessorScheduler";
+import {
+  recoverPayrollOperationalJobs,
+  startPayrollOperationsScheduler,
+} from "./services/payroll/payrollOperationsScheduler";
 
 dotenv.config();
 
@@ -34,7 +38,7 @@ const corsOptions = {
   origin: "*",
   methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
   credentials: false,
-  allowedHeaders: ["Content-Type", "Authorization", "X-Attendance-Device-Id"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Attendance-Device-Id", "Idempotency-Key"],
 };
 
 app.use(cors(corsOptions));
@@ -145,6 +149,14 @@ const startServer = async () => {
       console.log(`Server running on port ${PORT}`);
       startLeaveAccrualScheduler();
       const attendanceSchedulerStarted = startAttendanceProcessorScheduler();
+      startPayrollOperationsScheduler();
+      recoverPayrollOperationalJobs()
+        .then((count) => {
+          if (count) console.log(`Recovered ${count} payroll operations job(s)`);
+        })
+        .catch((error: any) => {
+          console.error("Payroll operations recovery failed:", error?.message || error);
+        });
       recoverPendingAttendanceProcessorRuns()
         .then(async (count) => {
           if (count) console.log(`Recovered ${count} pending attendance processor run(s)`);

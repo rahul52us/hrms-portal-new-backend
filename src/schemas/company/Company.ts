@@ -54,6 +54,11 @@ interface CompanyI extends Document {
     payDay?: number;
     roundingMode?: "nearest" | "floor" | "ceil";
     employeeCompensationVisibility?: "hidden" | "current" | "history";
+    payrollReminderDay?: number;
+    payrollNotificationsEnabled?: boolean;
+    accessLogRetentionDays?: number;
+    operationalJobRetentionDays?: number;
+    finalizedPayrollRetentionYears?: number;
   };
   lastActiveAt?: Date;
 }
@@ -241,6 +246,34 @@ const companySchema = new mongoose.Schema<CompanyI>({
       type: String,
       enum: ["hidden", "current", "history"],
       default: "hidden",
+    },
+    payrollReminderDay: {
+      type: Number,
+      min: 1,
+      max: 28,
+      default: 20,
+    },
+    payrollNotificationsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    accessLogRetentionDays: {
+      type: Number,
+      min: 30,
+      max: 3650,
+      default: 365,
+    },
+    operationalJobRetentionDays: {
+      type: Number,
+      min: 7,
+      max: 730,
+      default: 90,
+    },
+    finalizedPayrollRetentionYears: {
+      type: Number,
+      min: 1,
+      max: 25,
+      default: 8,
     },
   },
   lastActiveAt: {

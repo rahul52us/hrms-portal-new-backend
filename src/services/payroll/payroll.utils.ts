@@ -159,7 +159,7 @@ export async function resolvePayrollCompany(
     _id: new mongoose.Types.ObjectId(companyId),
     deletedAt: { $exists: false },
   })
-    .select("_id company_name companyCode is_active")
+    .select("_id company_name companyCode is_active payrollSettings rolePermissions")
     .lean();
 
   if (!company) {

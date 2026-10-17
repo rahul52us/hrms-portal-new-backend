@@ -8,6 +8,8 @@ import Company from "../../schemas/company/Company";
 import PayrollFinalizedResult from "../../schemas/Payroll/PayrollFinalizedResult.schema";
 import PayrollPayslip, { PAYSLIP_TEMPLATE_VERSION } from "../../schemas/Payroll/PayrollPayslip.schema";
 import PayrollRun from "../../schemas/Payroll/PayrollRun.schema";
+import { writePayrollAccessLog } from "./payrollAccess.service";
+import { sendPayrollNotificationSafely } from "./payrollNotification.service";
 import {
   ensurePayrollRunManager,
   getPayrollActor,
@@ -518,6 +520,8 @@ export async function issuePayrollPayslipsService(req: any, res: Response, next:
     let issuedNow = 0;
     let total = 0;
     let finalizationVersion = 0;
+    let periodKey = "";
+    let issuedEmployees: mongoose.Types.ObjectId[] = [];
 
     await mongoose.connection.transaction(async (session) => {
       const run: any = await PayrollRun.findOne({ _id: runId, company: companyObjectId }).session(session).lean();
@@ -526,6 +530,7 @@ export async function issuePayrollPayslipsService(req: any, res: Response, next:
         throw generateError("Finalize payroll before issuing payslips", 409);
       }
       finalizationVersion = Number(run.finalizationVersion);
+      periodKey = run.periodKey;
       const results: any[] = await PayrollFinalizedResult.find({
         company: companyObjectId,
         payrollRun: run._id,
@@ -550,6 +555,7 @@ export async function issuePayrollPayslipsService(req: any, res: Response, next:
       const documents = buildPayrollPayslipDocuments({ run, results, company, actorId, issuedAt })
         .filter((item) => !existingEmployees.has(id(item.employee)));
       issuedNow = documents.length;
+      issuedEmployees = documents.map((item: any) => item.employee);
       if (documents.length) {
         await PayrollPayslip.insertMany(documents, { session, ordered: true });
         await writePayrollAudit({
@@ -569,6 +575,24 @@ export async function issuePayrollPayslipsService(req: any, res: Response, next:
         }, session);
       }
     });
+
+    if (issuedEmployees.length) {
+      await sendPayrollNotificationSafely({
+        company: companyObjectId,
+        recipients: issuedEmployees,
+        actor: actorId,
+        eventType: "payroll_payslip_issued",
+        entityType: "payroll_run",
+        entityId: runId,
+        title: "Payslip available",
+        message: `Your ${periodKey} payslip is ready to download.`,
+        actionUrl: "/dashboard/my-payslips",
+        priority: "medium",
+        category: "system",
+        metadata: { periodKey, finalizationVersion },
+        dedupeEventKey: `payslip-issued:${finalizationVersion}`,
+      });
+    }
 
     return res.status(issuedNow ? 201 : 200).json({
       success: true,
@@ -667,7 +691,14 @@ export async function listMyPayrollPayslipsService(req: any, res: Response, next
   }
 }
 
-async function sendPayslipPdf(res: Response, payslip: any) {
+async function sendPayslipPdf(options: {
+  req: any;
+  res: Response;
+  payslip: any;
+  actorId: mongoose.Types.ObjectId;
+  retentionDays?: number;
+}) {
+  const { req, res, payslip, actorId } = options;
   const [run, result] = await Promise.all([
     PayrollRun.findOne({ _id: payslip.payrollRun, company: payslip.company }).lean(),
     PayrollFinalizedResult.findOne({
@@ -697,6 +728,18 @@ async function sendPayslipPdf(res: Response, payslip: any) {
   });
   if (expectedHash !== text(payslip.contentHash)) throw generateError("Payslip integrity verification failed", 409);
   const buffer = await renderPayrollPayslipPdf({ payslip, run, result });
+  await writePayrollAccessLog({
+    req,
+    company: payslip.company,
+    actor: actorId,
+    action: "payslip_downloaded",
+    resourceType: "payslip",
+    resourceId: String(payslip._id),
+    payrollRun: payslip.payrollRun,
+    employee: payslip.employee,
+    metadata: { periodKey: payslip.periodKey, finalizationVersion: payslip.finalizationVersion, selfService: String(actorId) === String(payslip.employee) },
+    retentionDays: options.retentionDays,
+  });
   const filename = `${safeCode(payslip.payslipNumber, "PAYSLIP")}.pdf`;
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Length", buffer.length);
@@ -708,12 +751,13 @@ async function sendPayslipPdf(res: Response, payslip: any) {
 export async function downloadPayrollPayslipService(req: any, res: Response, next: NextFunction) {
   try {
     ensurePayrollRunManager(req);
-    const { companyObjectId } = await resolvePayrollCompany(req, req.query?.companyId);
+    const { companyObjectId, company } = await resolvePayrollCompany(req, req.query?.companyId);
+    const actorId = getPayrollActorId(req);
     const runId = objectId(req.params.runId, "payroll run id");
     const payslipId = objectId(req.params.payslipId, "payslip id");
     const payslip: any = await PayrollPayslip.findOne({ _id: payslipId, company: companyObjectId, payrollRun: runId }).lean();
     if (!payslip) throw generateError("Payslip not found", 404);
-    return await sendPayslipPdf(res, payslip);
+    return await sendPayslipPdf({ req, res, payslip, actorId, retentionDays: Number((company as any)?.payrollSettings?.accessLogRetentionDays || 365) });
   } catch (error) {
     next(error);
   }
@@ -722,11 +766,11 @@ export async function downloadPayrollPayslipService(req: any, res: Response, nex
 export async function downloadMyPayrollPayslipService(req: any, res: Response, next: NextFunction) {
   try {
     const actorId = assertSelfPayslipActor(req);
-    const { companyObjectId } = await resolvePayrollCompany(req);
+    const { companyObjectId, company } = await resolvePayrollCompany(req);
     const payslipId = objectId(req.params.payslipId, "payslip id");
     const payslip: any = await PayrollPayslip.findOne({ _id: payslipId, company: companyObjectId, employee: actorId }).lean();
     if (!payslip) throw generateError("Payslip not found", 404);
-    return await sendPayslipPdf(res, payslip);
+    return await sendPayslipPdf({ req, res, payslip, actorId, retentionDays: Number((company as any)?.payrollSettings?.accessLogRetentionDays || 365) });
   } catch (error) {
     next(error);
   }
