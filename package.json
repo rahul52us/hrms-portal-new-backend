@@ -95,6 +95,11 @@
     "test:user-schema": "ts-node src/schemas/User/User.schema.test.ts",
     "test:permissions": "ts-node src/services/permissions/permission.utils.test.ts",
     "test:workforce-policy-access": "ts-node src/services/workforcePolicy/workforcePolicyAccess.test.ts",
+    "test:auth-account-status": "ts-node src/services/auth/utils/userAccountStatus.test.ts",
+    "test:auth-validation": "ts-node src/services/auth/utils/validation.test.ts",
+    "test:comp-off-credit": "ts-node src/services/compOff/compOffCredit.utils.test.ts",
+    "test:company-activity-guards": "ts-node src/services/company/utils/activityGuards.test.ts",
+    "test:employee-code": "ts-node src/services/employeeCode/employeeCode.utils.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod"
