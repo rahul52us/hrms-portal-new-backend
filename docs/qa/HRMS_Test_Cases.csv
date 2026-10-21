@@ -1,0 +1,490 @@
+﻿TC ID,Module,Sub-module,Scenario,Type,Priority,Role,Preconditions,Steps,Test Data,Expected Result,Source,Status,Actual Result,Tester,Date,Bug ID
+AUTH-001,Authentication,Login,Login with valid email and password,Positive,P0,Employee,"Active user exists (password set, enabled)","1. Open /login
+2. Enter email
+3. Enter password
+4. Click Sign In",admin@company.com / Test@1234,User is logged in and lands on the dashboard; token/session is created.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-002,Authentication,Login,Email is trimmed and lower-cased before login,Positive,P2,Employee,Active user exists,"1. Open /login
+2. Enter email with spaces and capitals
+3. Enter correct password
+4. Sign In",'  Admin@Company.COM ' / Test@1234,Login succeeds; username is treated as admin@company.com.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-003,Authentication,Login,Wrong password,Negative,P0,Anonymous,Active user exists,"1. Open /login
+2. Enter valid email and wrong password
+3. Sign In",admin@company.com / Wrong@1234,Login rejected with an invalid-credentials error; no session created.,backend src/services/auth/auth.service.ts,Not Run,,,,
+AUTH-004,Authentication,Login,Unregistered email,Negative,P1,Anonymous,Email not in system,"1. Open /login
+2. Enter unknown email and any password
+3. Sign In",nobody@nowhere.com / Test@1234,Login rejected; message does not reveal whether the email exists.,backend src/services/auth/auth.service.ts,Not Run,,,,
+AUTH-005,Authentication,Login,Empty email,Validation,P1,Anonymous,-,"1. Open /login
+2. Leave email empty
+3. Enter password
+4. Sign In",email='' / Test@1234,Error 'Username is required'; request not accepted.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-006,Authentication,Login,Empty password,Validation,P1,Anonymous,-,"1. Open /login
+2. Enter email
+3. Leave password empty
+4. Sign In",admin@company.com / '',Error 'Password is required'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-007,Authentication,Login,Username that is not an email,Validation,P1,Anonymous,-,"1. Open /login
+2. Enter text without @
+3. Enter password
+4. Sign In",adminuser / Test@1234,Error 'Username must be a valid email address'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-008,Authentication,Login,Password shorter than 8 characters,Validation,P2,Anonymous,-,"1. Open /login
+2. Enter valid email
+3. Enter 7-char password
+4. Sign In",admin@company.com / Ab1cdef,Request rejected by validation (minimum 8 characters).,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-009,Authentication,Login,Password longer than 128 characters,Edge,P3,Anonymous,-,"1. Open /login
+2. Enter valid email
+3. Paste a 129-character password
+4. Sign In",129 x 'A1b',Request rejected by validation (maximum 128 characters).,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-010,Authentication,Login,Disabled (inactive) user cannot log in,Negative,P0,Employee,User exists with password but is disabled by admin,"1. Open /login
+2. Enter the disabled user's credentials
+3. Sign In",disabled.user@company.com / Test@1234,Login is blocked; user account status is INACTIVE so canUserLogin is false.,backend src/services/auth/utils/userAccountStatus.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+AUTH-011,Authentication,Login,Invited user who has not set a password cannot log in,Negative,P0,Employee,User created by admin; password not yet set (status PENDING),"1. Open /login
+2. Enter the invited user's email and any password
+3. Sign In",new.hire@company.com / Test@1234,Login is blocked; account is PENDING until a password is set via invite link.,backend src/services/auth/utils/userAccountStatus.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+AUTH-012,Authentication,Login,Deleted user cannot log in,Negative,P0,Employee,User is soft-deleted (deletedAt set),"1. Open /login
+2. Enter the deleted user's credentials
+3. Sign In",deleted.user@company.com / Test@1234,Login is blocked; DELETED status wins over every other state.,backend src/services/auth/utils/userAccountStatus.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+AUTH-013,Authentication,Login,Login blocked when the user's company is inactive,Negative,P1,Employee,Company is deactivated by Super Admin,"1. Deactivate the company
+2. Login as an employee of that company",employee@inactive-co.com / Test@1234,Action blocked with message '<Company name> is inactive.' (or 'This company is inactive.').,backend src/services/company/utils/activityGuards.ts,Not Run,,,,
+AUTH-014,Authentication,Login,Show/hide password toggle,UI,P3,Anonymous,-,"1. Open /login
+2. Type a password
+3. Click the eye icon",any,Password toggles between masked and visible text.,frontend app/(authentication)/login/page.tsx,Not Run,,,,
+AUTH-015,Authentication,Login,Protected page without a session redirects to login,Permission,P0,Anonymous,Not logged in,1. Open /dashboard directly in a new browser profile,-,User is redirected to /login; no dashboard data shown.,frontend app/dashboard,Not Run,,,,
+AUTH-016,Authentication,Session,Logout clears session,Positive,P1,Employee,Logged in,"1. Click profile menu
+2. Click Logout
+3. Press browser Back",-,User returns to login; Back button does not reopen protected pages.,frontend app/dashboard,Not Run,,,,
+AUTH-017,Authentication,Session,Expired/invalid token is rejected by API,Negative,P0,Employee,Logged in,"1. Tamper with or expire the stored token
+2. Refresh /dashboard",token='abc.def.ghi',API returns unauthorized; user is sent to login.,backend src/modules/config/authenticate.ts,Not Run,,,,
+AUTH-018,Authentication,Forgot Password,Request reset link with registered email,Positive,P1,Anonymous,Active user exists,"1. Open /forgot-password
+2. Enter registered email
+3. Submit",admin@company.com,Success message shown; a reset email with a secure link is sent.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-019,Authentication,Forgot Password,Request reset with invalid email format,Validation,P2,Anonymous,-,"1. Open /forgot-password
+2. Enter 'abc'
+3. Submit",abc,Error 'Username should be a valid email address'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-020,Authentication,Forgot Password,Request reset with empty email,Validation,P2,Anonymous,-,"1. Open /forgot-password
+2. Leave empty
+3. Submit",'',Error 'Username is required'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-021,Authentication,Reset Password,Reset password with valid token and strong password,Positive,P0,Anonymous,Valid reset link received by email,"1. Open the reset link
+2. Enter a new strong password
+3. Submit
+4. Login with the new password",NewPass@123,Password changes; old password stops working; login works with the new one.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-022,Authentication,Reset Password,Reset with expired/invalid token,Negative,P0,Anonymous,Expired or random token,"1. Open /reset-password/<bad-token>
+2. Enter strong password
+3. Submit",token=invalid,Reset rejected with an invalid/expired token error.,backend src/services/auth/auth.service.ts,Not Run,,,,
+AUTH-023,Authentication,Reset Password,Reset link cannot be reused,Negative,P1,Anonymous,Reset already completed once,"1. Use the same link again
+2. Submit a new password",-,Second attempt is rejected.,backend src/services/auth/auth.service.ts,Not Run,,,,
+AUTH-024,Authentication,Password Rules,Weak password rejected (7 characters),Boundary,P1,Anonymous,Valid reset token,"1. Open the reset page
+2. Enter 'Pass123'
+3. Submit",Pass123,"Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-025,Authentication,Password Rules,Weak password rejected (no uppercase letter),Validation,P1,Anonymous,Valid reset token,"1. Open the reset page
+2. Enter 'password1'
+3. Submit",password1,"Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-026,Authentication,Password Rules,Weak password rejected (no lowercase letter),Validation,P1,Anonymous,Valid reset token,"1. Open the reset page
+2. Enter 'PASSWORD1'
+3. Submit",PASSWORD1,"Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-027,Authentication,Password Rules,Weak password rejected (no digit),Validation,P1,Anonymous,Valid reset token,"1. Open the reset page
+2. Enter 'Password'
+3. Submit",Password,"Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-028,Authentication,Password Rules,"Exactly 8 characters with upper, lower and digit is accepted",Edge,P2,Anonymous,Valid reset token,"1. Open the reset page
+2. Enter 'Abcdef1x'
+3. Submit",Abcdef1x,Password is accepted.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-029,Authentication,Set Password,Invited user sets password from invite link,Positive,P0,Employee,Admin created the user; invite email received,"1. Open /set-password link
+2. Enter strong password
+3. Submit
+4. Login",Welcome@123,Status changes PENDING -> ACTIVE; user can log in.,backend src/services/auth/utils/userAccountStatus.ts,Not Run,,,,
+AUTH-030,Authentication,Set Password,Set password with weak password,Validation,P1,Employee,Invite link available,"1. Open /set-password link
+2. Enter 'abc'
+3. Submit",abc,Rejected with password-strength message.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-031,Authentication,Change Password,Change password with correct old password,Positive,P1,Employee,Logged in,"1. Open Profile
+2. Open Change Password
+3. Enter old and new strong password
+4. Save",Old@1234 -> New@12345,Password updated; login with the new password works.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-032,Authentication,Change Password,Change password with wrong old password,Negative,P1,Employee,Logged in,"1. Open Change Password
+2. Enter incorrect old password and a new strong password
+3. Save",Wrong@1234 -> New@12345,Request rejected; password unchanged.,backend src/services/auth/auth.service.ts,Not Run,,,,
+AUTH-033,Authentication,Change Password,New password fails strength rule,Validation,P2,Employee,Logged in,"1. Open Change Password
+2. Enter correct old and weak new password
+3. Save",newpassword,"Password must contain at least 8 characters, including one uppercase letter, one lowercase letter, and one digit.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-034,Authentication,Registration,Registration page without invite,Negative,P2,Anonymous,No invite token,1. Open /register,-,Page shows 'Invite Required' and does not allow self sign-up.,frontend app/(authentication)/register/page.tsx,Not Run,,,,
+AUTH-035,Authentication,Bootstrap,Create first Super Admin with valid data,Positive,P1,Anonymous,No superadmin exists; setupKey configured if required,1. Call POST /bootstrap/superadmin with valid body,"name='Ra', email=owner@co.com, phone=9876543210, strong password",Super Admin is created.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-036,Authentication,Bootstrap,Bootstrap rejects bad phone,Validation,P2,Anonymous,-,1. Call bootstrap with 9-digit phone,phone=987654321,Error 'Phone must be a valid 10-digit number'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-037,Authentication,Bootstrap,Bootstrap name boundary (1 vs 2 characters),Boundary,P3,Anonymous,-,"1. Call bootstrap with name 'A'
+2. Repeat with 'Al'",'A' then 'Al','A' is rejected (min 2); 'Al' is accepted.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-038,Authentication,Company Registration,Admin registration needs company name and location,Validation,P1,Anonymous,Verified email token available,"1. Submit admin registration without company name
+2. Submit without city/state/country/pincode",-,"Errors: 'Company name is required', 'City is required', 'State is required', 'Country is required', 'Pincode is required'.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-039,Authentication,Company Registration,Latitude/longitude bounds,Boundary,P3,Anonymous,-,"1. Submit location with lat 91
+2. lat -91
+3. lng 181
+4. lat 90, lng 180",lat/lng pairs above,Out-of-range values rejected; lat 90 / lng 180 accepted.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+AUTH-040,Authentication,Company Registration,Phone must be 10 digits,Validation,P2,Anonymous,-,1. Submit registration with phone '98765abcde',98765abcde,Error 'Phone must be a valid 10-digit number'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+EMP-001,Employees & Users,Create Employee,Create employee with all required fields,Positive,P0,HR,HR has create_users permission,"1. Dashboard > Users > Add
+2. Fill name, email, role, department, location, employee number
+3. Save","Name 'Asha Rao', asha@co.com, role Employee",Employee created in PENDING status; invite/set-password email sent; appears in list.,backend src/routing/users.routing.ts,Not Run,,,,
+EMP-002,Employees & Users,Create Employee,Duplicate email,Negative,P0,HR,asha@co.com already exists,"1. Add employee with the same email
+2. Save",asha@co.com,Error 'Email already exists (asha@co.com)'; no new record.,backend src/routing/users.routing.ts,Not Run,,,,
+EMP-003,Employees & Users,Create Employee,Name length boundaries (3 to 30),Boundary,P2,HR,-,"1. Add user with 2-char name
+2. 3-char name
+3. 30-char name
+4. 31-char name","'Al','Ali', 30 chars, 31 chars",2 and 31 rejected ('Name must have a minimum length of 3' / 'should not exceed 30'); 3 and 30 accepted.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+EMP-004,Employees & Users,Create Employee,Company is mandatory for non-admin roles,Validation,P1,Super Admin,-,1. Create a manager without selecting company,company='',Error 'Please select the company'.,backend src/services/auth/utils/validation.ts,Not Run,,,,
+EMP-005,Employees & Users,Create Employee,Role limited to allowed values,Validation,P2,Super Admin,-,1. Create user via API with role 'ceo',role=ceo,"Rejected; allowed roles are user, admin, superadmin, manager, customer, support.",backend src/services/auth/utils/validation.ts,Not Run,,,,
+EMP-006,Employees & Users,Create Employee,HR cannot create HR users without permission,Permission,P1,HR,HR lacks create_hr_users,1. Try to add a user with role HR,role=hr,Blocked/hidden; only roles permitted by create_hr_users can be created.,backend src/services/permissions/permission.utils.ts,Not Run,,,,
+EMP-007,Employees & Users,Create Employee,Employee role cannot open user management,Permission,P0,Employee,Logged in as Employee,1. Open /dashboard/users directly,-,Access denied / redirected; no user list returned by API.,frontend app/dashboard/users,Not Run,,,,
+EMP-008,Employees & Users,Employee Code,Company code is normalized to upper case,Positive,P2,Company Admin,-,"1. Set company code ' acme '
+2. Save",' acme ',Saved as ACME.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+EMP-009,Employees & Users,Employee Code,Company code length 2 to 20,Boundary,P2,Company Admin,-,"1. Try 'A'
+2. 'AB'
+3. 20 chars
+4. 21 chars",A / AB / 20 / 21 chars,'A' and 21 chars rejected; 'AB' and 20 chars accepted.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+EMP-010,Employees & Users,Employee Code,"Company code allows only letters, digits and single hyphens",Validation,P2,Company Admin,-,"1. Try 'AC ME'
+2. 'ACME-'
+3. 'AC--ME'
+4. 'AC-ME'",as listed,First three rejected; 'AC-ME' accepted.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+EMP-011,Employees & Users,Employee Code,Employee number max length 40,Boundary,P2,HR,-,"1. Enter 40-char number
+2. Enter 41-char number",40 / 41 chars,40 accepted; 41 rejected.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+EMP-012,Employees & Users,Employee Code,Employee ID is built as COMPANY-NUMBER,Positive,P1,HR,Company code ACME,1. Create employee with number '0042',0042,Employee ID shown as ACME-0042.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,"Executed probe: {""companyCode"":""ACME"",""employeeNumber"":""0042"",""code"":""ACME-0042""}. Logic checked by running the backend code; UI / API / database flow NOT tested.",Claude (auto),2026-10-21,
+EMP-013,Employees & Users,Employee Code,Company prefix typed by user is not duplicated,Edge,P2,HR,Company code ACME,1. Enter employee number 'acme-0042',acme-0042,ID is ACME-0042 (not ACME-ACME-0042).,backend src/services/employeeCode/employeeCode.utils.ts,Pass,"Executed probe: {""companyCode"":""ACME"",""employeeNumber"":""0042"",""code"":""ACME-0042""}. Logic checked by running the backend code; UI / API / database flow NOT tested.",Claude (auto),2026-10-21,
+EMP-014,Employees & Users,Employee Code,Employee number that only looks like the prefix is kept,Edge,P3,HR,Company code ACME,1. Enter 'ACMEX-1',ACMEX-1,Stored as ACMEX-1 under ACME => ACME-ACMEX-1.,backend src/services/employeeCode/employeeCode.utils.ts,Pass,"Executed probe: {""companyCode"":""ACME"",""employeeNumber"":""ACMEX-1"",""code"":""ACME-ACMEX-1""}. Logic checked by running the backend code; UI / API / database flow NOT tested.",Claude (auto),2026-10-21,
+EMP-015,Employees & Users,Employee Code,Duplicate employee number in same company,Negative,P1,HR,ACME-0042 exists,1. Create another employee with number 0042,0042,Error 'Employee code already exists (ACME-0042)' naming the owner.,backend src/services/adminUsers/adminUsers.service.ts,Not Run,,,,
+EMP-016,Employees & Users,Bulk Upload,Download bulk upload template,Positive,P2,HR,-,"1. Users > Bulk upload
+2. Click Download template",-,Excel template downloads with expected columns.,backend src/routing (GET /bulk/template),Not Run,,,,
+EMP-017,Employees & Users,Bulk Upload,Preview then commit valid file,Positive,P1,HR,Filled template with 5 valid rows,"1. Upload file
+2. Review preview
+3. Commit",5 rows,Preview shows 5 valid rows; commit creates 5 employees.,"backend src/routing (POST /bulk, /commit)",Not Run,,,,
+EMP-018,Employees & Users,Bulk Upload,File with invalid rows,Negative,P1,HR,File has 1 duplicate email and 1 missing name,"1. Upload file
+2. Review preview",2 bad rows,Bad rows flagged with reasons; valid rows can still proceed or commit is blocked as designed.,backend src/routing (POST /bulk),Not Run,,,,
+EMP-019,Employees & Users,Bulk Upload,Wrong file type,Negative,P2,HR,-,1. Upload a .pdf as bulk file,sample.pdf,Rejected with a clear file-type error.,frontend app/dashboard/users,Not Run,,,,
+EMP-020,Employees & Users,Status,Disable an employee,Positive,P0,HR,Active employee,"1. Open employee
+2. Click Disable
+3. Confirm",-,Status becomes Inactive; employee can no longer log in.,backend PUT /:id/status,Not Run,,,,
+EMP-021,Employees & Users,Status,Re-enable an employee,Positive,P1,HR,Disabled employee with password,1. Click Enable,-,Status returns to Active; login works.,backend PUT /:id/status,Not Run,,,,
+EMP-022,Employees & Users,Status,Cannot manage user of another company,Permission,P0,Company Admin,Two companies A and B,"1. As Admin of A, call update on a user of B",userId of B,Rejected; non-superadmin cannot target another company.,backend src/services/company/utils/activityGuards.ts,Not Run,,,,
+EMP-023,Employees & Users,Status,Inactive company blocks management actions,Negative,P1,Company Admin,Company is inactive,1. Try to add or edit a user,-,Blocked with '<Company name> is inactive.',backend src/services/company/utils/activityGuards.ts,Not Run,,,,
+EMP-024,Employees & Users,Manager,Assign reporting manager,Positive,P1,HR,Manager exists,"1. Open employee
+2. Choose Reporting Manager
+3. Save",Manager 'Ravi',Manager saved; employee appears in manager's team; approvals route to the manager.,backend PUT /:id/manager,Not Run,,,,
+EMP-025,Employees & Users,Manager,Employee cannot be their own manager,Negative,P2,HR,-,1. Set employee as own manager,same user,Error 'A user cannot be their own reporting manager' (400).,backend PUT /:id/manager,Not Run,,,,
+EMP-026,Employees & Users,Access Role,Assign Payroll Executive access role,Positive,P1,Company Admin,Employee exists,"1. Open employee
+2. Set Access Role = Payroll Executive
+3. Save",payrollexecutive,Employee gets payroll permissions but organizational role is unchanged.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test permission.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+EMP-027,Employees & Users,Search,Search/filter employee list,Positive,P2,HR,20+ employees,"1. Type part of a name in search
+2. Filter by department",'Asha',List shows only matching employees; pagination counts update.,frontend app/dashboard/users,Not Run,,,,
+EMP-028,Employees & Users,Create Employee,Duplicate phone number,Negative,P1,HR,A user with phone 9876543210 exists,"1. Add employee with the same phone
+2. Save",9876543210,Error 'Phone number already exists (...)'.,backend src/services/adminUsers/adminUsers.service.ts,Not Run,,,,
+EMP-029,Employees & Users,Bulk Upload,Duplicate rows are skipped with reason,Negative,P1,HR,"File repeats an existing email, phone and employee code","1. Upload file
+2. Open preview",3 duplicate rows,"Each row shows its error ('Email already exists', 'Phone number already exists', 'Employee code already exists') and a skip reason.",backend src/services/adminUsers/adminUsers.service.ts,Not Run,,,,
+EMP-030,Employees & Users,Bulk Upload,Row where user is own manager,Negative,P3,HR,File row lists the employee as own manager,1. Upload file,-,Row error 'A user cannot be their own manager'.,backend src/services/adminUsers/adminUsers.service.ts,Not Run,,,,
+PROF-001,Employee Profile,Personal details,Employee updates own personal details,Positive,P2,Employee,Logged in,"1. Open My Profile
+2. Edit Personal details
+3. Save","DOB, gender, address",Changes saved and shown after refresh.,backend PUT /me/profile/*,Not Run,,,,
+PROF-002,Employee Profile,Family details,Employee updates own family details,Positive,P2,Employee,Logged in,"1. Open My Profile
+2. Edit Family details
+3. Save","spouse, children",Changes saved and shown after refresh.,backend PUT /me/profile/*,Not Run,,,,
+PROF-003,Employee Profile,Skills,Employee updates own skills,Positive,P2,Employee,Logged in,"1. Open My Profile
+2. Edit Skills
+3. Save","Excel, SQL",Changes saved and shown after refresh.,backend PUT /me/profile/*,Not Run,,,,
+PROF-004,Employee Profile,Statutory details,Employee updates own statutory details,Positive,P2,Employee,Logged in,"1. Open My Profile
+2. Edit Statutory details
+3. Save","PAN, UAN, ESIC number",Changes saved and shown after refresh.,backend PUT /me/profile/*,Not Run,,,,
+PROF-005,Employee Profile,Profile,Employee cannot edit another employee's profile,Permission,P0,Employee,-,1. Call PUT /:id/profile/personal for another user,other userId,Rejected with 403.,backend src/routing/users.routing.ts,Not Run,,,,
+PROF-006,Employee Profile,Profile,HR edits an employee's profile,Positive,P1,HR,edit_users permission,"1. Open employee
+2. Edit personal info
+3. Save",-,Saved; audit shows HR as editor.,backend PUT /:id/profile/*,Not Run,,,,
+PROF-007,Employee Profile,Documents,Upload profile document,Positive,P2,Employee,-,"1. Profile > Documents
+2. Upload PDF
+3. Save",aadhaar.pdf,Document listed and downloadable.,frontend app/dashboard/profile/documents,Not Run,,,,
+PROF-008,Employee Profile,Documents,Upload unsupported/oversized document,Negative,P2,Employee,-,1. Upload .exe or very large file,virus.exe,Rejected with file-type/size error.,frontend app/dashboard/profile/documents,Not Run,,,,
+PROF-009,Employee Profile,Bank Details,Save bank details,Positive,P1,Employee,-,"1. Add account holder, account number, IFSC
+2. Save",HDFC0001234,Saved; used later for payroll validation (missing bank details raises a payroll issue).,backend PUT /bankDetails/:id; payrollValidation,Not Run,,,,
+PROF-010,Employee Profile,Bank Details,Missing bank details flagged in payroll,Negative,P1,Payroll Executive,Employee with no bank details in a payroll run,1. Run validation,-,Issue 'missing_bank_details' raised; recommended action: update the employee profile.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+PERM-001,Roles & Permissions,Role Defaults,View permission matrix,Positive,P1,Company Admin,manage_permissions,1. Open /dashboard/permissions,-,Roles and their permissions listed.,frontend app/dashboard/permissions,Not Run,,,,
+PERM-002,Roles & Permissions,Role Defaults,HR cannot finalize or reopen payroll by default,Permission,P0,HR,Default role config,"1. Open payroll run as HR
+2. Look for Finalize/Reopen",-,Finalize and Reopen not available; Admin and HR Admin have both.,backend src/services/payroll/payrollFinalization.test.ts; payrollReopen.test.ts,Not Run,,,,
+PERM-003,Roles & Permissions,Override,Grant a single permission to one user,Positive,P1,Company Admin,HR user exists,"1. Open permissions
+2. Select user
+3. Enable manage_workforce_policies
+4. Save",HR user,User gains the permission without a role change.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test permission.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PERM-004,Roles & Permissions,Override,Explicit deny overrides role default,Positive,P1,Company Admin,-,"1. Disable an inherited permission for a user
+2. Save",-,User loses permission even though role grants it.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test permission.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PERM-005,Roles & Permissions,Override,System permissions cannot be delegated to individuals,Negative,P1,Company Admin,-,1. Try to grant manage_permissions to one user,manage_permissions,Not allowed; control is disabled or request rejected.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test permission.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PERM-006,Roles & Permissions,Override,Omitted overrides keep inheriting defaults,Edge,P2,Company Admin,-,"1. Save override for one permission
+2. Check other permissions",-,Other permissions still follow the role default.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test permission.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PERM-007,Roles & Permissions,Menu,Sidebar shows only permitted modules,Permission,P0,Employee,Employee role,1. Log in and view sidebar,-,"Admin modules (Payroll, Permissions, Users) are hidden; My Attendance/My Leave/My Payslips visible.",frontend app/dashboard,Not Run,,,,
+ORG-001,Organization Setup,Department,Create department,Positive,P0,Company Admin,-,"1. Departments > Add
+2. Enter name and code
+3. Save",Engineering / ENG-01,Department appears in the list.,frontend app/dashboard/departments/AddDepartment.tsx,Not Run,,,,
+ORG-002,Organization Setup,Department,Duplicate team name inside a department,Negative,P2,Company Admin,Team exists,1. Add team with the same name,'Backend',Error 'Team already exists in this department'.,backend src/services/department,Not Run,,,,
+ORG-003,Organization Setup,Department,Team name is required,Validation,P2,Company Admin,-,1. Add team with empty name,'',Error 'Team name is required'.,backend src/services/department,Not Run,,,,
+ORG-004,Organization Setup,Department,Delete team that has employees,Negative,P1,Company Admin,Team has employees,1. Delete team,-,Blocked: 'This team has assigned employees. Move employees before deleting it.',backend src/services/department,Not Run,,,,
+ORG-005,Organization Setup,Department,Department head must be employee or manager,Negative,P2,Company Admin,-,1. Set an admin account as department head,admin user,"Error 'Choose an employee or manager, not an admin account'.",backend src/services/department,Not Run,,,,
+ORG-006,Organization Setup,Department,Close department with transfer of employees,Positive,P1,Company Admin,Department with employees; another department exists,"1. Open Department closure drawer
+2. Select destination department
+3. Enter transfer reason
+4. Confirm",reason='Restructure',Employees move to destination; department archived.,frontend app/dashboard/departments/DepartmentClosureDrawer.tsx,Not Run,,,,
+ORG-007,Organization Setup,Department,Closure reason too short,Validation,P2,Company Admin,-,1. In closure drawer enter reason 'ab',ab,Error 'Transfer reason must be at least 3 characters'.,backend src/services/department,Not Run,,,,
+ORG-008,Organization Setup,Department,Closure without destination,Negative,P2,Company Admin,Department has employees,1. Confirm closure without selecting destination,-,Error 'Select a valid destination department'.,backend src/services/department,Not Run,,,,
+ORG-009,Organization Setup,Department,HR cannot manage departments,Permission,P1,HR,-,1. Try to add or archive a department,-,Error 'Only superadmin or admin can manage departments'.,backend src/services/department,Not Run,,,,
+ORG-010,Organization Setup,Location,Create office location,Positive,P0,Company Admin,-,"1. Locations > Add
+2. Enter name, code, city, state, country, pin, address, lat, lng
+3. Save",Delhi Head Office / DEL-HO / 28.6139 / 77.2090,Location saved and listed.,frontend app/dashboard/locations/LocationModal.tsx,Not Run,,,,
+ORG-011,Organization Setup,Location,Required fields,Validation,P1,Company Admin,-,"1. Save with name, code or city empty",-,"Error 'Location name, code, and city are required'.",backend src/services/officeLocation,Not Run,,,,
+ORG-012,Organization Setup,Location,Duplicate name or code,Negative,P1,Company Admin,DEL-HO exists,1. Create another with code DEL-HO,DEL-HO,Error 'A location with this name or code already exists for this company'.,backend src/services/officeLocation,Not Run,,,,
+ORG-013,Organization Setup,Location,Latitude and longitude must be given together,Validation,P2,Company Admin,-,1. Enter latitude only,lat=28.6,Error 'Latitude and longitude must be provided together'.,backend src/services/officeLocation,Not Run,,,,
+ORG-014,Organization Setup,Location,Latitude/longitude ranges,Boundary,P2,Company Admin,-,"1. lat 90.1
+2. lng -180.1
+3. lat 'abc'",as listed,"Errors 'Latitude must be between -90 and 90', 'Longitude must be between -180 and 180', 'Latitude must be a number'.",backend src/services/officeLocation,Not Run,,,,
+ORG-015,Organization Setup,Location,Delete location assigned to employees,Negative,P1,Company Admin,Employees assigned,1. Delete the location,-,Blocked: 'This location is assigned to employees. Deactivate it instead of deleting it.',backend src/services/officeLocation,Not Run,,,,
+ORG-016,Organization Setup,Location,Employee cannot manage locations,Permission,P1,Employee,-,1. Open /dashboard/locations,-,No access; API returns 403.,backend src/services/officeLocation,Not Run,,,,
+ORG-017,Organization Setup,Organization,Org tree shows reporting hierarchy,Positive,P2,HR,Managers and reportees configured,1. Open Organization > Tree,-,Tree reflects manager-reportee structure; clicking a person opens the drawer.,frontend app/dashboard/organization,Not Run,,,,
+ORG-018,Organization Setup,Company Settings,Update company settings,Positive,P2,Company Admin,company_settings permission,"1. Open Company Settings
+2. Change a value
+3. Save",-,Saved and persisted after refresh.,frontend app/dashboard/company-settings,Not Run,,,,
+ORG-019,Organization Setup,Contacts,Contact list loads and searches,Positive,P3,HR,-,"1. Open Contacts
+2. Search for a name",-,Matching contacts shown.,frontend app/dashboard/contacts,Not Run,,,,
+ORG-020,Organization Setup,Notifications,Mark notification read / read all,Positive,P2,Employee,Unread notifications,"1. Open Notifications
+2. Click one
+3. Click Mark all read",-,Unread count drops to 0; items flagged read.,"backend PATCH /:notificationId/read, /read-all",Not Run,,,,
+ATT-001,Attendance,Punch,Punch in on a working day,Positive,P0,Employee,Working day; employee assigned to a shift,"1. Open My Attendance
+2. Click Punch In",09:30,Punch-in time recorded; status shows 'pending' (open session) for the day.,backend src/services/attendance/attendancePunch.ts,Not Run,,,,
+ATT-002,Attendance,Punch,Punch out after punch in,Positive,P0,Employee,Already punched in,1. Click Punch Out,18:30,Session closes; worked minutes computed; day status calculated.,backend src/services/attendance/attendancePunch.test.ts,Not Run,,,,
+ATT-003,Attendance,Punch,Punch out without a punch in,Negative,P0,Employee,No punch-in for the day,1. Click Punch Out,-,Rejected; punch-out requires a punch-in.,backend src/services/attendance/attendancePunch.test.ts,Pass,Verified by existing test attendancePunch.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-004,Attendance,Punch,Second punch-out replaces the first (latest wins),Edge,P1,Employee,"Punched in 09:30, out 15:00",1. Punch out again at 18:00,15:00 then 18:00,Final session is 09:30-18:00; previous punch-out 15:00 kept as history.,backend src/services/attendance/attendancePunch.test.ts,Pass,Verified by existing test attendancePunch.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-005,Attendance,Punch,Overnight shift punch-out next morning,Edge,P1,Employee,Night shift crossing midnight,"1. Punch in 22:00
+2. Punch out 06:00 next day",22:00 -> 06:00,Punch-out belongs to the previous attendance date; one session recorded.,backend src/services/attendance/attendancePunch.test.ts,Pass,Verified by existing test attendancePunch.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-006,Attendance,Punch,Punch inside office geofence,Positive,P1,Employee,Policy needs geofence; office lat/lng set,1. Punch in from the office location,Same coordinates as office,"Punch accepted; distance 0 m, within geofence.",backend src/services/attendance/attendancePunch.test.ts,Pass,Verified by existing test attendancePunch.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-007,Attendance,Punch,Punch outside office geofence,Negative,P1,Employee,Geofence enforced; office lat/lng set,1. Punch in from >700 m away,~700+ m from office,Punch flagged/blocked as outside geofence per policy.,backend src/services/attendance/attendancePunch.test.ts,Pass,Verified by existing test attendancePunch.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-008,Attendance,Punch,Punch from an untrusted device,Negative,P1,Employee,Trusted-device policy is on; device not approved,1. Punch in from a new browser/device,new device,Punch blocked or sent for approval per punch access policy.,backend src/services/attendance/attendancePunchAccess.test.ts,Not Run,,,,
+ATT-009,Attendance,Punch,Approve a trusted device,Positive,P2,HR,Pending device request,"1. Attendance > Trusted devices
+2. Approve the device",-,Employee can punch from the device afterwards.,frontend app/dashboard/attendance/AttendanceTrustedDevicesPanel.tsx,Not Run,,,,
+ATT-010,Attendance,Calculation,Full day with overtime,Positive,P0,Employee,8-hour shift,"1. Work 9 hours
+2. Open the day",worked=540 min,"Status 'present', late 0, early exit 0, overtime 60.",backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-011,Attendance,Calculation,Multiple sessions with a break,Positive,P1,Employee,"Two sessions in a day, 60-min gap","1. Punch in/out twice
+2. Open the day",break=60,"Worked 435, break 60, status 'half_day', late 5, early exit 25 (per fixture).",backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-012,Attendance,Calculation,Open session during the day,Edge,P1,Employee,"Punched in, not out, day not closed",1. Open day view,-,"Status 'pending', state 'open', missing punch flagged.",backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-013,Attendance,Calculation,Day closed with no punches,Positive,P0,Employee,"Working day, closed, no punch",1. Run processor / view day,-,Status 'absent'.,backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-014,Attendance,Calculation,Day closed with only a punch-in,Positive,P0,Employee,Missing punch-out after close,1. View day,-,Status 'incomplete' with missing punch flag.,backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-015,Attendance,Calculation,No punch on a weekly off,Positive,P1,Employee,Sunday = weekly off,1. View Sunday,-,"Status 'weekly_off', not absent.",backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-016,Attendance,Calculation,Work on a holiday,Edge,P1,Employee,Holiday in calendar,1. Punch 2 hours on the holiday,120 min,Status 'present' with 120 worked minutes; may be eligible for comp-off.,backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-017,Attendance,Calculation,Very late arrival cannot be recovered by working after shift,Edge,P1,Employee,Scheduled window set,"1. Arrive 140 min late
+2. Work 8 hours total (after shift end)","late=140, worked=480",Late 140 and status 'half_day' despite 480 worked.,backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-018,Attendance,Calculation,Shift across midnight is calculated as one day,Edge,P1,Employee,Night shift,1. Work a full overnight shift,worked=420,"Status 'present', early exit 0.",backend src/services/attendance/attendanceCalculator.test.ts,Pass,Verified by existing test attendanceCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+ATT-019,Attendance,Processor,Day shift auto-closes at shift end,Positive,P1,System,Attendance processor enabled,1. Run processor after shift end,-,Open days are closed at the scheduled close time.,backend src/services/attendance/attendanceProcessor.test.ts,Not Run,,,,
+ATT-020,Attendance,Processor,Grace period delays closing,Edge,P2,System,Grace period configured (e.g. 30 min),1. Run processor just after shift end,grace=30,Day closes only after shift end + grace.,backend src/services/attendance/attendanceProcessor.test.ts,Not Run,,,,
+ATT-021,Attendance,Processor,Overnight shift closes next morning,Edge,P2,System,Night shift,1. Run processor at night,-,Close time falls on the next calendar day.,backend src/services/attendance/attendanceProcessor.test.ts,Not Run,,,,
+ATT-022,Attendance,Processor,Completed run is not re-processed,Edge,P3,System,Run already complete,1. Trigger processor again,-,Run is detected as complete and skipped.,backend src/services/attendance/attendanceProcessor.test.ts,Not Run,,,,
+ATT-023,Attendance,Regularization,Employee submits regularization,Positive,P0,Employee,Missing punch-out yesterday,"1. My Attendance > yesterday > Regularize
+2. Choose correction type
+3. Enter times and reason
+4. Submit",punch-out 18:30; reason 'Forgot',Request created in Pending; goes to approver per workflow.,backend src/services/attendance/attendanceRegularization.test.ts,Not Run,,,,
+ATT-024,Attendance,Regularization,Correction type is required,Validation,P1,Employee,-,1. Submit regularization without correction type,-,Validation error on correctionType; request not created.,backend src/services/attendance/attendanceRegularization.test.ts,Not Run,,,,
+ATT-025,Attendance,Regularization,Manager approves regularization,Positive,P1,Manager,Pending request from a reportee,"1. Open Requests
+2. Approve",-,Attendance day is corrected and recalculated.,backend src/services/attendance/attendanceRegularization.test.ts,Not Run,,,,
+ATT-026,Attendance,Regularization,Manager rejects regularization,Positive,P2,Manager,Pending request,1. Reject with a reason,-,Request Rejected; day unchanged; employee notified.,backend src/services/attendance/attendanceRegularization.test.ts,Not Run,,,,
+ATT-027,Attendance,Regularization,Overnight correction keeps correct dates,Edge,P2,Employee,Night shift,1. Regularize with punch-out after midnight,-,Punch-out saved on the next calendar date.,backend src/services/attendance/attendanceRegularization.test.ts,Not Run,,,,
+ATT-028,Attendance,Overtime,Approve overtime,Positive,P1,Manager,Overtime minutes > 0 and approval needed,"1. Open overtime request
+2. Approve",60 min,Overtime marked approved and available for payroll.,backend src/services/attendance/attendanceOvertime.test.ts,Not Run,,,,
+ATT-029,Attendance,Overtime,Approved overtime without amount blocks payroll validation,Negative,P1,Payroll Executive,"Approved OT, no one-time earning",1. Validate payroll run,-,Issue 'approved_overtime_requires_amount'; recommendation: add one-time earning.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+ATT-030,Attendance,Period,Lock attendance period,Positive,P1,HR,lock_attendance_period permission; all days ready,"1. Attendance > Period
+2. Lock",cycle Sep,Period locked; edits blocked.,backend src/services/attendance/attendancePeriod.test.ts,Not Run,,,,
+ATT-031,Attendance,Period,Lock blocked while blockers exist,Negative,P1,HR,Open/incomplete days exist,1. Try to lock,-,Readiness blockers listed; lock refused.,backend src/services/attendance/attendancePeriod.test.ts,Not Run,,,,
+ATT-032,Attendance,Period,Edit attendance in a locked period,Negative,P0,HR,Period locked,1. Adjust a day,-,Edit rejected until period is reopened.,backend src/services/attendance/attendancePeriod.test.ts,Not Run,,,,
+ATT-033,Attendance,Period,Reopen needs permission,Permission,P1,Manager,Locked period,1. Try to reopen the period,-,Denied; reopen_attendance_period required.,backend src/services/attendance/attendancePeriod.test.ts,Not Run,,,,
+ATT-034,Attendance,Period,Auto-finalization at cycle end,Positive,P2,System,Auto-finalization configured,1. Wait for cycle end or run job,-,Eligible cycle finalizes; ineligible one is skipped with reason.,backend src/services/attendance/attendanceProcessor.test.ts,Not Run,,,,
+ATT-035,Attendance,Adjustment,HR adjusts a day manually,Positive,P1,HR,adjust_attendance permission,"1. Open day drawer
+2. Adjust status/time with reason
+3. Save",-,Day updated; revision history shows the change.,frontend app/dashboard/attendance/AttendanceAdjustmentDrawer.tsx,Not Run,,,,
+ATT-036,Attendance,Adjustment,Adjustment without permission,Permission,P1,Employee,-,1. Try to open Attendance admin,-,No access.,frontend app/dashboard/attendance,Not Run,,,,
+ATT-037,Attendance,Import,Import attendance from file,Positive,P2,HR,import_attendance permission; valid file,"1. Attendance > Import
+2. Upload file
+3. Confirm",10 rows,Rows imported; summary shows counts.,frontend app/dashboard/attendance/AttendanceImportDrawer.tsx,Not Run,,,,
+ATT-038,Attendance,Import,Import invalid file,Negative,P2,HR,-,1. Upload file with wrong columns,-,Rejected with column/row errors.,frontend app/dashboard/attendance/AttendanceImportDrawer.tsx,Not Run,,,,
+ATT-039,Attendance,Reports,View and export attendance report,Positive,P2,HR,view/export reports permission,"1. Attendance > Reports
+2. Choose month
+3. Export",-,Report matches day data; export downloads.,backend src/services/attendance/attendanceReports.test.ts,Not Run,,,,
+ATT-040,Attendance,Reports,Manager sees only own team,Permission,P1,Manager,Reportees configured,1. Open attendance overview,-,Only reportees listed (employee scope).,backend src/services/attendance/attendanceOverview.test.ts,Not Run,,,,
+WFH-001,Remote Work (WFH),Request,Request WFH for a valid single day,Positive,P0,Employee,WFH policy enabled,"1. Remote Work > New request
+2. Pick date, reason
+3. Submit",2026-09-01,Request Pending; approver notified.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-002,Remote Work (WFH),Request,End date before start date,Validation,P1,Employee,-,"1. Pick start 2026-09-02, end 2026-09-01
+2. Submit",-,Rejected (invalid date range).,backend src/services/remoteWork/remoteWorkRequest.test.ts,Pass,Executed probe: fromDate cannot be after toDate. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+WFH-003,Remote Work (WFH),Request,Range longer than 31 days,Boundary,P2,Employee,-,1. Pick 2026-09-01 to 2026-10-02,32 days,Rejected; range too long.,backend src/services/remoteWork/remoteWorkRequest.test.ts,Pass,Executed probe: A WFH request can span at most 31 calendar days. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+WFH-004,Remote Work (WFH),Request,Weekly limit exceeded,Negative,P1,Employee,Policy maxDaysPerWeek e.g. 2,1. Request 3 days in the same Mon-Sun week,3 days,Error 'Weekly WFH limit is 2 days' (HTTP 422).,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-005,Remote Work (WFH),Request,Week boundary is Monday to Sunday,Edge,P2,Employee,maxDaysPerWeek=2,1. Request Sun and Mon + Tue,"2026-09-06, 09-07, 09-08",Sun counts in the earlier week; Mon-Tue in the next. No weekly breach.,backend src/services/remoteWork/remoteWorkRequest.test.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+WFH-006,Remote Work (WFH),Request,Monthly limit exceeded,Negative,P1,Employee,maxDaysPerMonth e.g. 8,1. Request days that push the month over 8,9th day,Error 'Monthly WFH limit is 8 days'.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-007,Remote Work (WFH),Request,Consecutive days limit exceeded,Negative,P1,Employee,maxConsecutiveDays e.g. 3,1. Request 4 consecutive days,4 days,Error 'Consecutive WFH limit is 3 days'.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-008,Remote Work (WFH),Request,Minimum notice not met,Negative,P1,Employee,minimumNoticeDays=2,1. Request WFH for tomorrow,tomorrow,Rejected with minimum-notice error.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Pass,Executed probe: This leave requires at least 2 calendar days notice. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+WFH-009,Remote Work (WFH),Request,Too far in advance,Negative,P2,Employee,maximumAdvanceDays=30,1. Request a date 60 days ahead,+60 days,Rejected with maximum-advance error.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-010,Remote Work (WFH),Approval,Manager approves WFH,Positive,P1,Manager,Pending WFH request,1. Approve,-,Status Approved; attendance for that date reflects remote work.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-011,Remote Work (WFH),Approval,Manager rejects WFH,Positive,P2,Manager,Pending request,1. Reject with reason,-,Status Rejected; employee notified.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+WFH-012,Remote Work (WFH),Approval,Employee cannot approve own request,Permission,P0,Employee,Employee is own approver,1. Try approving own request,-,Blocked.,backend src/services/remoteWork/remoteWorkRequest.service.ts,Not Run,,,,
+CAL-001,Calendar & Workforce Policy,Calendar,Month view shows holidays and events,Positive,P2,Employee,Holidays configured,1. Open Calendar,-,Holidays and leave/WFH days appear on the correct dates.,frontend app/dashboard/calendar,Not Run,,,,
+CAL-002,Calendar & Workforce Policy,Calendar,Day drawer shows day details,Positive,P3,Employee,-,1. Click a date,-,Drawer shows holiday/leave/attendance info for that day.,frontend app/dashboard/calendar/CalendarDayDrawer.tsx,Not Run,,,,
+CAL-003,Calendar & Workforce Policy,Policy,Create attendance policy version,Positive,P1,HR,manage_workforce_policies,"1. Workforce Policies > Attendance
+2. Create new version
+3. Publish",-,New version saved with effective date; old version remains for past dates.,backend src/schemas/WorkforcePolicy/AttendancePolicyVersion.schema.ts,Not Run,,,,
+CAL-004,Calendar & Workforce Policy,Policy,Invalid status calculation basis,Validation,P2,HR,-,1. Submit policy with unsupported calculation basis,-,Rejected by validation.,backend src/schemas/WorkforcePolicy/AttendancePolicyVersion.schema.test.ts,Not Run,,,,
+CAL-005,Calendar & Workforce Policy,Policy,Office geofence settings validation,Validation,P2,HR,-,1. Enable geofence without radius/coordinates,-,Rejected until coordinates and radius are valid.,backend src/schemas/WorkforcePolicy/AttendancePolicyVersion.schema.test.ts,Not Run,,,,
+CAL-006,Calendar & Workforce Policy,Policy,Upload holidays via Excel,Positive,P1,HR,Valid holiday sheet,"1. Policies > Holidays
+2. Upload Excel",10 holidays,Holidays saved and visible in calendar.,backend PUT /policy/holidays/excel,Not Run,,,,
+CAL-007,Calendar & Workforce Policy,Policy,Upload invalid holiday Excel,Negative,P2,HR,-,1. Upload sheet with bad dates,-,Rejected with row errors.,backend PUT /policy/holidays/excel,Not Run,,,,
+CAL-008,Calendar & Workforce Policy,Policy,Employee cannot edit workforce policy,Permission,P1,Employee,-,1. Open /dashboard/workforce-policies,-,Not accessible or read-only.,backend src/services/workforcePolicy/workforcePolicyAccess.test.ts,Not Run,,,,
+LV-001,Leave,Apply,Apply full-day leave,Positive,P0,Employee,Leave balance available,"1. My Leave > Apply
+2. Choose type, dates, reason
+3. Submit","Casual Leave 2026-08-24, reason 'Family event'",Request Pending; balance reserved/charged per policy.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-002,Leave,Apply,Holiday inside range is not charged,Positive,P0,Employee,Holiday on 2026-08-25,1. Apply leave 24-26 Aug,3 days requested,"Requested 3, charged 2.",backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-003,Leave,Apply,Sandwich rule charges weekend between leave days,Edge,P1,Employee,Sandwich rule on; Sat-Sun weekly off,1. Apply Fri 21 Aug to Mon 24 Aug,4 days,Charged 4 days; Sat/Sun reason 'sandwich_rule'.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-004,Leave,Apply,Half-day holiday charges 0.5,Edge,P2,Employee,Half-day mandatory holiday,1. Apply leave on that day,-,Charged 0.5.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-005,Leave,Apply,Hourly leave,Positive,P2,Employee,Leave type allows hours,1. Apply 2.5 hours,2.5 h,Charged 2.5 units.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-006,Leave,Apply,Half-day leave,Positive,P1,Employee,Type allows half day,1. Choose half day,0.5 day,Charged 0.5.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Executed probe: Behaved as expected. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-007,Leave,Apply,Leave type not allowed during probation,Negative,P1,Employee,Probationer; rule 'after_confirmation',1. Apply that leave type,-,Rejected (not eligible until confirmed).,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-008,Leave,Apply,Minimum notice not met,Negative,P1,Employee,minimumNoticeDays>0,1. Apply for tomorrow,-,Rejected with minimum-notice error.,backend src/services/leave/leaveRequestCalculator.utils.ts,Pass,Executed probe: This leave requires at least 2 calendar days notice. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-009,Leave,Apply,Range longer than 366 days,Boundary,P3,Employee,-,1. Apply 2026-01-01 to 2027-01-02,367 days,Error 'A leave request cannot span more than 366 calendar days'.,backend src/services/leave/leaveRequestCalculator.utils.ts,Pass,Executed probe: A leave request cannot span more than 366 calendar days. Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-010,Leave,Apply,Reason shorter than 3 characters,Validation,P2,Employee,-,1. Enter reason 'ab',ab,Error 'Leave reason must be at least 3 characters'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-011,Leave,Apply,Overlapping leave request,Negative,P0,Employee,Active request exists for 24 Aug,1. Apply again for 24 Aug,-,Error 'An active leave request already overlaps these dates' (409).,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-012,Leave,Apply,Insufficient balance (negative not allowed),Negative,P0,Employee,"Balance 1, negative balance off",1. Apply 3 days,-,Rejected for insufficient balance.,backend src/services/leave/leaveBalance.service.ts,Not Run,,,,
+LV-013,Leave,Apply,Negative balance within allowed limit,Edge,P2,Employee,"negativeBalanceAllowed, max 2","1. Apply days that take balance to -2
+2. Then -3",-,-2 accepted; -3 rejected.,backend src/services/leave/leaveRequestCalculator.test.ts,Not Run,,,,
+LV-014,Leave,Apply,Leave year starts April 1,Edge,P2,Employee,Leave year start 1 Apr,1. Apply on 31 Mar and on 1 Apr,2026-03-31 / 2026-04-01,31 Mar uses the previous leave year balance; 1 Apr uses the new year.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,"Executed probe: 31 Mar -> {""leaveYearKey"":""2025-04-01:2026-03-31"",""leaveYearStart"":""2025-04-01"",""leaveYearEnd"":""2026-03-31""} ; 1 Apr -> {""leaveYearKey"":""2026-04-01:2027-03-31"",""leaveYearStart"":""2026-04-01"",""leaveYearEnd"":""2027-03-31""}. Logic checked by running the backend code; UI / API / database flow NOT tested.",Claude (auto),2026-10-21,
+LV-015,Leave,Apply,HR applies on behalf of employee,Permission,P2,HR,Permission to submit on behalf,1. Apply leave for an employee,-,Created for that employee; employee without permission gets 403.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-016,Leave,Documents,Supporting document required from 2 days,Positive,P1,Employee,"Rule: documentRequiredFromUnits=2, allow later, due 2 days after leave end",1. Apply 24-25 Aug,2 days,Request shows document required; due date 27 Aug.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-017,Leave,Documents,Document not required for 1 day,Positive,P2,Employee,Same rule,1. Apply 1 day,1 day,No document requirement.,backend src/services/leave/leaveRequestCalculator.test.ts,Pass,Verified by existing test leaveRequestCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-018,Leave,Documents,Attachment limits,Boundary,P2,Employee,-,"1. Attach 5 files
+2. Attach a 6th
+3. Attach file >5 MB
+4. Attach .docx",-,6th rejected ('at most 5'); >5 MB rejected ('5 MB or smaller'); only PDF/JPG/PNG allowed.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-019,Leave,Documents,Same attachment used twice,Negative,P3,Employee,-,1. Attach the same uploaded file twice,-,Error 'A leave attachment can be included only once'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-020,Leave,Documents,HR verifies submitted document,Positive,P1,HR,Documents submitted,"1. Open request
+2. Verify document",-,Document status Verified.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-021,Leave,Documents,Waive document needs reason,Validation,P2,HR,Pending document requirement,1. Waive without reason,'',Error 'A document waiver reason is required'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-022,Leave,Documents,Manager cannot verify or waive documents,Permission,P1,Manager,-,1. Try to verify/waive,-,Error 'Only HR or a company administrator can verify or waive leave documents'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-023,Leave,Approval,Manager approves leave,Positive,P0,Manager,Pending leave from reportee,"1. Open request
+2. Approve",-,Status Approved; balance deducted; calendar/attendance show leave.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-024,Leave,Approval,Manager rejects leave,Positive,P1,Manager,Pending,1. Reject with reason,-,Status Rejected; balance restored.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-025,Leave,Approval,Cannot approve own leave,Permission,P0,Manager,Manager's own request pending with them as approver,1. Try to approve,-,Error 'You cannot approve your own leave request' (403).,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-026,Leave,Approval,Cannot approve leave of unrelated employee,Permission,P0,Manager,Employee outside scope,1. Approve their leave via API,-,Error 'You cannot approve leave for this employee'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-027,Leave,Approval,Employee cannot view others' leave,Permission,P1,Employee,-,1. Open another employee's leave by id,-,Error 'You cannot view this leave request'.,backend src/services/leave/leaveRequest.service.ts,Not Run,,,,
+LV-028,Leave,Approval,'Any' rule: first approver decides the step,Positive,P1,Manager,"Step with 2 approvers, rule any",1. Approver 1 approves,-,Step approved; approver 2 skipped; flow moves to next step.,backend src/services/approval/approvalDecision.test.ts,Pass,Verified by existing test approvalDecision.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-029,Leave,Approval,'All' rule: waits for every approver,Positive,P1,Manager,"Step with 2 approvers, rule all","1. Approver 1 approves
+2. Approver 2 approves",-,Step stays pending after first; completes after second.,backend src/services/approval/approvalDecision.test.ts,Pass,Verified by existing test approvalDecision.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-030,Leave,Approval,Rejection at any step ends the request,Positive,P1,Manager,2-step flow,"1. Approve step 1
+2. Reject at step 2",-,Overall status Rejected; no further steps.,backend src/services/approval/approvalDecision.test.ts,Pass,Verified by existing test approvalDecision.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-031,Leave,Approval,User who is not an approver cannot decide,Permission,P0,Employee,-,1. Call decision API as non-approver,-,Rejected.,backend src/services/approval/approvalDecision.test.ts,Not Run,,,,
+LV-032,Leave,Approval,Latest published workflow version applies,Edge,P2,HR,Two published versions with different effective dates,1. Submit a request after the newer version's date,-,Newer version used; older used for earlier dates.,backend src/services/approval/approvalWorkflowVersion.test.ts,Pass,Verified by existing test approvalWorkflowVersion.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+LV-033,Leave,Cancellation,Cancel approved leave needs a reason,Validation,P1,Employee,Approved leave,1. Request cancellation without reason,'',Rejected; reason required.,backend src/schemas/Leave/LeaveCancellationRequest.schema.test.ts,Not Run,,,,
+LV-034,Leave,Cancellation,Approved cancellation restores balance,Positive,P1,Employee,Cancellation approved,1. Approver approves cancellation,-,Leave cancelled; balance restored.,backend src/services/leave/leaveCancellationRequest.service.ts,Not Run,,,,
+LV-035,Leave,Encashment,Encash leave with positive units,Positive,P2,Employee,Encashable balance,1. Request encashment of 2 days,2,Request created and routed for approval.,backend src/services/leave/leaveEncashmentRequest.service.ts,Not Run,,,,
+LV-036,Leave,Encashment,Zero or negative units,Validation,P2,Employee,-,1. Request 0 and -1 units,"0, -1",Rejected; units must be positive.,backend src/schemas/Leave/LeaveEncashmentRequest.schema.test.ts,Not Run,,,,
+LV-037,Leave,Balance,Accrual credits balance per policy,Positive,P1,System,Monthly accrual policy,1. Run accrual for the month,-,Balances increase by policy amount.,backend src/services/leave/leaveAccrualCalculator.utils.ts,Not Run,,,,
+LV-038,Leave,Balance,Year-end carry forward and lapse,Positive,P1,HR,Year-end rules configured,"1. Leave Management > Year end
+2. Run",-,Balance carried forward up to limit; remainder lapses.,backend src/services/leave/leaveYearEndCalculator.utils.ts,Not Run,,,,
+LV-039,Leave,Balance,HR adjusts a balance manually,Positive,P2,HR,manage_leave_balances,"1. Open balances
+2. Adjust with reason",+1,Balance updated; entry in history.,frontend app/dashboard/leave-management/components/LeaveBalancesPanel.tsx,Not Run,,,,
+LV-040,Leave,Policy,Create leave type and policy,Positive,P1,HR,-,"1. Leave Management > Leave type > Add
+2. Add to policy
+3. Save","Casual Leave, 12 days",Type available for employees assigned the policy.,frontend app/dashboard/leave-management/components/LeaveTypeDrawer.tsx,Not Run,,,,
+CO-001,Comp-Off,Eligibility,Worked 239 minutes on holiday earns nothing,Boundary,P1,Employee,"Half-day=240, full-day=480","1. Work 239 min on a holiday
+2. Claim comp-off",239,Eligible units 0; claim not allowed.,backend src/services/compOff/compOffClaim.test.ts,Pass,Verified by existing test compOffClaim.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-002,Comp-Off,Eligibility,Worked 240 minutes earns half day,Boundary,P1,Employee,Same,1. Work 240 min,240,Eligible units 0.5.,backend src/services/compOff/compOffClaim.test.ts,Pass,Verified by existing test compOffClaim.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-003,Comp-Off,Eligibility,Worked 479 minutes still half day,Boundary,P1,Employee,Same,1. Work 479 min,479,Eligible units 0.5.,backend src/services/compOff/compOffClaim.test.ts,Pass,Verified by existing test compOffClaim.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-004,Comp-Off,Eligibility,Worked 480 minutes earns full day,Boundary,P1,Employee,Same,1. Work 480 min,480,Eligible units 1.,backend src/services/compOff/compOffClaim.test.ts,Pass,Verified by existing test compOffClaim.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-005,Comp-Off,Claim,Approve comp-off claim,Positive,P1,Manager,Pending claim,1. Approve,-,Comp-off lot credited with expiry date.,backend src/services/compOff/,Not Run,,,,
+CO-006,Comp-Off,Usage,Comp-off used before newer lots (FIFO),Positive,P1,Employee,"Lots: 1 day (older), 1 day (newer)",1. Take 1.5 days comp-off,1.5,"Uses the older lot fully, then 0.5 from the newer.",backend src/services/compOff/compOffCredit.utils.test.ts,Pass,Verified by existing test compOffCredit.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-007,Comp-Off,Usage,Expired lot is skipped,Edge,P1,Employee,Lot expired yesterday,1. Apply comp-off leave today,-,Expired lot not used; insufficient balance if nothing else.,backend src/services/compOff/compOffCredit.utils.test.ts,Pass,Verified by existing test compOffCredit.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-008,Comp-Off,Usage,Lot is still usable on its expiry date,Boundary,P1,Employee,Lot expires today,1. Apply comp-off leave for today,-,Lot is used.,backend src/services/compOff/compOffCredit.utils.test.ts,Pass,Verified by existing test compOffCredit.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-009,Comp-Off,Usage,Insufficient comp-off balance,Negative,P0,Employee,Balance 0.5,1. Apply 1 day comp-off,1,Request rejected (cannot cover usage).,backend src/services/compOff/compOffCredit.utils.test.ts,Pass,Verified by existing test compOffCredit.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-010,Comp-Off,Usage,Multi-day request must be covered for every day,Edge,P2,Employee,Balance covers day 1 only,1. Apply 2 days comp-off,2,Rejected if any day cannot be covered.,backend src/services/compOff/compOffCredit.utils.test.ts,Pass,Verified by existing test compOffCredit.utils.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+CO-011,Comp-Off,Claim,Compoff claims panel visible to HR,UI,P3,HR,-,1. Leave Management > Comp-off claims,-,List of claims with status and units.,frontend app/dashboard/leave-management/components/CompOffClaimsPanel.tsx,Not Run,,,,
+PAYS-001,Payroll - Setup,Components,Create salary component,Positive,P0,Payroll Executive,manage_payroll_configuration,"1. Payroll > Salary components > Add
+2. Enter name, code, category Earning
+3. Save",Basic / BASIC / Earning,Component saved with normalized code and category.,backend src/schemas/Payroll/SalaryComponent.schema.test.ts,Not Run,,,,
+PAYS-002,Payroll - Setup,Components,Invalid category or code,Validation,P1,Payroll Executive,-,"1. Save component with unsupported category
+2. Save with invalid code characters",category='bonusX'; code='b a$',Rejected by validation.,backend src/schemas/Payroll/SalaryComponent.schema.test.ts,Not Run,,,,
+PAYS-003,Payroll - Setup,Components,Component code is normalized,Edge,P3,Payroll Executive,-,1. Save code ' basic ',' basic ',"Stored in normalized form (trimmed, upper-case).",backend src/schemas/Payroll/SalaryComponent.schema.test.ts,Not Run,,,,
+PAYS-004,Payroll - Setup,Structure,Salary structure preview totals,Positive,P0,Payroll Executive,Structure with earnings and deductions,"1. Salary structures > Preview with BASIC 50,000 fixed, HRA 40% of Basic, PF 12% of Basic (deduction), Bonus variable (0)","BASIC 50,000; HRA 40%; PF 12%","Monthly gross 70,000 (50,000 + HRA 20,000), deductions 6,000, net 64,000, annual net 7,68,000.",backend src/services/payroll/salaryStructureCalculator.test.ts,Pass,Verified by existing test salaryStructureCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYS-005,Payroll - Setup,Structure,Percentage component follows its base component,Positive,P1,Payroll Executive,HRA = 40% of BASIC,"1. Set employee override BASIC = 60,000
+2. Preview","BASIC 50,000 -> override 60,000","BASIC 60,000, HRA 24,000, gross 84,000 (dependents recalculated from override).",backend src/services/payroll/salaryStructureCalculator.test.ts,Pass,Verified by existing test salaryStructureCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYS-006,Payroll - Setup,Structure,Circular dependency blocked,Negative,P1,Payroll Executive,A depends on B and B depends on A,1. Save structure,-,Rejected with circular dependency error.,backend src/services/payroll/salaryStructureCalculator.test.ts,Pass,Verified by existing test salaryStructureCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYS-007,Payroll - Setup,Structure,Employee override recalculates dependents,Edge,P2,Payroll Executive,"Structure: BASIC 50,000, HRA 40% of Basic","1. Override BASIC for one employee to 60,000
+2. Preview","60,000","HRA changes to 24,000 automatically.",backend src/services/payroll/salaryStructureCalculator.test.ts,Pass,Verified by existing test salaryStructureCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYS-008,Payroll - Setup,Structure,Rounding to nearest minor unit,Edge,P3,Payroll Executive,Fractional result,1. Preview with amounts that give fractions,-,Amounts rounded exactly to paise with no drift.,backend src/services/payroll/salaryStructureCalculator.test.ts,Pass,Verified by existing test salaryStructureCalculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYS-009,Payroll - Setup,Compensation,Assign compensation with effective dates,Positive,P0,Payroll Executive,manage_employee_compensation,"1. Employee compensation > Assign
+2. Pick structure, effective from, CTC",from 2026-04-01,Assignment saved; previous assignment end date derived automatically.,backend src/services/payroll/employeeCompensation.test.ts,Not Run,,,,
+PAYS-010,Payroll - Setup,Compensation,Invalid compensation snapshot,Validation,P1,Payroll Executive,-,1. Save with missing structure or negative amount,-,Rejected by validation.,backend src/services/payroll/employeeCompensation.test.ts,Not Run,,,,
+PAYS-011,Payroll - Setup,Compensation,Employee sees only own compensation (safe view),Permission,P0,Employee,Visibility enabled for employees,1. Open My Profile > compensation,-,Only own current data; future and cancelled assignments hidden.,backend src/services/payroll/employeeCompensation.test.ts,Not Run,,,,
+PAYS-012,Payroll - Setup,Compensation,Compensation visibility switched off,Permission,P1,Employee,Company setting hides compensation,1. Open My Profile,-,Compensation not shown to employee.,backend src/services/payroll/employeeCompensation.test.ts,Not Run,,,,
+PAYS-013,Payroll - Setup,Compensation,Bulk import compensation from Excel,Positive,P1,Payroll Executive,Valid workbook,"1. Compensation > Import
+2. Upload
+3. Confirm","1,234.56",Rows imported; amounts converted exactly to minor units (123456).,backend src/services/payroll/employeeCompensationImport.test.ts,Not Run,,,,
+PAYS-014,Payroll - Setup,Compensation,Import with bad workbook,Negative,P2,Payroll Executive,-,1. Upload sheet with missing columns,-,Rejected with parsing errors.,backend src/services/payroll/employeeCompensationImport.test.ts,Not Run,,,,
+PAYS-015,Payroll - Setup,Statutory,Create statutory profile,Positive,P1,Payroll Executive,-,"1. Statutory profiles > Add India profile
+2. Enable PF, ESI, PT, LWF",-,Profile saved with provider validation.,backend src/services/payroll/statutoryProfile.test.ts,Not Run,,,,
+PAYS-016,Payroll - Setup,Statutory,"Employee statutory details (UAN, ESIC, PAN)",Positive,P1,Payroll Executive,manage_employee_statutory,"1. Open employee statutory
+2. Enter details
+3. Save",-,Saved; validated per provider rules.,backend src/services/payroll/employeeStatutory.test.ts,Not Run,,,,
+PAYC-001,Payroll - Calculation,Statutory,"PF/ESI on Basic 30,000 for full month",Positive,P0,Payroll Executive,PF + ESI enabled; paid 30/30; PF rate 12%,"1. Calculate run for an employee with BASIC 30,000","BASIC 30,000","EPF employee 3,000 (base 25,000); EPS employer 1,250 (base 15,000); EPF employer 1,750; EDLI 125; ESI employee 225; ESI employer 975.",backend src/services/payroll/statutory/indiaStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-002,Payroll - Calculation,Statutory,PF on higher wages,Edge,P2,Payroll Executive,Higher-wages option on,"1. Calculate with BASIC 30,000","BASIC 30,000","EPF employee 3,600; EPS base stays 15,000; EPF employer 2,350.",backend src/services/payroll/statutory/indiaStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-003,Payroll - Calculation,Statutory,Reduced PF rate (10%),Edge,P2,Payroll Executive,"Rate 10%, EPS off","1. Calculate with BASIC 30,000",rate 10%,"EPF employee 2,500; EPS 0; EPF employer 2,500.",backend src/services/payroll/statutory/indiaStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-004,Payroll - Calculation,Statutory,ESI daily-wage exemption,Edge,P2,Payroll Executive,"ESI on, BASIC 5,000",1. Calculate,"BASIC 5,000",Employee ESI 0; employer ESI 163.,backend src/services/payroll/statutory/indiaStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-005,Payroll - Calculation,Statutory,Manual duplicate blocks auto statutory,Negative,P2,Payroll Executive,Manual PF entry present,1. Calculate,-,No auto-generated duplicate contribution lines.,backend src/services/payroll/statutory/indiaStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-006,Payroll - Calculation,Statutory,Maharashtra Professional Tax,Positive,P1,Payroll Executive,"Office state Maharashtra; male; BASIC 30,000","1. Calculate for a normal month
+2. Calculate for February",Mar / Feb,PT 200 in a normal month; 300 in February.,backend src/services/payroll/statutory/indiaStateStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-007,Payroll - Calculation,Statutory,Female exemption under threshold (Maharashtra),Edge,P2,Payroll Executive,"Female; BASIC 25,000",1. Calculate,"BASIC 25,000",PT 0.,backend src/services/payroll/statutory/indiaStateStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-008,Payroll - Calculation,Statutory,Labour Welfare Fund periodic months,Positive,P2,Payroll Executive,Maharashtra; Karnataka,"1. Calculate June (MH)
+2. Calculate December (KA)
+3. Calculate a non-LWF month",June / Dec / Sept,"MH June: employee 25, employer 75. KA Dec: PT 200, LWF employee 50, employer 100. No LWF in other months.",backend src/services/payroll/statutory/indiaStateStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-009,Payroll - Calculation,Statutory,Delhi shows zero PT,Edge,P3,Payroll Executive,Office state Delhi,1. Calculate,-,PT 0 (marked not levied); LWF 0.75 / 2.25.,backend src/services/payroll/statutory/indiaStateStatutoryContributionCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-010,Payroll - Calculation,Statutory,State statutory needs office state,Negative,P1,Payroll Executive,Employee without office location state,1. Build employee snapshots,-,Issue raised; employee flagged until office state is set.,backend src/services/payroll/payrollEmployeeSnapshot.test.ts,Not Run,,,,
+PAYC-011,Payroll - Calculation,Tax,Income tax withholding (new regime),Positive,P1,Payroll Executive,Tax regime new; salary projection set,1. Calculate,-,TDS line IN_TDS_SALARY computed on annual projection with standard deduction; monthly spread (see fixture).,backend src/services/payroll/statutory/indiaIncomeTaxWithholdingCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-012,Payroll - Calculation,Tax,Rebate leads to zero TDS,Edge,P2,Payroll Executive,Low annual income,1. Calculate,-,TDS 0 due to rebate.,backend src/services/payroll/statutory/indiaIncomeTaxWithholdingCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-013,Payroll - Calculation,Tax,Old regime uses verified deductions and HRA,Edge,P2,Payroll Executive,Regime old; verified declarations,1. Calculate,-,Verified deductions and HRA exemption applied.,backend src/services/payroll/statutory/indiaIncomeTaxWithholdingCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-014,Payroll - Calculation,Tax,Manual TDS deduction is blocked,Negative,P1,Payroll Executive,-,1. Add TDS as a manual deduction,-,Blocked; TDS must come from calculator.,backend src/services/payroll/statutory/indiaIncomeTaxWithholdingCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-015,Payroll - Calculation,Tax,Missing identity (PAN) produces warning,Edge,P2,Payroll Executive,No PAN,1. Calculate,-,Warning about required identity.,backend src/services/payroll/statutory/indiaIncomeTaxWithholdingCalculator.test.ts,Pass,Verified by existing test statutory/*Calculator.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
+PAYC-016,Payroll - Calculation,Run,Proration for unpaid days,Positive,P0,Payroll Executive,Employee with unpaid days,1. Calculate run,"Scheduled earnings 35,000 with proration reduction 10,000","Recurring earnings 25,000; gross 26,500 incl. arrears; net 25,100 (per fixture).",backend src/services/payroll/payrollCalculation.test.ts,Not Run,,,,
+PAYC-017,Payroll - Calculation,Run,"Invalid source value becomes issue, not crash",Negative,P2,Payroll Executive,Bad input amount,1. Calculate,-,Result has error issue; net pay still computed for valid items.,backend src/services/payroll/payrollCalculation.test.ts,Not Run,,,,
+PAYC-018,Payroll - Calculation,Run,Statutory version mismatch blocks calculation,Negative,P1,Payroll Executive,Run snapshot provider version differs,1. Calculate,-,Calculation blocked with version mismatch error.,backend src/services/payroll/payrollCalculation.test.ts,Not Run,,,,
+PAYC-019,Payroll - Calculation,Run,Rounding mode applied,Edge,P3,Payroll Executive,Rounding mode set,1. Calculate,-,Amounts follow selected rounding mode.,backend src/services/payroll/payrollCalculation.test.ts,Not Run,,,,
+PAYC-020,Payroll - Calculation,One-time,Add one-time earning,Positive,P1,Payroll Executive,Draft run,"1. One-time inputs > Add
+2. Enter amount",5000.50,Amount saved exactly; included in next calculation.,backend src/services/payroll/payrollOneTimeInput.test.ts,Not Run,,,,
+PAYC-021,Payroll - Calculation,One-time,Invalid amount,Validation,P2,Payroll Executive,-,1. Enter 'abc' and '-10',abc / -10,Rejected by amount parsing.,backend src/services/payroll/payrollOneTimeInput.test.ts,Not Run,,,,
+PAYC-022,Payroll - Calculation,One-time,Changing one-time inputs after review blocks approval,Negative,P1,Payroll Executive,Run in review,1. Edit a one-time input,-,Review blocker 'One-time payroll inputs changed'.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-001,Payroll - Run Lifecycle,Run,Create payroll run for a period,Positive,P0,Payroll Executive,manage_payroll_runs; attendance period locked,"1. Payroll runs > New
+2. Choose month
+3. Create",2026-09,Run created in Draft with employee snapshots.,backend src/services/payroll/payrollRun.test.ts,Not Run,,,,
+PAYR-002,Payroll - Run Lifecycle,Run,Duplicate run for the same period,Negative,P1,Payroll Executive,Run exists,1. Create another for same period,2026-09,Rejected (unique per period).,backend src/services/payroll/payrollRun.test.ts,Not Run,,,,
+PAYR-003,Payroll - Run Lifecycle,Validation,Blocking errors prevent review,Negative,P0,Payroll Executive,Employee without compensation assignment,"1. Run validation
+2. Submit for review",-,Error 'missing_compensation_assignment'; submit blocked with 'blocking errors' reason.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-004,Payroll - Run Lifecycle,Validation,Warnings must be acknowledged,Positive,P1,Payroll Executive,Run with warnings,"1. Open validation
+2. Acknowledge warning
+3. Submit for review",-,Warning marked acknowledged; blocker clears.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+PAYR-005,Payroll - Run Lifecycle,Validation,Errors cannot be waived,Negative,P0,Payroll Executive,Run with an error issue,1. Try to acknowledge an error,-,Rejected; only warnings can be acknowledged.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+PAYR-006,Payroll - Run Lifecycle,Validation,Acknowledged warning can be reopened,Edge,P2,Payroll Executive,Acknowledged warning,1. Click Reopen on the issue,-,Issue back to open; blocks review again.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+PAYR-007,Payroll - Run Lifecycle,Validation,Reason required for a decision,Validation,P2,Payroll Executive,-,1. Acknowledge with empty reason,'',Rejected; reason required.,backend src/services/payroll/payrollValidation.test.ts,Not Run,,,,
+PAYR-008,Payroll - Run Lifecycle,Review,Submit run for review,Positive,P0,Payroll Executive,No blockers,"1. Click Submit for review
+2. Enter reason",-,Run status 'review'; submitter and time recorded.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-009,Payroll - Run Lifecycle,Review,Submitter cannot approve own run (maker-checker),Permission,P0,Payroll Executive,Same user submitted,1. Try to approve the run,-,Error 'submitter cannot approve'.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-010,Payroll - Run Lifecycle,Review,Different approver approves,Positive,P0,HR Admin,Run in review; approve_payroll_runs,"1. Open run
+2. Approve",-,Run approved and ready to finalize.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-011,Payroll - Run Lifecycle,Review,Submission needs a reason,Validation,P2,Payroll Executive,-,1. Submit without reason,'',Schema error on reviewSubmissionReason.,backend src/services/payroll/payrollRunReview.test.ts,Not Run,,,,
+PAYR-012,Payroll - Run Lifecycle,Finalize,Admin finalizes approved run,Positive,P0,Admin,Run approved,1. Click Finalize,-,Status finalized; immutable results with snapshot hash; payslips generated.,backend src/services/payroll/payrollFinalization.test.ts,Not Run,,,,
+PAYR-013,Payroll - Run Lifecycle,Finalize,HR cannot finalize,Permission,P0,HR,Default HR permissions,1. Open run,-,Finalize unavailable (admin and HR Admin only).,backend src/services/payroll/payrollFinalization.test.ts,Not Run,,,,
+PAYR-014,Payroll - Run Lifecycle,Finalize,Finalized totals reconcile with run,Positive,P1,Admin,-,1. Compare run totals with finalized results,-,Employee count and net pay match; mismatch raises error.,backend src/services/payroll/payrollFinalization.test.ts,Not Run,,,,
+PAYR-015,Payroll - Run Lifecycle,Finalize,One finalized result per employee per version,Edge,P2,Admin,-,1. Attempt duplicate finalization,-,Unique index prevents duplicates.,backend src/services/payroll/payrollFinalization.test.ts,Not Run,,,,
+PAYR-016,Payroll - Run Lifecycle,Reopen,Reopen a finalized run with payout not started,Positive,P1,Admin,"Finalized, payout not_started","1. Click Reopen
+2. Enter reason",-,Status back to draft; version incremented; earlier finalization preserved for audit.,backend src/services/payroll/payrollReopen.test.ts,Not Run,,,,
+PAYR-017,Payroll - Run Lifecycle,Reopen,Cannot reopen a draft run,Negative,P2,Admin,Draft run,1. Try Reopen,-,Blocked: only finalized runs can be reopened.,backend src/services/payroll/payrollReopen.test.ts,Not Run,,,,
+PAYR-018,Payroll - Run Lifecycle,Reopen,Cannot reopen when payout is processing or paid,Negative,P0,Admin,Payout processing / paid,1. Try Reopen,-,Blocked due to payout status.,backend src/services/payroll/payrollReopen.test.ts,Not Run,,,,
+PAYR-019,Payroll - Run Lifecycle,Reopen,HR cannot reopen,Permission,P1,HR,-,1. Look for Reopen,-,Not available (admin and HR Admin only).,backend src/services/payroll/payrollReopen.test.ts,Not Run,,,,
+PAYR-020,Payroll - Run Lifecycle,Adjustment,Correction after finalization goes as arrear to next run,Positive,P1,Payroll Executive,Run for Aug finalized,"1. Create correction for Aug
+2. Calculate Sept run",-,Arrear line has source 'finalized_correction' linked to Aug and finalization version 1.,backend src/services/payroll/payrollCalculation.test.ts,Not Run,,,,
+PAYP-001,Payroll - Payslips & Reports,Payslip,Employee views own payslip,Positive,P0,Employee,Finalized run,"1. Open My Payslips
+2. Choose month
+3. Download PDF",Sep 2026,"Payslip PDF opens with correct earnings, deductions and net pay.",backend src/services/payroll/payrollPayslip.test.ts,Not Run,,,,
+PAYP-002,Payroll - Payslips & Reports,Payslip,Employee cannot see another employee's payslip,Permission,P0,Employee,-,1. Request another employee's payslip by id,other userId,Denied.,backend src/services/payroll/payrollPayslip.test.ts,Not Run,,,,
+PAYP-003,Payroll - Payslips & Reports,Payslip,Payslip before finalization,Negative,P1,Employee,Run still draft,1. Open My Payslips,-,No payslip for that month yet.,backend src/services/payroll/payrollPayslip.test.ts,Not Run,,,,
+PAYP-004,Payroll - Payslips & Reports,Payslip,Filter payslips by period,Positive,P3,Employee,Several months finalized,1. Select a year/month range,-,Only payslips in range shown.,backend src/services/payroll/payrollPayslip.test.ts,Not Run,,,,
+PAYP-005,Payroll - Payslips & Reports,Reports,Statutory report workbook,Positive,P1,Payroll Executive,Finalized run,1. Statutory reports > Generate,-,Excel contains PF/ESI/PT figures matching run.,backend src/services/payroll/payrollStatutoryReport.test.ts,Not Run,,,,
+PAYP-006,Payroll - Payslips & Reports,Reports,ESIC / statutory filing file,Positive,P2,Payroll Executive,Finalized run,"1. Statutory filings > ESIC
+2. Generate",-,Filing file generated in expected format.,backend src/services/payroll/payrollEsicFiling.test.ts,Not Run,,,,
+PAYP-007,Payroll - Payslips & Reports,Reports,Sensitive CSV controls,Permission,P1,HR,User without sensitive-data access,1. Export payroll CSV,-,Sensitive columns masked or export denied.,backend src/services/payroll/payrollReportingOperations.test.ts,Not Run,,,,
+PAYP-008,Payroll - Payslips & Reports,Reports,Large run opens without failure,Edge,P3,Payroll Executive,Run with many employees,1. Open finalized results,1000+ employees,Results load and paginate properly.,backend src/services/payroll/payrollReportingOperations.test.ts,Not Run,,,,
+PAYP-009,Payroll - Payslips & Reports,Access,Payroll menu hidden for plain employees,Permission,P0,Employee,-,"1. Check sidebar
+2. Open /dashboard/payroll directly",-,Menu hidden; direct URL denied.,frontend app/dashboard/payroll,Not Run,,,,
+PAYP-010,Payroll - Payslips & Reports,Access,Payroll Executive access role,Permission,P1,Payroll Executive,Access role assigned to an HR user,1. Login and open Payroll,-,Gets payroll permissions only; no extra org rights.,backend src/services/permissions/permission.utils.test.ts,Pass,Verified by existing test payrollAccessRole.test.ts (ran OK). Logic checked by running the backend code; UI / API / database flow NOT tested.,Claude (auto),2026-10-21,
