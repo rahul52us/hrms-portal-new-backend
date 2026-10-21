@@ -374,7 +374,8 @@ const resetPassword = async (
 
     const hashedPassword = await hashBcrypt(req.body.password);
     const user = await User.findByIdAndUpdate(token.userId, {
-      $set: { password: hashedPassword },
+      $set: { password: hashedPassword, failedLoginAttempts: 0 },
+      $unset: { lastFailedLoginAt: 1, loginLockedUntil: 1 },
     });
 
     if (!user) {

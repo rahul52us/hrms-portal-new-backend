@@ -43,6 +43,8 @@ import {
   canUserLogin,
   getUserAccountStatus,
 } from "../auth/utils/userAccountStatus";
+import { assertUserStatusChangeAllowed } from "./adminUserSecurity.utils";
+import { validateProfileImageUpload } from "../upload/uploadSecurity.utils";
 import {
   buildEmployeeIdentifier,
   MAX_EMPLOYEE_NUMBER_LENGTH,
@@ -605,6 +607,7 @@ async function tryUploadUserPicture(pic: any) {
     return null;
   }
 
+  validateProfileImageUpload(pic);
   try {
     pic.filename = generateFileName(pic.filename);
     const url = await uploadFile(pic);
@@ -1906,6 +1909,9 @@ async function saveManagedUser({
     user.password = await hashBcrypt(password);
     user.setupToken = undefined;
     user.setupTokenExpiry = undefined;
+    user.failedLoginAttempts = 0;
+    user.lastFailedLoginAt = undefined;
+    user.loginLockedUntil = undefined;
   } else if (isCreate && sendSetupEmail && email) {
     const setupToken = createSetupToken();
     user.setupToken = setupToken.token;
@@ -3152,6 +3158,24 @@ export async function updateManagedUserStatusHandler(req: Request, res: Response
         ? req.body.isEnabled
         : targetUser.is_enabled === false;
 
+    assertUserStatusChangeAllowed({
+      requesterId: requester.userId,
+      targetUserId: targetUser._id,
+      nextStatus,
+    });
+
+    if (!nextStatus && targetRole === "superadmin") {
+      const anotherActiveSuperadmin = await User.exists({
+        _id: { $ne: targetUser._id },
+        role: "superadmin",
+        is_enabled: { $ne: false },
+        deletedAt: { $exists: false },
+      });
+      if (!anotherActiveSuperadmin) {
+        throw generateError("At least one active superadmin account must remain", 400);
+      }
+    }
+
     targetUser.is_enabled = nextStatus;
     targetUser.updatedAt = new Date();
     await targetUser.save();
@@ -3611,6 +3635,9 @@ export async function setPasswordFromSetupToken(token: string, password: string)
   user.password = await hashBcrypt(password);
   user.setupToken = undefined;
   user.setupTokenExpiry = undefined;
+  user.failedLoginAttempts = 0;
+  user.lastFailedLoginAt = undefined;
+  user.loginLockedUntil = undefined;
   await user.save();
 
   const populatedUser = await User.findById(user._id)
@@ -3671,6 +3698,9 @@ export async function getManagedUserProfileDetailsHandler(req: Request, res: Res
 export async function updateManagedUserPersonalDetailsHandler(req: Request, res: Response) {
   try {
     const targetUserId = req.params.id;
+    if (req.body?.pic?.isAdd && req.body?.pic?.buffer) {
+      validateProfileImageUpload(req.body.pic);
+    }
     let profile = await ProfileDetails.findOne({ user: targetUserId });
     if (!profile) profile = new ProfileDetails({ user: targetUserId });
     
@@ -3725,6 +3755,7 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
         if (req.body.pic.isDeleted) {
           user.pic = null;
         } else if (req.body.pic.isAdd && req.body.pic.buffer) {
+          validateProfileImageUpload(req.body.pic);
           if (req.body.pic.filename) {
             const lastDotIndex = req.body.pic.filename.lastIndexOf('.');
             if (lastDotIndex !== -1) {
@@ -3747,7 +3778,7 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
 
     return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message || "Failed to update personal details" });
+    return res.status(error?.statusCode || 500).json({ success: false, error: error.message || "Failed to update personal details" });
   }
 }
 

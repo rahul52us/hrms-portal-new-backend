@@ -43,6 +43,9 @@ export interface UserInterface extends Document {
   password?: string;
   setupToken?: string;
   setupTokenExpiry?: Date;
+  failedLoginAttempts?: number;
+  lastFailedLoginAt?: Date;
+  loginLockedUntil?: Date;
   deletedAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -162,6 +165,9 @@ const UserSchema: Schema<UserInterface> = new Schema<UserInterface>({
   password: { type: String, trim: true },
   setupToken: { type: String, index: true },
   setupTokenExpiry: { type: Date },
+  failedLoginAttempts: { type: Number, default: 0, min: 0, select: false },
+  lastFailedLoginAt: { type: Date, select: false },
+  loginLockedUntil: { type: Date, select: false },
   refrenceBy:{
     type : mongoose.Schema.Types.ObjectId
   },

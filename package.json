@@ -93,6 +93,7 @@
     "test:payroll-statutory-filings": "ts-node src/services/payroll/payrollStatutoryFiling.test.ts && ts-node src/services/payroll/payrollEsicFiling.test.ts",
     "test:payroll-reporting-operations": "ts-node src/services/payroll/payrollReportingOperations.test.ts",
     "test:user-schema": "ts-node src/schemas/User/User.schema.test.ts",
+    "test:auth-security": "ts-node src/services/auth/loginSecurity.test.ts && ts-node src/services/adminUsers/adminUserSecurity.test.ts && ts-node src/services/upload/uploadSecurity.test.ts",
     "test:permissions": "ts-node src/services/permissions/permission.utils.test.ts",
     "test:workforce-policy-access": "ts-node src/services/workforcePolicy/workforcePolicyAccess.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",

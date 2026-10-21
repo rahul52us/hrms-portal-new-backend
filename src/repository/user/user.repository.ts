@@ -20,6 +20,7 @@ import Qualification from "../../schemas/User/Qualifications";
 import companyDetails from "../../schemas/company/companyDetails";
 import Company from "../../schemas/company/Company";
 import { ACTIVE_USER_PASSWORD_MATCH } from "../../services/auth/utils/userAccountStatus";
+import { validateProfileImageUpload } from "../../services/upload/uploadSecurity.utils";
 
 async function generateUniqueCode(this: any): Promise<string> {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*_-";
@@ -46,6 +47,7 @@ async function tryUploadUserPicture(pic: any) {
     return null;
   }
 
+  validateProfileImageUpload(pic);
   try {
     pic.filename = generateFileName(pic.filename);
     const url = await uploadFile(pic);
@@ -71,6 +73,7 @@ function normalizeUserLocationFields(target: Record<string, any>) {
 
 const createAdminUser = async (data: any) => {
   try {
+    if (data?.pic?.buffer) validateProfileImageUpload(data.pic);
     // -------------------------------
     // 1️⃣ Generate unique user code
     // -------------------------------
@@ -194,6 +197,7 @@ const createAdminUser = async (data: any) => {
 
 const createCompanyAdminUser = async (data: any) => {
   try {
+    if (data?.pic?.buffer) validateProfileImageUpload(data.pic);
     let finalCode = data.code;
     if (!finalCode) {
       finalCode = await generateUniqueCode();
@@ -334,6 +338,7 @@ const createCompanyAdminUser = async (data: any) => {
 
 const createUser = async (data: any) => {
   try {
+    if (data?.pic?.buffer) validateProfileImageUpload(data.pic);
     let finalCode = data.code;
     if (!finalCode) {
       finalCode = await generateUniqueCode();
@@ -525,6 +530,7 @@ const deleteUser = async (userId: any) => {
 
 const updateUserProfileDetails = async (data: any) => {
   try {
+    if (data?.pic?.isAdd && data?.pic?.buffer) validateProfileImageUpload(data.pic);
     const {
       pic,
       _id,
@@ -572,6 +578,7 @@ const updateUserProfileDetails = async (data: any) => {
       }
 
       if (pic?.filename && pic?.buffer && pic?.isAdd) {
+        validateProfileImageUpload(pic);
         pic.filename = generateFileName(pic.filename);
         const url = await uploadFile(pic);
         users.pic = {

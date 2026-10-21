@@ -46,6 +46,9 @@ const passwordLoginService = async (
       });
     }
 
+    if ((data as any)?.statusCode === 423 && Number((data as any)?.retryAfterSeconds) > 0) {
+      res.setHeader("Retry-After", String((data as any).retryAfterSeconds));
+    }
     next(data);
   } catch (err) {
     next(err);

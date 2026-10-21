@@ -10,6 +10,12 @@ import Company from "../../schemas/company/Company";
 import CompanyPolicy from "../../schemas/company/CompanyPolicy";
 import companyDetails from "../../schemas/company/companyDetails";
 import { createManagedCompany } from "../company/company.respository";
+import {
+  getLoginSecurityConfig,
+  isLoginLockActive,
+  loginRetryAfterSeconds,
+  shouldResetFailedLoginWindow,
+} from "../../services/auth/loginSecurity.utils";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -118,7 +124,26 @@ async function findUserByLoginUsername(username: string) {
   return User.findOne({
     username: usernameRegex,
     deletedAt: { $exists: false },
-  });
+  }).select("+failedLoginAttempts +lastFailedLoginAt +loginLockedUntil");
+}
+
+function loginLockedError(lockedUntil: Date, now = new Date()) {
+  const error: any = generateError(
+    "Too many failed sign-in attempts. This account is temporarily locked.",
+    423
+  );
+  error.retryAfterSeconds = loginRetryAfterSeconds(lockedUntil, now);
+  return error;
+}
+
+async function clearLoginSecurityState(userId: unknown) {
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: { failedLoginAttempts: 0 },
+      $unset: { lastFailedLoginAt: 1, loginLockedUntil: 1 },
+    }
+  );
 }
 
 const findUserByUserName = async (data: any) => {
@@ -160,6 +185,21 @@ const loginUserWithPassword = async (data: any): Promise<any> => {
 
     ensureUserAccountEnabled(existUser);
 
+    const now = new Date();
+    const security = getLoginSecurityConfig();
+    if (isLoginLockActive(existUser.loginLockedUntil, now)) {
+      throw loginLockedError(existUser.loginLockedUntil as Date, now);
+    }
+    if (
+      existUser.loginLockedUntil ||
+      shouldResetFailedLoginWindow(existUser.lastFailedLoginAt, now, security.failureWindowMs)
+    ) {
+      await clearLoginSecurityState(existUser._id);
+      existUser.failedLoginAttempts = 0;
+      existUser.lastFailedLoginAt = undefined;
+      existUser.loginLockedUntil = undefined;
+    }
+
     if (!hasUserPassword(existUser)) {
       throw generateError("Password setup is required before you can sign in.", 403);
     }
@@ -169,7 +209,36 @@ const loginUserWithPassword = async (data: any): Promise<any> => {
       String(existUser.password)
     );
     if (!passwordMatches) {
+      const failedUser = await User.findOneAndUpdate(
+        { _id: existUser._id },
+        {
+          $inc: { failedLoginAttempts: 1 },
+          $set: { lastFailedLoginAt: now },
+        },
+        { new: true }
+      ).select("+failedLoginAttempts +lastFailedLoginAt +loginLockedUntil");
+      const failedAttempts = Number(failedUser?.failedLoginAttempts || 0);
+      if (failedAttempts >= security.maxFailedAttempts) {
+        const lockedUntil = new Date(now.getTime() + security.lockDurationMs);
+        await User.updateOne(
+          {
+            _id: existUser._id,
+            failedLoginAttempts: { $gte: security.maxFailedAttempts },
+          },
+          { $set: { loginLockedUntil: lockedUntil } }
+        );
+        throw loginLockedError(
+          isLoginLockActive(failedUser?.loginLockedUntil, now)
+            ? (failedUser?.loginLockedUntil as Date)
+            : lockedUntil,
+          now
+        );
+      }
       throw generateError("Invalid credentials.", 401);
+    }
+
+    if (Number(existUser.failedLoginAttempts || 0) > 0 || existUser.lastFailedLoginAt) {
+      await clearLoginSecurityState(existUser._id);
     }
 
     return {
@@ -445,6 +514,9 @@ const changePassword = async (data: any) => {
       }
       let hashPassword =  await hashBcrypt(data.newPassword)
       user.password = hashPassword;
+      user.failedLoginAttempts = 0;
+      user.lastFailedLoginAt = undefined;
+      user.loginLockedUntil = undefined;
       await user.save();
       return { status: "success", data: null };
     } else {

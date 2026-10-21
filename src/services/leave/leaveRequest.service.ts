@@ -37,6 +37,10 @@ import { parseAttendanceDate } from "../attendance/employeeDayContext.utils";
 import { resolveLeaveYear } from "./leaveRequestCalculator.utils";
 import { uploadFile } from "../../repository/uploadDoc.repository";
 import {
+  LEAVE_DOCUMENT_MIME_TYPES,
+  validateUploadSignature,
+} from "../upload/uploadSecurity.utils";
+import {
   ensureEmployeeLeaveAccruals,
   runCompanyLeaveAccrualCatchUp,
 } from "./leaveAccrual.service";
@@ -738,17 +742,20 @@ export async function uploadLeaveAttachmentService(req: any, res: Response, next
     const type = text(req.body?.type).toLowerCase();
     const size = Number(req.body?.size || 0);
     const data = text(req.body?.data);
-    const allowedTypes = ["application/pdf", "image/jpeg", "image/png"];
-    if (!name || !allowedTypes.includes(type)) {
+    if (!name || !LEAVE_DOCUMENT_MIME_TYPES.includes(type as any)) {
       throw generateError("Upload a PDF, JPG, or PNG document", 422);
     }
     if (!Number.isFinite(size) || size <= 0 || size > 5 * 1024 * 1024) {
       throw generateError("Leave attachments must be 5 MB or smaller", 422);
     }
-    if (!data.startsWith(`data:${type};base64,`)) throw generateError("Attachment data does not match its content type", 422);
-    const encoded = data.slice(data.indexOf(",") + 1);
-    const actualSize = Buffer.byteLength(encoded, "base64");
-    if (actualSize <= 0 || actualSize > 5 * 1024 * 1024 || Math.abs(actualSize - size) > 2) {
+    const validated = validateUploadSignature({
+      data,
+      declaredMimeType: type,
+      allowedMimeTypes: LEAVE_DOCUMENT_MIME_TYPES,
+      maxBytes: 5 * 1024 * 1024,
+    });
+    const actualSize = validated.size;
+    if (Math.abs(actualSize - size) > 2) {
       throw generateError("Attachment size does not match the uploaded data", 422);
     }
     const url = await uploadFile({ filename: name, buffer: data });
