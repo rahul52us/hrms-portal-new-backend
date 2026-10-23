@@ -99,7 +99,8 @@
     "vercel:deploy": "vercel",
     "vercel:prod": "vercel --prod",
     "test:api": "jest --config jest.config.js --runInBand --forceExit",
-    "test:api:report": "jest --config jest.config.js --runInBand --forceExit --json --outputFile=reports/api-results.json"
+    "test:api:report": "jest --config jest.config.js --runInBand --forceExit --json --outputFile=reports/api-results.json",
+    "test:api:summary": "node scripts/summarize-api-results.js"
   },
   "keywords": [],
   "author": "",
