@@ -5,19 +5,20 @@
  * - Loads the real Express app from src/index.ts (VERCEL=1 stops it from listening / starting schedulers).
  * - Provides seed helpers (companies, users per role) and a token helper.
  */
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 
 export const DEFAULT_PASSWORD = "Test@1234";
 
-let mongod: MongoMemoryServer | null = null;
+let mongod: MongoMemoryReplSet | null = null;
 let app: any = null;
 let seq = 0;
 
 export async function startTestEnv() {
-  mongod = await MongoMemoryServer.create();
+  // Replica set (single node) because the app uses MongoDB transactions, which a standalone server rejects.
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   const uri = mongod.getUri("hrms_test");
   // Safety: the URI must point to the temporary local server, never a real database.
   if (!/^mongodb:\/\/127\.0\.0\.1:\d+\//.test(uri)) {
