@@ -10,7 +10,6 @@ import { setupSocket } from "./modules/chatSocket/chatSocket";
 import { statusCode } from "./config/helper/statusCode";
 import connectToDatabase from "./db/db";
 import mongoose from "mongoose";
-import { serveCourseAsset } from "./services/scorm/scormStorage.service";
 import { startLeaveAccrualScheduler } from "./services/leave/leaveAccrualScheduler";
 import { recoverPendingAttendanceProcessorRuns } from "./services/attendance/attendanceProcessor.service";
 import {
@@ -46,22 +45,22 @@ app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.get("/", (req: Request, res: Response) => {
-  res.status(statusCode.info).json({
-    message: "LMS backend is running",
+  res.status(statusCode.success).json({
+    message: "HRMS backend is running",
     health: "/health",
     apiBase: "/api",
   });
 });
 
 app.get("/api", (req: Request, res: Response) => {
-  res.status(statusCode.info).json({
+  res.status(statusCode.success).json({
     message: "API base route is available",
     health: "/health",
   });
 });
 
 app.get("/health", (req: Request, res: Response) => {
-  res.status(statusCode.info).send("Health OK");
+  res.status(statusCode.success).send("Health OK");
 });
 
 app.get("/db-check", async (req: Request, res: Response) => {
@@ -85,41 +84,14 @@ app.get("/db-check", async (req: Request, res: Response) => {
     99: "uninitialized",
   };
 
-  res.status(statusCode.info).json({
+  res.status(statusCode.success).json({
     status: (states as any)[state] || "unknown",
     readyState: state,
     uri: process.env.MONGODB_URI ? "Defined (redacted)" : "NOT DEFINED",
   });
 });
 
-app.get("/courses/*", async (req: Request, res: Response) => {
-  try {
-    const assetPath = req.path.replace(/^\/courses\/?/, "");
-    const wasServed = await serveCourseAsset(assetPath, res);
-
-    if (!wasServed) {
-      res.status(404).send("Course asset not found");
-    }
-  } catch (error) {
-    console.error("Course asset serve error:", error);
-    res.status(500).send("Failed to load course asset");
-  }
-});
-
-app.use("/notes", express.static(path.join(__dirname, "src", "../public/notes")));
 app.use("/public", express.static(path.join(process.cwd(), "public")));
-
-app.get("/courses-debug", (req: Request, res: Response) => {
-  const coursesDir = path.join(process.cwd(), "public", "uploads", "courses");
-  const fs = require("fs");
-
-  try {
-    const dirs = fs.readdirSync(coursesDir);
-    res.json({ coursesDir, contents: dirs });
-  } catch (err: any) {
-    res.json({ coursesDir, error: err.message });
-  }
-});
 
 app.use(async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -134,7 +106,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
 importRoutings(app);
 
 app.use((req: Request, res: Response) => {
-  res.status(404).send("Welcome to our app 4 (Not Found)");
+  res.status(404).json({ success: false, message: "API route not found" });
 });
 
 app.use(errorMiddleware);
@@ -177,7 +149,7 @@ const startServer = async () => {
   }
 };
 
-if (!process.env.VERCEL) {
+if (require.main === module && !process.env.VERCEL) {
   startServer();
 }
 

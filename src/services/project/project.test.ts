@@ -1,0 +1,50 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import {
+  dateKey, dateRange, overlapMatch, assignmentDateMatch, projectCode, pagination,
+  canManageProject, companyProjectManager, employeeProjectScope,
+} from "./project.utils";
+import { attachEffectivePermissions, computeEffectivePermissions, PERMISSION_KEYS } from "../permissions/permission.utils";
+import Project from "../../schemas/project/Project.schema";
+import WorkType from "../../schemas/project/ProjectWorkType.schema";
+import Assignment from "../../schemas/project/ProjectAssignment.schema";
+
+const id = () => new mongoose.Types.ObjectId();
+const owner = id(), outsider = id(), company = id();
+const employee = attachEffectivePermissions({ user: { _id: owner, company, role: "user" } });
+assert.equal(employee.role, "user");
+assert.equal(employee.effectivePermissions.view_projects, true);
+assert.equal(employee.effectivePermissions.manage_projects, false);
+assert.equal(canManageProject(employee, { managers: [owner] }), true);
+assert.equal(canManageProject(employee, { managers: [outsider] }), false);
+assert.equal(companyProjectManager(employee), false);
+assert.equal(canManageProject({ ...employee, permissions: { manage_projects: false } }, { managers: [owner] }), false);
+assert.equal(canManageProject({ ...employee, effectivePermissions: { view_projects: false } }, { managers: [owner] }), false);
+const admin = attachEffectivePermissions({ user: { _id: outsider, company, role: "hradmin" } });
+assert.equal(companyProjectManager(admin), true);
+assert.equal(canManageProject(admin, { managers: [owner] }), true);
+assert.deepEqual(employeeProjectScope(admin), {});
+assert.deepEqual(employeeProjectScope(employee), { $or: [{ _id: owner }, { reportingManager: owner }] });
+const delegated = computeEffectivePermissions({ role: "user", userOverrides: { view_projects: true, manage_projects: true } });
+assert.equal(delegated.manage_projects, true);
+assert.equal(computeEffectivePermissions({ role: "user", userOverrides: { view_projects: false, manage_projects: true } }).manage_projects, false);
+assert.equal(dateKey("2028-02-29", "Date"), "2028-02-29");
+for (const value of ["2026-02-29", "2026-02-30", "2026-13-01", "10/22/2026", {}, ""]) assert.throws(() => dateKey(value, "Date"));
+assert.equal(dateKey("", "Date", true), null);
+assert.throws(() => dateRange("2026-10-23", "2026-10-22"));
+assert.doesNotThrow(() => dateRange("2026-10-22", "2026-10-22"));
+assert.deepEqual(overlapMatch("2026-10-22", null), { status: "assigned", $or: [{ effectiveTo: null }, { effectiveTo: { $gte: "2026-10-22" } }] });
+assert.deepEqual(assignmentDateMatch("2026-10-22").effectiveFrom, { $lte: "2026-10-22" });
+assert.match(projectCode(undefined, "HRMS Portal"), /^HRMS_PORTAL_[A-F0-9]{6}$/);
+assert.match(projectCode(undefined, "123"), /^PROJECT_[A-F0-9]{6}$/);
+assert.throws(() => projectCode("bad code", "Project"));
+assert.equal(projectCode("hrms", "Project"), "HRMS");
+assert.throws(() => pagination({ limit: 10000 }));
+assert.throws(() => pagination({ page: 1.5 }));
+assert.deepEqual(pagination({}), { page: 1, limit: 20, skip: 0 });
+const project = new Project({ company, name: "HRMS", code: "HRMS", managers: [owner], startDate: "2026-10-22", createdBy: owner, updatedBy: owner });
+assert.equal(project.validateSync(), undefined);
+assert.ok(new Project({ ...project.toObject(), managers: [] }).validateSync());
+assert.ok(WorkType.schema.indexes().some(([index, options]: any) => index.project && index.name && options.unique));
+assert.ok(Assignment.schema.indexes().some(([, options]: any) => options.partialFilterExpression?.status === "assigned"));
+console.log("Project validation, permissions, ownership, scope, and schema tests passed");

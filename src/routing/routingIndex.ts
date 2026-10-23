@@ -8,16 +8,9 @@ import masterRouting from "./masters/master.routing";
 import notificationRouting from './notification/notification.routing';
 import testimonialRouting from "./testimonial";
 import tokenRouting from "./token/token.routing";
-import StudentRouting from "./userTypes/student";
 import UserRouting from "./users.routing";
-import scormRouting from "./scorm.routing";
-import managerRouting from "./manager.routing";
-import courseDetailsRouting from "./course/course.routing";
-import courseAccessRouting from "./courseAccess.routing";
-import batchRouting from "./batch.routing";
 import departmentRouting from "./departments.routing";
 import officeLocationRouting from "./officeLocations.routing";
-import certificateRouting from "./certificate.routing";
 import organizationRouting from "./organization.routing";
 import workforcePoliciesRouting from "./workforcePolicies.routing";
 import leaveRouting from "./leave.routing";
@@ -27,6 +20,7 @@ import remoteWorkRouting from "./remoteWork.routing";
 import compOffRouting from "./compOff.routing";
 import calendarRouting from "./calendar.routing";
 import payrollRouting from "./payroll.routing";
+import projectsRouting from "./projects.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -41,14 +35,7 @@ const importRoutings = (app: any) => {
   app.use("/api/User", UserRouting);
   app.use('/api/token',tokenRouting);
   app.use("/api/testimonial", testimonialRouting);
-  app.use("/api/student", StudentRouting);
   app.use('/api/masters',masterRouting)
-  app.use("/api/scorm", scormRouting);
-  app.use("/api/manager", managerRouting);
-  app.use('/api/course', courseDetailsRouting);
-  app.use('/api/certificates', certificateRouting);
-  app.use('/api', courseAccessRouting);
-  app.use('/api', batchRouting);
   app.use('/api/department', departmentRouting);
   app.use('/api/locations', officeLocationRouting);
   app.use('/api/workforce-policies', workforcePoliciesRouting);
@@ -59,6 +46,7 @@ const importRoutings = (app: any) => {
   app.use('/api/comp-off', compOffRouting);
   app.use('/api/calendar', calendarRouting);
   app.use('/api/payroll', payrollRouting);
+  app.use('/api/projects', projectsRouting);
 };
 
 export default importRoutings;

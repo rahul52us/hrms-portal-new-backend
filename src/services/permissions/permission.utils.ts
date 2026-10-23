@@ -1,6 +1,8 @@
 import Company from "../../schemas/company/Company";
 
 export const PERMISSION_KEYS = {
+  VIEW_PROJECTS: "view_projects",
+  MANAGE_PROJECTS: "manage_projects",
   VIEW_DASHBOARD: "view_dashboard",
   VIEW_USERS: "view_users",
   CREATE_USERS: "create_users",
@@ -65,6 +67,8 @@ type PermissionDefinition = {
 };
 
 const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  { key: PERMISSION_KEYS.VIEW_PROJECTS, label: "View Projects", description: "View assigned projects, or company projects for Company Admin and HR Admin.", category: "Projects" },
+  { key: PERMISSION_KEYS.MANAGE_PROJECTS, label: "Manage Projects", description: "Create projects and manage work types and employee assignments within scope. Project managers also manage their assigned projects.", category: "Projects" },
   {
     key: PERMISSION_KEYS.VIEW_DASHBOARD,
     label: "View Dashboard",
@@ -401,6 +405,8 @@ const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, 
 );
 
 const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
+  PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
   PERMISSION_KEYS.VIEW_USERS,
   PERMISSION_KEYS.CREATE_USERS,
@@ -455,6 +461,8 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
+  PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
   PERMISSION_KEYS.VIEW_USERS,
   PERMISSION_KEYS.CREATE_USERS,
@@ -501,6 +509,8 @@ const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
+  PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
   PERMISSION_KEYS.VIEW_USERS,
   PERMISSION_KEYS.CREATE_USERS,
@@ -527,6 +537,8 @@ const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
+  PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
   PERMISSION_KEYS.VIEW_USERS,
   PERMISSION_KEYS.CREATE_USERS,
@@ -556,6 +568,7 @@ const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.VIEW_PAYROLL,
   PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
   PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
@@ -568,6 +581,8 @@ const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 export const INDIVIDUAL_OVERRIDE_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_PROJECTS,
+  PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_PAYROLL,
   PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
   PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
@@ -585,10 +600,11 @@ const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
   hr: HR_ALLOWED_PERMISSION_KEYS,
   departmenthead: DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS,
   payrollexecutive: PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS,
-  default: [PERMISSION_KEYS.VIEW_PROFILE],
+  default: [PERMISSION_KEYS.VIEW_PROFILE, PERMISSION_KEYS.VIEW_PROJECTS],
 };
 
 export const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
+  [PERMISSION_KEYS.MANAGE_PROJECTS]: [PERMISSION_KEYS.VIEW_PROJECTS],
   [PERMISSION_KEYS.CREATE_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_HR_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_MANAGERS]: [PERMISSION_KEYS.VIEW_USERS],
@@ -732,6 +748,8 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "admin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PROJECTS,
+      PERMISSION_KEYS.MANAGE_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
       PERMISSION_KEYS.CREATE_USERS,
@@ -788,6 +806,8 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hradmin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PROJECTS,
+      PERMISSION_KEYS.MANAGE_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
       PERMISSION_KEYS.CREATE_USERS,
@@ -836,6 +856,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hr") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
       PERMISSION_KEYS.CREATE_USERS,
@@ -862,6 +883,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "departmenthead") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
       PERMISSION_KEYS.CREATE_USERS,
@@ -893,6 +915,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "payrollexecutive") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.VIEW_PAYROLL,
       PERMISSION_KEYS.MANAGE_PAYROLL_CONFIGURATION,
       PERMISSION_KEYS.MANAGE_EMPLOYEE_COMPENSATION,
@@ -902,7 +925,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
     ]);
   }
 
-  return createPermissionRecord([PERMISSION_KEYS.VIEW_PROFILE]);
+  return createPermissionRecord([PERMISSION_KEYS.VIEW_PROFILE, PERMISSION_KEYS.VIEW_PROJECTS]);
 }
 
 export function normalizePermissionRecord(value: any) {

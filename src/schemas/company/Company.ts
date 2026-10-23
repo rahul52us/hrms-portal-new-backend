@@ -1,6 +1,6 @@
 import mongoose, { Document } from "mongoose";
 
-interface CompanyI extends Document {
+export interface CompanyI extends Document {
   type?: string;
   company_name: string;
   companyCode: string;

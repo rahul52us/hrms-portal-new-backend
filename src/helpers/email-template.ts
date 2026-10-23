@@ -24,5 +24,6 @@ type Props = {
 export default async function compileEmailTemplate({ fileName, data }: Props): Promise<string> {
   const mjMail = await fs.promises.readFile(path.join('src/email-templates', fileName), 'utf8');
   const template = handlebars.compile(mjMail)(data);
-  return mjml2html(template).html.toString();
+  const rendered = await mjml2html(template);
+  return rendered.html.toString();
 }

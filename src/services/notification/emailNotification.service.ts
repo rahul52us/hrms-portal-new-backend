@@ -4,15 +4,11 @@ import nodemailer from "nodemailer";
 import NotificationSchema from "../../schemas/Notification/notification.schema";
 import User from "../../schemas/User/User";
 import Company from "../../schemas/company/Company";
-import BatchEnrollment from "../../schemas/course/BatchEnrollment";
-import CourseEnrollment from "../../schemas/course/CourseEnrollment";
-import CourseQuizAttempt from "../../schemas/course/CourseQuizAttempt";
 import { getUserAccountStatus } from "../auth/utils/userAccountStatus";
 
 type RecipientMode = "all" | "selected";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const UPCOMING_WINDOW_DAYS = 14;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -38,7 +34,7 @@ function getNotificationEmailConfig() {
   const fromName =
     normalizeEnvValue(process.env.SMTP_FROM_NAME) ||
     normalizeEnvValue(process.env.COMPANY_NAME) ||
-    "LMS Team";
+    "HRMS Team";
   const logoUrl =
     normalizeEnvValue(process.env.COMPANY_LOGO_URL) ||
     normalizeEnvValue(process.env.SMTP_FROM_LOGO_URL) ||
@@ -180,8 +176,8 @@ function buildNotificationEmailHtml({
   priority?: string;
 }) {
   const config = getNotificationEmailConfig();
-  const companyName = company?.company_name || "LMS";
-  const brandName = config.fromName || "LMS Team";
+  const companyName = company?.company_name || "HRMS";
+  const brandName = config.fromName || "HRMS Team";
   const brandLogoUrl = config.logoUrl;
   const brandColor = "#334155";
   const buttonColor = "#475569";
@@ -190,9 +186,9 @@ function buildNotificationEmailHtml({
   const context = {
     user_name: userName,
     company_name: companyName,
-    course_name: "your course",
-    batch_name: "your batch",
-    due_date: "the due date",
+    employee_code: user?.code || "",
+    department: user?.department || "",
+    designation: user?.designation || "",
   };
   const renderedMessage = renderPlaceholders(message, context)
     .split(/\r?\n/)
@@ -243,102 +239,6 @@ function buildNotificationEmailHtml({
   </div>`;
 }
 
-function getUpcomingDateThreshold() {
-  const date = new Date();
-  date.setDate(date.getDate() + UPCOMING_WINDOW_DAYS);
-  return date;
-}
-
-async function buildUserSignals(users: any[]) {
-  const userIds = users.map((user) => user._id);
-  const now = new Date();
-  const upcomingDate = getUpcomingDateThreshold();
-
-  const [courseEnrollments, quizAttempts, batchEnrollments] = await Promise.all([
-    CourseEnrollment.find({ userId: { $in: userIds } })
-      .populate("courseId", "title status")
-      .lean(),
-    CourseQuizAttempt.find({ userId: { $in: userIds } }).lean(),
-    BatchEnrollment.find({ userId: { $in: userIds } })
-      .populate("batchId", "name endDate")
-      .lean(),
-  ]);
-
-  const courseMap = new Map<string, any[]>();
-  const quizMap = new Map<string, any[]>();
-  const batchMap = new Map<string, any[]>();
-
-  courseEnrollments.forEach((enrollment: any) => {
-    const key = String(enrollment.userId);
-    courseMap.set(key, [...(courseMap.get(key) || []), enrollment]);
-  });
-
-  quizAttempts.forEach((attempt: any) => {
-    const key = String(attempt.userId);
-    quizMap.set(key, [...(quizMap.get(key) || []), attempt]);
-  });
-
-  batchEnrollments.forEach((enrollment: any) => {
-    const key = String(enrollment.userId);
-    batchMap.set(key, [...(batchMap.get(key) || []), enrollment]);
-  });
-
-  return users.map((user) => {
-    const key = String(user._id);
-    const enrollments = courseMap.get(key) || [];
-    const attempts = quizMap.get(key) || [];
-    const batches = batchMap.get(key) || [];
-    const pendingCourses = enrollments.filter((entry: any) => entry.status !== "completed");
-    const completedCourses = enrollments.filter((entry: any) => entry.status === "completed");
-    const inProgressCourses = enrollments.filter((entry: any) => entry.status === "in_progress");
-    const notStartedCourses = enrollments.filter((entry: any) => entry.status === "not_started");
-    const overdueCourses = pendingCourses.filter((entry: any) => {
-      const dueDate = entry.dueDate || entry.validTill;
-      return dueDate && new Date(dueDate) < now;
-    });
-    const expiringCourses = pendingCourses.filter((entry: any) => {
-      const dueDate = entry.validTill || entry.dueDate;
-      return dueDate && new Date(dueDate) >= now && new Date(dueDate) <= upcomingDate;
-    });
-    const endingBatches = batches.filter((entry: any) => {
-      const endDate = entry?.batchId?.endDate;
-      return entry.status === "active" && endDate && new Date(endDate) >= now && new Date(endDate) <= upcomingDate;
-    });
-
-    const courseStatus =
-      enrollments.length === 0
-        ? "none"
-        : completedCourses.length === enrollments.length
-          ? "completed"
-          : inProgressCourses.length > 0
-            ? "in_progress"
-            : "pending";
-    const quizStatus =
-      attempts.length === 0
-        ? "not_attempted"
-        : attempts.some((attempt: any) => Number(attempt.percentage || 0) < 70)
-          ? "needs_attention"
-          : "completed";
-
-    return {
-      ...user,
-      notificationSignals: {
-        assignedCourses: enrollments.length,
-        pendingCourses: pendingCourses.length,
-        completedCourses: completedCourses.length,
-        inProgressCourses: inProgressCourses.length,
-        notStartedCourses: notStartedCourses.length,
-        overdueCourses: overdueCourses.length,
-        expiringCourses: expiringCourses.length,
-        batchEndingSoon: endingBatches.length > 0,
-        batchEndingSoonCount: endingBatches.length,
-        quizAttempts: attempts.length,
-        courseStatus,
-        quizStatus,
-      },
-    };
-  });
-}
 
 function serializeNotificationUser(user: any) {
   const lifecycleStatus = getUserAccountStatus(user).toLowerCase();
@@ -354,13 +254,13 @@ function serializeNotificationUser(user: any) {
     _id: user._id,
     name: user.name || user.username || "Unnamed user",
     username: user.username || "",
+    code: user.code || "",
     role: user.role || "user",
     department: user.department || "",
     designation: user.designation || "",
     isActive: lifecycleStatus === "active",
     status: lifecycleStatus,
     reportingManager,
-    notificationSignals: user.notificationSignals,
   };
 }
 
@@ -369,72 +269,15 @@ function applyNotificationFilters(users: any[], filters: any = {}) {
   const departments = normalizeArray(filters.department);
   const managers = normalizeArray(filters.manager);
   const statuses = normalizeArray(filters.status);
-  const courseStatuses = normalizeArray(filters.courseStatus);
-  const quizStatuses = normalizeArray(filters.quizStatus);
-
   return users.filter((user) => {
     const serialized = serializeNotificationUser(user);
-    const signals = serialized.notificationSignals || {};
-
-    if (roles.length && !roles.includes(normalizeLower(serialized.role))) {
-      return false;
-    }
-
-    if (departments.length && !departments.includes(normalizeLower(serialized.department))) {
-      return false;
-    }
-
-    if (statuses.length && !statuses.includes(normalizeLower(serialized.status))) {
-      return false;
-    }
-
-    if (courseStatuses.length && !courseStatuses.includes(normalizeLower(signals.courseStatus))) {
-      return false;
-    }
-
-    if (quizStatuses.length && !quizStatuses.includes(normalizeLower(signals.quizStatus))) {
-      return false;
-    }
-
+    if (roles.length && !roles.includes(normalizeLower(serialized.role))) return false;
+    if (departments.length && !departments.includes(normalizeLower(serialized.department))) return false;
+    if (statuses.length && !statuses.includes(normalizeLower(serialized.status))) return false;
     if (managers.length) {
-      const managerValues = [
-        normalizeLower(serialized.reportingManager?.username),
-        normalizeLower(serialized.reportingManager?.name),
-        normalizeLower(serialized.reportingManager?._id),
-      ];
-      if (!managers.some((manager) => managerValues.includes(manager))) {
-        return false;
-      }
+      const values = [serialized.reportingManager?._id, serialized.reportingManager?.name, serialized.reportingManager?.username].map(normalizeLower);
+      if (!managers.some((manager) => values.includes(manager))) return false;
     }
-
-    if (filters.pendingCourses && Number(signals.pendingCourses || 0) === 0) {
-      return false;
-    }
-
-    if (filters.completedCourses && Number(signals.completedCourses || 0) === 0) {
-      return false;
-    }
-
-    if (filters.courseExpiringSoon && Number(signals.expiringCourses || 0) === 0) {
-      return false;
-    }
-
-    if (filters.batchEndingSoon && !signals.batchEndingSoon) {
-      return false;
-    }
-
-    if (filters.overdueCourses && Number(signals.overdueCourses || 0) === 0) {
-      return false;
-    }
-
-    if (filters.notStarted && Number(signals.notStartedCourses || 0) === 0) {
-      return false;
-    }
-
-    if (filters.inProgress && Number(signals.inProgressCourses || 0) === 0) {
-      return false;
-    }
-
     return true;
   });
 }
@@ -448,7 +291,7 @@ async function loadCompanyNotificationUsers(companyId: string) {
     .sort({ name: 1, username: 1 })
     .lean();
 
-  return buildUserSignals(users);
+  return users;
 }
 
 export async function listCompanyNotificationUsers(req: Request, res: Response) {
@@ -528,6 +371,14 @@ export async function sendCompanyNotification(req: Request, res: Response) {
       ctaUrl,
       priority,
     } = req.body || {};
+
+    if (notificationType && !["announcement", "custom"].includes(notificationType)) {
+      return res.status(400).json({ success: false, error: "Notification type must be announcement or custom" });
+    }
+    if (!filters || typeof filters !== "object" || Array.isArray(filters) ||
+      Object.keys(filters).some((key) => !["role", "department", "manager", "status"].includes(key))) {
+      return res.status(400).json({ success: false, error: "Supported recipient filters are role, department, manager, and status" });
+    }
 
     if (!mongoose.Types.ObjectId.isValid(companyId)) {
       return res.status(400).json({ success: false, error: "Valid company id is required" });

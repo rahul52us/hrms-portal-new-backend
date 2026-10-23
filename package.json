@@ -4,10 +4,10 @@
   "description": "",
   "main": "src/index.ts",
   "scripts": {
+    "test:projects": "ts-node src/services/project/project.test.ts",
+    "test:projects:live": "ts-node src/services/project/project.live.test.ts",
+    "test:projects:ui": "ts-node src/services/project/project.live.test.ts --ui",
     "start": "nodemon src/index.ts",
-    "scorm:reenrich": "ts-node src/scripts/reEnrichScormTrackingAttempt.ts",
-    "scorm:cleanup-questionbank": "ts-node src/scripts/cleanupScormQuestionBank.ts",
-    "certificates:seed": "ts-node src/scripts/seedCertificateTemplates.ts",
     "assignments:backfill": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts",
     "assignments:backfill:apply": "ts-node src/scripts/backfillEmployeeAssignmentHistory.ts --apply",
     "attendance:payroll-test:prepare": "ts-node src/scripts/preparePayrollTestCycle.ts",
