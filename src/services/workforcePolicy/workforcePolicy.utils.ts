@@ -148,6 +148,8 @@ export async function writePolicyAudit(options: {
     | "leave_version"
     | "remote_work_policy"
     | "remote_work_version"
+    | "timesheet_policy"
+    | "timesheet_version"
     | "approval_workflow"
     | "approval_workflow_version"
     | "assignment";

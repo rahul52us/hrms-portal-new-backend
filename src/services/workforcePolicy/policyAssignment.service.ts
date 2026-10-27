@@ -5,6 +5,7 @@ import Department from "../../schemas/Department/Department.schema";
 import EmployeeAssignmentHistory from "../../schemas/EmployeeAssignment/EmployeeAssignmentHistory.schema";
 import OfficeLocation from "../../schemas/OfficeLocation/OfficeLocation.schema";
 import User from "../../schemas/User/User";
+import Company from "../../schemas/company/Company";
 import { ensureCurrentEmployeeAssignment } from "../employeeAssignment/employeeAssignment.service";
 import AttendancePolicy from "../../schemas/WorkforcePolicy/AttendancePolicy.schema";
 import AttendancePolicyVersion from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
@@ -16,6 +17,8 @@ import LeavePolicy from "../../schemas/WorkforcePolicy/LeavePolicy.schema";
 import LeavePolicyVersion from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import RemoteWorkPolicy from "../../schemas/WorkforcePolicy/RemoteWorkPolicy.schema";
 import RemoteWorkPolicyVersion from "../../schemas/WorkforcePolicy/RemoteWorkPolicyVersion.schema";
+import TimesheetPolicy from "../../schemas/WorkforcePolicy/TimesheetPolicy.schema";
+import TimesheetPolicyVersion from "../../schemas/WorkforcePolicy/TimesheetPolicyVersion.schema";
 import WorkforcePolicyAssignment, {
   POLICY_RESOURCE_TYPES,
   POLICY_SCOPE_TYPES,
@@ -52,6 +55,11 @@ async function findResource(options: {
   resourceType: string;
   resourceId: string;
 }) {
+  if (options.resourceType === "timesheet_policy") {
+    const resource: any = await TimesheetPolicy.findOne({ _id: new mongoose.Types.ObjectId(options.resourceId), company: options.company }).lean();
+    if (!resource) throw generateError("Timesheet policy not found", 404);
+    return { resource, resourceModel: "TimesheetPolicy" as const };
+  }
   if (options.resourceType === "attendance_policy") {
     const resource = await AttendancePolicy.findOne({
       _id: new mongoose.Types.ObjectId(options.resourceId),
@@ -136,6 +144,8 @@ async function ensureResourceHasPublishedVersion(options: {
     })
       .sort({ effectiveFrom: -1, versionNumber: -1 })
       .lean();
+  } else if (options.resourceType === "timesheet_policy") {
+    version = await TimesheetPolicyVersion.findOne({ ...query, policy: new mongoose.Types.ObjectId(options.resourceId) }).sort({ effectiveFrom: -1, versionNumber: -1 }).lean();
   } else {
     version = await RemoteWorkPolicyVersion.findOne({
       ...query,
@@ -281,6 +291,7 @@ export async function listPolicyAssignmentsService(req: any, res: Response, next
 }
 
 export async function createPolicyAssignmentService(req: any, res: Response, next: NextFunction) {
+  let session: mongoose.ClientSession | undefined;
   try {
     ensurePolicyManager(req);
     const { company, companyObjectId } = await resolvePolicyCompany(
@@ -323,6 +334,13 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
       scopeType,
       scopeIdInput: req.body.scopeId,
     });
+    const createAssignment = async () => {
+    if (session) {
+      // Serialize assignments across different policy identities targeting the same company scope.
+      await Company.updateOne({ _id: companyObjectId }, { $inc: { __v: 1 } }, { session });
+      const activePolicy = await TimesheetPolicy.updateOne({ _id: resourceId, company: companyObjectId, status: "active" }, { $inc: { revision: 1 } }, { session });
+      if (!activePolicy.modifiedCount) throw generateError("Timesheet policy is no longer active", 409);
+    }
     const existingAssignments = await WorkforcePolicyAssignment.find({
       company: companyObjectId,
       resourceType,
@@ -330,6 +348,7 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
       scopeId: scope.scopeId,
     })
       .select("effectiveFrom effectiveTo resource")
+      .session(session || null)
       .lean();
     const overlap = existingAssignments.find((assignment) =>
       isDateRangeOverlapping({
@@ -346,7 +365,7 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
       );
     }
 
-    const assignment = await WorkforcePolicyAssignment.create({
+    const [assignment] = await WorkforcePolicyAssignment.create([{
       company: companyObjectId,
       resourceType,
       resourceModel,
@@ -359,7 +378,7 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
       effectiveTo,
       changeReason,
       createdBy: actorId,
-    });
+    }], { session });
     await writePolicyAudit({
       company: companyObjectId,
       entityType: "assignment",
@@ -374,7 +393,14 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
         effectiveFrom,
         effectiveTo,
       },
-    });
+    }, session);
+    return assignment;
+    };
+    let assignment: any;
+    if (resourceType === "timesheet_policy") {
+      session = await mongoose.startSession();
+      await session.withTransaction(async () => { assignment = await createAssignment(); });
+    } else assignment = await createAssignment();
     await assignment.populate("resource", "name code status");
     return res.status(201).json({
       success: true,
@@ -383,7 +409,7 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
     });
   } catch (error) {
     next(error);
-  }
+  } finally { await session?.endSession(); }
 }
 
 export async function endPolicyAssignmentService(req: any, res: Response, next: NextFunction) {
@@ -499,6 +525,12 @@ async function resolvePublishedVersion(options: {
   resourceId: mongoose.Types.ObjectId;
   at: Date;
 }) {
+  if (options.resourceType === "timesheet_policy") {
+    const version: any = await TimesheetPolicyVersion.findOne({ company: options.company, policy: options.resourceId, status: "published", effectiveFrom: { $lte: options.at } }).sort({ effectiveFrom: -1, versionNumber: -1 }).lean();
+    if (!version) return null;
+    const next: any = await TimesheetPolicyVersion.findOne({ company: options.company, policy: options.resourceId, status: "published", effectiveFrom: { $gt: version.effectiveFrom } }).sort({ effectiveFrom: 1 }).select("effectiveFrom").lean();
+    return { ...version, effectiveTo: next?.effectiveFrom || null };
+  }
   if (options.resourceType === "attendance_policy") {
     const version = await AttendancePolicyVersion.findOne({
       company: options.company,
@@ -729,6 +761,7 @@ export async function resolveEmployeePolicyData(options: {
     holidayCalendar: resolved.holiday_calendar,
     leavePolicy: resolved.leave_policy,
     remoteWorkPolicy: resolved.remote_work_policy,
+    timesheetPolicy: resolved.timesheet_policy,
     warnings,
   };
 }
@@ -841,7 +874,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
     const requestedResourceType = normalizeText(req.query.resourceType);
     const coverageResourceTypes = POLICY_RESOURCE_TYPES.includes(requestedResourceType as any)
       ? [requestedResourceType]
-      : [...POLICY_RESOURCE_TYPES];
+      : POLICY_RESOURCE_TYPES.filter((type) => type !== "timesheet_policy");
     const match: any = {
       company: companyObjectId,
       deletedAt: null,
@@ -888,6 +921,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         holiday_calendar: resolution.holidayCalendar,
         leave_policy: resolution.leavePolicy,
         remote_work_policy: resolution.remoteWorkPolicy,
+        timesheet_policy: resolution.timesheetPolicy,
       };
       const missing = coverageResourceTypes.filter((resourceType) => !resolutionByType[resourceType]);
       const compactResource = (resolved: any) => {
@@ -926,6 +960,7 @@ export async function getPolicyCoverageService(req: any, res: Response, next: Ne
         holidayCalendar: compactResource(resolution.holidayCalendar),
         leavePolicy: compactResource(resolution.leavePolicy),
         remoteWorkPolicy: compactResource(resolution.remoteWorkPolicy),
+        timesheetPolicy: compactResource(resolution.timesheetPolicy),
         warnings: resolution.warnings,
         complete: missing.length === 0,
         missing,

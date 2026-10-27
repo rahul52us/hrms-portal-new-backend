@@ -1,0 +1,52 @@
+import mongoose, { Schema } from "mongoose";
+
+export interface TimesheetRules {
+  required: boolean;
+  deadlineDaysAfterShift: number;
+  deadlineTime: string;
+  maxBackdateDays: number;
+  minimumEntryMinutes: number;
+  minuteIncrement: number;
+  maximumDailyEntries: number;
+  notesRequired: boolean;
+  minimumNotesLength: number;
+  allowExtraHours: boolean;
+  maximumExtraMinutes: number;
+  payrollMode: "report_only" | "block" | "shortfall";
+}
+
+const rules = new Schema<TimesheetRules>({
+  required: { type: Boolean, required: true },
+  deadlineDaysAfterShift: { type: Number, required: true, min: 0, max: 31 },
+  deadlineTime: { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+  maxBackdateDays: { type: Number, required: true, min: 0, max: 366 },
+  minimumEntryMinutes: { type: Number, required: true, min: 1, max: 480 },
+  minuteIncrement: { type: Number, required: true, min: 1, max: 60 },
+  maximumDailyEntries: { type: Number, required: true, min: 1, max: 100 },
+  notesRequired: { type: Boolean, required: true },
+  minimumNotesLength: { type: Number, required: true, min: 0, max: 500 },
+  allowExtraHours: { type: Boolean, required: true },
+  maximumExtraMinutes: { type: Number, required: true, min: 0, max: 720 },
+  payrollMode: { type: String, enum: ["report_only", "block", "shortfall"], required: true },
+}, { _id: false });
+
+const schema = new Schema({
+  company: { type: Schema.Types.ObjectId, ref: "Company", required: true, immutable: true },
+  policy: { type: Schema.Types.ObjectId, ref: "TimesheetPolicy", required: true, immutable: true },
+  versionNumber: { type: Number, required: true, immutable: true },
+  revision: { type: Number, required: true, default: 1 },
+  status: { type: String, enum: ["draft", "published", "cancelled"], default: "draft", required: true },
+  effectiveFrom: { type: Date, default: null },
+  rules: { type: rules, required: true },
+  changeReason: { type: String, required: true, maxlength: 500 },
+  createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
+  publishedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  publishedAt: { type: Date, default: null },
+  cancelledBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  cancelledAt: { type: Date, default: null },
+  cancellationReason: { type: String, default: "" },
+}, { timestamps: true });
+schema.index({ company: 1, policy: 1, versionNumber: 1 }, { unique: true });
+schema.index({ company: 1, policy: 1, status: 1 }, { unique: true, partialFilterExpression: { status: "draft" } });
+schema.index({ company: 1, policy: 1, effectiveFrom: 1 }, { unique: true, partialFilterExpression: { status: "published" } });
+export default mongoose.models.TimesheetPolicyVersion || mongoose.model("TimesheetPolicyVersion", schema);

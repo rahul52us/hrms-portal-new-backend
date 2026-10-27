@@ -67,7 +67,7 @@ type PermissionDefinition = {
 };
 
 const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
-  { key: PERMISSION_KEYS.VIEW_PROJECTS, label: "View Projects", description: "View assigned projects, or company projects for Company Admin and HR Admin.", category: "Projects" },
+  { key: PERMISSION_KEYS.VIEW_PROJECTS, label: "View Projects", description: "View the project management workspace when managing projects or employees, or as Company Admin / HR Admin. Employees select assigned projects inside timesheets.", category: "Projects" },
   { key: PERMISSION_KEYS.MANAGE_PROJECTS, label: "Manage Projects", description: "Create projects and manage work types and employee assignments within scope. Project managers also manage their assigned projects.", category: "Projects" },
   {
     key: PERMISSION_KEYS.VIEW_DASHBOARD,

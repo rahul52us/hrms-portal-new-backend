@@ -8,6 +8,7 @@ import User from "../../schemas/User/User";
 import { getEmployeeRequestActor, resolveEmployeeRequestCompanyId } from "../leave/leaveAccess.utils";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
 import { hasPermission, PERMISSION_KEYS } from "../permissions/permission.utils";
+import { resolveProjectWorkspaceAccess } from "./projectAccess.service";
 import {
   assignmentDateMatch, canManageProject, companyProjectManager, companyProjectViewer,
   dateKey, dateRange, employeeProjectScope, objectId, overlapMatch, pagination,
@@ -110,8 +111,7 @@ async function list(model: any, match: any, req: any, sort: any) {
 
 export const projectOptions = handler(async (_req, ctx) => ({ data: {
   today: projectToday(),
-  canCreate: await canCreate(ctx), canAdmin: companyProjectManager(ctx.actor),
-  scopes: companyProjectViewer(ctx.actor) ? ["all", "managed", "mine"] : ["mine", "managed"],
+  ...await resolveProjectWorkspaceAccess(ctx.actor),
   self: { _id: ctx.actor._id, name: ctx.actor.name, code: ctx.actor.code },
 } }));
 
@@ -130,7 +130,7 @@ export const projectPeople = handler(async (req, ctx) => {
 });
 
 export const listProjects = handler(async (req, ctx) => {
-  const scope = selection(req.query.scope, ["mine", "managed", "all"], companyProjectViewer(ctx.actor) ? "all" : "mine");
+  const scope = selection(req.query.scope, ["mine", "managed", "all"], companyProjectViewer(ctx.actor) ? "all" : "managed");
   if (scope === "all" && !companyProjectViewer(ctx.actor)) throw generateError("You cannot view all company projects", 403);
   const status = selection(req.query.status, ["active", "archived", "all"], "active");
   const asOf = dateKey(req.query.asOf || projectToday(), "As-of date")!;
@@ -237,7 +237,7 @@ export const saveWorkType = handler(async (req, ctx, session) => {
 
 export const listAssignments = handler(async (req, ctx) => {
   const project = await findProject(ctx, req.params.projectId);
-  const scope = canManageProject(ctx.actor, project) || companyProjectViewer(ctx.actor) ? {} : { employee: ctx.actor._id };
+  const scope = companyProjectViewer(ctx.actor) || project.managers.some((id: any) => projectId(id) === projectId(ctx.actor)) ? {} : { employee: ctx.actor._id };
   const match: any = { $and: [{ company: ctx.company, project: project._id }, scope] };
   const filter = selection(req.query.status, ["all", "current", "upcoming", "ended", "cancelled"], "all");
   const date = dateKey(req.query.asOf || projectToday(), "As-of date")!;

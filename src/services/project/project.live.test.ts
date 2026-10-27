@@ -89,7 +89,15 @@ async function run() {
     await call(superadmin, "/api/notification/send", "POST", { companyId: company, filters: { courseStatus: "pending" } }, 400);
     await call(null, "/options", "GET", undefined, 401);
     assert.equal((await call(manager, "/options")).data.canCreate, true);
-    assert.equal((await call(employee, "/options")).data.canCreate, false);
+    assert.deepEqual((await call(manager, "/options")).data.scopes, ["managed"]);
+    const employeeAccess = (await call(employee, "/options")).data;
+    assert.equal(employeeAccess.canCreate, false);
+    assert.equal(employeeAccess.canAccessWorkspace, false);
+    assert.deepEqual(employeeAccess.scopes, []);
+    assert.deepEqual((await call(admin, "/options")).data.scopes, ["all", "managed"]);
+    assert.equal((await call(employee, "/api/auth/me", "POST", {})).data.projectAccess.canAccessWorkspace, false);
+    assert.equal((await call(manager, "/api/auth/me", "POST", {})).data.projectAccess.canAccessWorkspace, true);
+    assert.equal((await call(superadmin, "/api/auth/me", "POST", {})).data.projectAccess.canAccessWorkspace, false);
     await call(outsider, "", "POST", { name: "Forbidden" }, 403);
     await call(manager, "?scope=all", "GET", undefined, 403);
     await call(manager, `?companyId=${otherCompany}`, "GET", undefined, 403);
@@ -118,6 +126,7 @@ async function run() {
     const assignmentId = assigned.data[0]._id;
     await call(manager, `/${project._id}/assignments`, "POST", { revision, employeeIds: [employee], effectiveFrom: today, reason: "Overlap attempt" }, 409);
     assert.equal((await call(employee, "?scope=mine")).data.length, 1);
+    assert.equal((await call(employee, "/api/auth/me", "POST", {})).data.projectAccess.canAccessWorkspace, false, "Project membership alone must not expose management navigation");
     assert.equal((await call(outsider, "?scope=mine")).data.length, 0);
     assert.equal((await call(employee, `/${project._id}/assignments`)).data.length, 1);
     await call(employee, `/${project._id}/audit`, "GET", undefined, 403);
@@ -145,11 +154,21 @@ async function run() {
     await User.collection.updateOne({ _id: manager }, { $set: { permissions: { manage_projects: false } } });
     assert.equal((await call(manager, "/options")).data.canCreate, false);
     assert.equal((await call(manager, `/${project._id}`)).data.canManage, false);
+    assert.equal((await call(manager, "/options")).data.canAccessWorkspace, true, "An explicit edit denial keeps managed-project read access");
+    assert.ok((await call(manager, `/${project._id}/assignments`)).data.some((item: any) => item.employee === String(employee)));
+    await call(manager, `/${project._id}`, "PUT", { revision: projectAfter.revision, name: "Denied edit", reason: "Read access must not grant writes" }, 403);
+    await Project.updateOne({ _id: project._id, company }, { $addToSet: { managers: outsider } });
+    const namedManagerAccess = (await call(outsider, "/options")).data;
+    assert.equal(namedManagerAccess.canAccessWorkspace, true);
+    assert.equal(namedManagerAccess.canCreate, false);
+    assert.deepEqual(namedManagerAccess.scopes, ["managed"]);
+    await User.collection.updateOne({ _id: manager }, { $unset: { permissions: "" } });
     if (process.argv.includes("--ui")) {
       const token = (id: mongoose.Types.ObjectId) => jwt.sign({ userId: String(id) }, process.env.SECRET_KEY || "@#$4515Rahulkushwa_675@#");
       const ui = spawn(process.execPath, [path.resolve("../scripts/verify-projects-live-ui.cjs")], {
         stdio: "inherit", windowsHide: true, env: { ...process.env, PROJECT_TEST_API_URL: running.base,
           PROJECT_TEST_ADMIN_TOKEN: token(admin), PROJECT_TEST_EMPLOYEE_TOKEN: token(employee),
+          PROJECT_TEST_MANAGER_TOKEN: token(manager), PROJECT_TEST_NAMED_MANAGER_TOKEN: token(outsider),
           PROJECT_TEST_SUPERADMIN_TOKEN: token(superadmin), PROJECT_TEST_EMPLOYEE_NAME: "Project fixture 2" },
       });
       const exit = await new Promise((resolve) => ui.once("exit", resolve));

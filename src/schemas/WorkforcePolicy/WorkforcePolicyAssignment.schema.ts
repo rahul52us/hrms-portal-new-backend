@@ -6,13 +6,14 @@ export const POLICY_RESOURCE_TYPES = [
   "holiday_calendar",
   "leave_policy",
   "remote_work_policy",
+  "timesheet_policy",
 ] as const;
 export const POLICY_SCOPE_TYPES = ["company", "location", "department", "team", "employee"] as const;
 
 export interface WorkforcePolicyAssignmentI extends Document {
   company: mongoose.Types.ObjectId;
   resourceType: (typeof POLICY_RESOURCE_TYPES)[number];
-  resourceModel: "AttendancePolicy" | "WorkSchedule" | "HolidayCalendar" | "LeavePolicy" | "RemoteWorkPolicy";
+  resourceModel: "AttendancePolicy" | "WorkSchedule" | "HolidayCalendar" | "LeavePolicy" | "RemoteWorkPolicy" | "TimesheetPolicy";
   resource: mongoose.Types.ObjectId;
   scopeType: (typeof POLICY_SCOPE_TYPES)[number];
   scopeId?: mongoose.Types.ObjectId | null;
@@ -35,7 +36,7 @@ const WorkforcePolicyAssignmentSchema = new Schema<WorkforcePolicyAssignmentI>(
     resourceType: { type: String, enum: POLICY_RESOURCE_TYPES, required: true, index: true },
     resourceModel: {
       type: String,
-      enum: ["AttendancePolicy", "WorkSchedule", "HolidayCalendar", "LeavePolicy", "RemoteWorkPolicy"],
+      enum: ["AttendancePolicy", "WorkSchedule", "HolidayCalendar", "LeavePolicy", "RemoteWorkPolicy", "TimesheetPolicy"],
       required: true,
     },
     resource: { type: Schema.Types.ObjectId, refPath: "resourceModel", required: true, index: true },

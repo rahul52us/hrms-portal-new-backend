@@ -8,6 +8,8 @@ import { attachEffectivePermissions, computeEffectivePermissions, PERMISSION_KEY
 import Project from "../../schemas/project/Project.schema";
 import WorkType from "../../schemas/project/ProjectWorkType.schema";
 import Assignment from "../../schemas/project/ProjectAssignment.schema";
+import User from "../../schemas/User/User";
+import { resolveProjectWorkspaceAccess } from "./projectAccess.service";
 
 const id = () => new mongoose.Types.ObjectId();
 const owner = id(), outsider = id(), company = id();
@@ -48,3 +50,31 @@ assert.ok(new Project({ ...project.toObject(), managers: [] }).validateSync());
 assert.ok(WorkType.schema.indexes().some(([index, options]: any) => index.project && index.name && options.unique));
 assert.ok(Assignment.schema.indexes().some(([, options]: any) => options.partialFilterExpression?.status === "assigned"));
 console.log("Project validation, permissions, ownership, scope, and schema tests passed");
+
+async function testWorkspaceAccess() {
+  const originalUserExists = User.exists, originalProjectExists = Project.exists;
+  let hasReport = false, hasProject = false, queries = 0;
+  try {
+    User.exists = (() => { queries++; return Promise.resolve(hasReport ? { _id: outsider } : null); }) as any;
+    Project.exists = (() => { queries++; return Promise.resolve(hasProject ? { _id: outsider } : null); }) as any;
+    assert.deepEqual(await resolveProjectWorkspaceAccess(employee), { canAccessWorkspace: false, canCreate: false, canAdmin: false, scopes: [] });
+    hasReport = true;
+    assert.deepEqual(await resolveProjectWorkspaceAccess(employee), { canAccessWorkspace: true, canCreate: true, canAdmin: false, scopes: ["managed"] });
+    hasReport = false; hasProject = true;
+    assert.deepEqual(await resolveProjectWorkspaceAccess(employee), { canAccessWorkspace: true, canCreate: false, canAdmin: false, scopes: ["managed"] });
+    assert.deepEqual(await resolveProjectWorkspaceAccess({ ...employee, permissions: { manage_projects: false } }), { canAccessWorkspace: true, canCreate: false, canAdmin: false, scopes: ["managed"] });
+    hasProject = false;
+    assert.equal((await resolveProjectWorkspaceAccess({ ...employee, permissions: { manage_projects: false } })).canAccessWorkspace, false);
+    const before = queries;
+    assert.deepEqual(await resolveProjectWorkspaceAccess(admin), { canAccessWorkspace: true, canCreate: true, canAdmin: true, scopes: ["all", "managed"] });
+    assert.equal((await resolveProjectWorkspaceAccess({ ...admin, effectivePermissions: { view_projects: true, manage_projects: false } })).canAccessWorkspace, true);
+    assert.equal((await resolveProjectWorkspaceAccess({ ...employee, effectivePermissions: { view_projects: false } })).canAccessWorkspace, false);
+    assert.equal((await resolveProjectWorkspaceAccess({ ...admin, role: "superadmin" })).canAccessWorkspace, false);
+    assert.equal((await resolveProjectWorkspaceAccess({ ...employee, company: null })).canAccessWorkspace, false);
+    assert.equal(queries, before, "Administrative and denied access should not query reporting/project relations");
+    const delegatedActor = attachEffectivePermissions({ user: { _id: owner, company, role: "user", permissions: { manage_projects: true } } });
+    assert.deepEqual(await resolveProjectWorkspaceAccess(delegatedActor), { canAccessWorkspace: true, canCreate: true, canAdmin: false, scopes: ["managed"] });
+    console.log("Project workspace capability tests passed: employees hidden; reporting/named managers and delegated HR retained; explicit denials respected");
+  } finally { User.exists = originalUserExists; Project.exists = originalProjectExists; }
+}
+testWorkspaceAccess().catch((error) => { console.error(error); process.exitCode = 1; });
