@@ -357,6 +357,7 @@ LeaveRequestSchema.index({ company: 1, currentApprovers: 1, status: 1, submitted
 LeaveRequestSchema.index({ company: 1, departmentNameSnapshot: 1, status: 1, submittedAt: -1 });
 LeaveRequestSchema.index({ company: 1, leaveType: 1, status: 1, fromDate: -1 });
 LeaveRequestSchema.index({ company: 1, documentStatus: 1, submittedAt: -1 });
+LeaveRequestSchema.index({ company: 1, updatedAt: 1, _id: 1 });
 
 const LeaveRequest =
   (mongoose.models.LeaveRequest as mongoose.Model<LeaveRequestI>) ||

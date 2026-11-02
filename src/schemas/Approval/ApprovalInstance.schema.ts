@@ -5,11 +5,12 @@ import { APPROVAL_STEP_TYPES } from "./ApprovalWorkflowVersion.schema";
 export interface ApprovalInstanceI extends Document {
   company: mongoose.Types.ObjectId;
   requestType: (typeof APPROVAL_REQUEST_TYPES)[number];
-  requestModel: "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest" | "AttendanceOvertimeReview";
+  requestModel: "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest" | "AttendanceOvertimeReview" | "TimesheetSubmission";
   request: mongoose.Types.ObjectId;
   employee: mongoose.Types.ObjectId;
-  workflow: mongoose.Types.ObjectId;
-  workflowVersion: mongoose.Types.ObjectId;
+  routingSource: "workflow" | "reporting_manager";
+  workflow: mongoose.Types.ObjectId | null;
+  workflowVersion: mongoose.Types.ObjectId | null;
   workflowVersionNumber: number;
   workflowNameSnapshot: string;
   status: "pending" | "approved" | "rejected" | "cancelled";
@@ -34,6 +35,9 @@ const ResolvedApproverSchema = new Schema(
     },
     actedAt: { type: Date, default: null },
     comment: { type: String, trim: true },
+    reassignedTo: { type: Schema.Types.ObjectId, ref: "User" },
+    reassignedAt: { type: Date },
+    replacesUser: { type: Schema.Types.ObjectId, ref: "User" },
   },
   { _id: true }
 );
@@ -61,12 +65,13 @@ const ApprovalHistorySchema = new Schema(
   {
     action: {
       type: String,
-      enum: ["created", "auto_approved", "step_approved", "rejected", "cancelled"],
+      enum: ["created", "auto_approved", "step_approved", "rejected", "cancelled", "approver_reassigned"],
       required: true,
     },
     stepOrder: { type: Number, default: null },
     actor: { type: Schema.Types.ObjectId, ref: "User", default: null },
     actorNameSnapshot: { type: String, trim: true },
+    reassignment: { type: Schema.Types.Mixed },
     comment: { type: String, trim: true },
     at: { type: Date, required: true, default: Date.now },
   },
@@ -79,13 +84,14 @@ const ApprovalInstanceSchema = new Schema<ApprovalInstanceI>(
     requestType: { type: String, enum: APPROVAL_REQUEST_TYPES, required: true, index: true },
     requestModel: {
       type: String,
-      enum: ["LeaveRequest", "LeaveCancellationRequest", "LeaveEncashmentRequest", "RemoteWorkRequest", "CompOffClaim", "AttendanceRegularizationRequest", "AttendanceOvertimeReview"],
+      enum: ["LeaveRequest", "LeaveCancellationRequest", "LeaveEncashmentRequest", "RemoteWorkRequest", "CompOffClaim", "AttendanceRegularizationRequest", "AttendanceOvertimeReview", "TimesheetSubmission"],
       required: true,
     },
     request: { type: Schema.Types.ObjectId, refPath: "requestModel", required: true, index: true },
     employee: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    workflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", required: true },
-    workflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", required: true },
+    routingSource: { type: String, enum: ["workflow", "reporting_manager"], default: "workflow", required: true, validate: { validator: function(this: any, value: string) { return value !== "reporting_manager" || this.requestType === "timesheet_submission" && this.requestModel === "TimesheetSubmission"; }, message: "Default reporting-manager routing is only supported for timesheet submissions" } },
+    workflow: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflow", default: null, required: function(this: any) { return this.routingSource !== "reporting_manager"; } },
+    workflowVersion: { type: Schema.Types.ObjectId, ref: "ApprovalWorkflowVersion", default: null, required: function(this: any) { return this.routingSource !== "reporting_manager"; } },
     workflowVersionNumber: { type: Number, required: true, min: 1 },
     workflowNameSnapshot: { type: String, required: true, trim: true },
     status: {

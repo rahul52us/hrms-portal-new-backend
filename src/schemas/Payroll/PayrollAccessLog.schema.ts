@@ -40,7 +40,7 @@ const PayrollAccessLogSchema = new Schema<PayrollAccessLogI>(
     purpose: { type: String, trim: true, maxlength: 240, immutable: true },
     requestFingerprint: { type: String, required: true, match: /^[a-f0-9]{64}$/, immutable: true },
     metadata: { type: Schema.Types.Mixed, default: {}, immutable: true },
-    expiresAt: { type: Date, required: true, index: true, immutable: true },
+    expiresAt: { type: Date, required: true, immutable: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

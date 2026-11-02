@@ -10,6 +10,7 @@ export const PAYROLL_AUDIT_ENTITY_TYPES = [
   "compensation_import",
   "payroll_run",
   "payroll_input",
+  "timesheet_payroll",
   "statutory_profile",
   "statutory_filing",
   "payslip",

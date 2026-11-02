@@ -102,6 +102,8 @@ export function serializePayrollRegisterRow(result: any) {
     location: text(result.organization?.officeLocationName) || "Unassigned",
     paidDays: amount(result.payrollDays?.paidDays),
     unpaidDays: amount(result.payrollDays?.unpaidDays),
+    attendanceLopDays: amount(result.payrollDays?.attendanceLopDays ?? result.payrollDays?.unpaidDays),
+    timesheetLopDays: amount(result.payrollDays?.timesheetLopDays),
     grossEarningsMinor: amount(result.totals?.grossEarningsMinor),
     totalDeductionsMinor: amount(result.totals?.totalDeductionsMinor),
     totalReimbursementsMinor: amount(result.totals?.totalReimbursementsMinor),

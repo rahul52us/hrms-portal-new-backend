@@ -9,6 +9,7 @@ import Attendance from "../../schemas/Attendance/AttendanceRecord.schema";
 import Leave from "../../schemas/Leave/LeaveRequest.schema";
 import ProjectAssignment from "../../schemas/project/ProjectAssignment.schema";
 import Timesheet from "../../schemas/Timesheet/Timesheet.schema";
+import DayControl from "../../schemas/Timesheet/TimesheetDayControl.schema";
 import { generateError } from "../../config/Error/functions";
 import { buildEmployeeDayContext, parseAttendanceDate } from "../attendance/employeeDayContext.utils";
 import { resolveEmployeeDayContext } from "../attendance/employeeDayContext.service";
@@ -16,6 +17,8 @@ import { effectiveOn, selectCalendarPolicy } from "../calendar/calendar.utils";
 import { buildTimesheetDay } from "./timesheetContext.service";
 import { addDateDays, dateInZone } from "./timesheet.utils";
 import { plannerDaySummary, plannerPeriods } from "./timesheetPlanner.utils";
+import { usesPayrollCutoff } from "./timesheetDeadline.utils";
+import { loadTimesheetCycles } from "./timesheetCycle.service";
 
 export async function loadMyTimesheetPlanner(company: mongoose.Types.ObjectId, employeeId: mongoose.Types.ObjectId, from: string, to: string, now = new Date()) {
   if (from > to || to >= addDateDays(from, 42)) throw generateError("Planner range must contain 1 to 42 days", 400);
@@ -41,7 +44,7 @@ export async function loadMyTimesheetPlanner(company: mongoose.Types.ObjectId, e
   // Load configuration once for this employee's historical scopes, never the company roster.
   const assignments: any[] = await WorkforceAssignment.find({ company, resourceType: { $in: ["work_schedule", "holiday_calendar", "timesheet_policy"] }, effectiveFrom: { $lte: end }, $and: [{ $or: [{ effectiveTo: null }, { effectiveTo: { $gt: start } }] }, { $or: scopeMatches }] }).sort({ priority: -1, effectiveFrom: -1, createdAt: -1 }).lean();
   const resources = (type: string) => assignments.filter((a) => a.resourceType === type).map((a) => a.resource);
-  const [schedules, calendars, policies, records, leaves, memberships, sheets] = await Promise.all([
+  const [schedules, calendars, policies, records, leaves, memberships, sheets, controls] = await Promise.all([
     ScheduleVersion.find({ company, schedule: { $in: resources("work_schedule") }, status: "published", effectiveFrom: { $lte: end } }).lean(),
     HolidayVersion.find({ company, calendar: { $in: resources("holiday_calendar") }, status: "published", effectiveFrom: { $lte: end } }).lean(),
     PolicyVersion.find({ company, policy: { $in: resources("timesheet_policy") }, status: "published", effectiveFrom: { $lte: end } }).lean(),
@@ -49,7 +52,9 @@ export async function loadMyTimesheetPlanner(company: mongoose.Types.ObjectId, e
     Leave.find({ company, employee: employeeId, status: "approved", dayBreakdown: { $elemMatch: { attendanceDate: { $gte: from, $lte: to } } } }).select("unit dayBreakdown").lean(),
     ProjectAssignment.find({ company, employee: employeeId, status: "assigned", effectiveFrom: { $lte: to }, $or: [{ effectiveTo: null }, { effectiveTo: { $gte: from } }] }).select("effectiveFrom effectiveTo").lean(),
     Timesheet.find({ company, employee: employeeId, $or: [{ attendanceDate: { $gte: from, $lte: to } }, ...Object.values(periods).map((p) => ({ attendanceDate: { $gte: p.from, $lte: p.to } }))] }).select("attendanceDate status revision loggedMinutes requiredMinutes payrollLockedAt").limit(85).lean(),
+    DayControl.find({ company, employee: employeeId, attendanceDate: { $gte: from, $lte: to } }).lean(),
   ]);
+  const cycles = policies.some((policy: any) => usesPayrollCutoff(policy.rules)) ? await loadTimesheetCycles(company, from, to) : null;
   const data = [];
   for (let date = from; date <= to; date = addDateDays(date, 1)) {
     const history = histories.find((item) => effectiveOn(item, date));
@@ -58,7 +63,7 @@ export async function loadMyTimesheetPlanner(company: mongoose.Types.ObjectId, e
     const resolve = (type: string, versions: any[]) => selectCalendarPolicy(assignments.filter((a) => a.resourceType === type && scopes.some(([scope, id]) => a.scopeType === scope && String(a.scopeId || "") === id)), versions, date);
     const context = buildEmployeeDayContext({ attendanceDate: date, policyResolution: { employee, at: parseAttendanceDate(date).date, organizationAssignment: organization,
       workSchedule: resolve("work_schedule", schedules), holidayCalendar: resolve("holiday_calendar", calendars), timesheetPolicy: resolve("timesheet_policy", policies) } });
-    const day = buildTimesheetDay({ employee, context, record: records.find((r: any) => r.attendanceDate === date), leaves: leaves as any[], assigned: memberships.some((m: any) => m.effectiveFrom <= date && (!m.effectiveTo || m.effectiveTo >= date)), now });
+    const day = buildTimesheetDay({ employee, context, record: records.find((r: any) => r.attendanceDate === date), leaves: leaves as any[], assigned: memberships.some((m: any) => m.effectiveFrom <= date && (!m.effectiveTo || m.effectiveTo >= date)), now, control: controls.find((c: any) => c.attendanceDate === date), cycle: cycles?.get(date) });
     data.push(plannerDaySummary(day, sheets.find((s: any) => s.attendanceDate === date), today));
   }
   const total = (period: { from: string; to: string }) => sheets.filter((s: any) => s.attendanceDate >= period.from && s.attendanceDate <= period.to).reduce((sum, s: any) => sum + s.loggedMinutes, 0);

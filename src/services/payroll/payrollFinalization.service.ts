@@ -114,6 +114,7 @@ export function buildFinalizedPayrollDocuments(options: {
       identity: result.identity,
       organization: result.organization,
       payrollDays: result.payrollDays,
+      ...(result.timesheetPayroll ? { timesheetPayroll: result.timesheetPayroll } : {}),
       recurringComponents: result.recurringComponents || [],
       oneTimeInputs: result.oneTimeInputs || [],
       statutoryContributions: result.statutoryContributions || [],

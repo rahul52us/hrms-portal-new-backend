@@ -31,6 +31,7 @@ import {
   PERMISSION_KEYS,
 } from "../../services/permissions/permission.utils";
 import { resolveProjectWorkspaceAccess } from "../../services/project/projectAccess.service";
+import { resolveTimesheetWorkspaceAccess } from "../../services/timesheet/timesheetOperationsAccess.service";
 
 dotenv.config();
 
@@ -70,7 +71,7 @@ async function getReportingDescendantIds(
 
 const MeUser = async (req: any, res: Response): Promise<any> => {
 
-  const [profile_details, companyDetails, linkedCompanyDocuments, reportingManager, projectAccess] = await Promise.all([
+  const [profile_details, companyDetails, linkedCompanyDocuments, reportingManager, projectAccess, timesheetAccess] = await Promise.all([
     ProfileDetails.findById(req.bodyData.profile_details),
     req.bodyData?.company ? Company.findById(req.bodyData.company) : null,
     Company.find({
@@ -87,6 +88,7 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
           .lean()
       : null,
     resolveProjectWorkspaceAccess(req.bodyData),
+    resolveTimesheetWorkspaceAccess(req.bodyData),
   ]);
 
   const memberships = linkedCompanyDocuments.map((membership: any) => {
@@ -119,6 +121,7 @@ const MeUser = async (req: any, res: Response): Promise<any> => {
     companyDetails,
     reportingManager: reportingManager || null,
     projectAccess,
+    timesheetAccess,
   };
 
   return res.status(200).send({

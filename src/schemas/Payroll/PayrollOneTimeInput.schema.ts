@@ -15,7 +15,7 @@ export const PAYROLL_ONE_TIME_INPUT_TYPES = [
 ] as const;
 
 export type PayrollOneTimeInputType = (typeof PAYROLL_ONE_TIME_INPUT_TYPES)[number];
-export const PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES = ["manual", "finalized_correction"] as const;
+export const PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES = ["manual", "finalized_correction", "timesheet_correction"] as const;
 export type PayrollOneTimeInputSourceType = (typeof PAYROLL_ONE_TIME_INPUT_SOURCE_TYPES)[number];
 
 export interface PayrollOneTimeInputI extends Document {

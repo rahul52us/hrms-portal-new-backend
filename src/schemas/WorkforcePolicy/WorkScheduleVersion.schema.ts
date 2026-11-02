@@ -107,6 +107,7 @@ WorkScheduleVersionSchema.index(
   { unique: true }
 );
 WorkScheduleVersionSchema.index({ company: 1, schedule: 1, status: 1, effectiveFrom: -1 });
+WorkScheduleVersionSchema.index({ company: 1, updatedAt: 1, _id: 1 });
 
 const WorkScheduleVersion =
   (mongoose.models.WorkScheduleVersion as mongoose.Model<WorkScheduleVersionI>) ||

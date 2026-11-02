@@ -3,9 +3,38 @@ import { generateError } from "../../config/Error/functions";
 import Policy from "../../schemas/WorkforcePolicy/TimesheetPolicy.schema";
 import Version from "../../schemas/WorkforcePolicy/TimesheetPolicyVersion.schema";
 import Assignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import User from "../../schemas/User/User";
 import { dateKey, objectId, projectCode, shortText } from "../project/project.utils";
 import { normalizeTimesheetRules, timesheetPagination as pagination } from "../timesheet/timesheetRules.utils";
+import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import { ensurePolicyManager, ensurePolicyViewer, escapeRegex, getPolicyActorId, getVersionEffectiveTo, resolvePolicyCompany, writePolicyAudit } from "./workforcePolicy.utils";
+import { buildOperationsDays } from "../timesheet/timesheetOperationsBatch.service";
+
+export const previewTimesheetPolicy = async (req: any, res: any, next: any) => {
+  try {
+    ensurePolicyManager(req);
+    const { companyObjectId: company } = await resolvePolicyCompany(req, req.body.companyId, true);
+    const date = dateKey(req.body.effectiveFrom, "Preview date")!;
+    const policy = req.body.policyId ? objectId(req.body.policyId, "policy id") : new mongoose.Types.ObjectId();
+    if (req.body.policyId && !await Policy.exists({ company, _id: policy })) throw generateError("Timesheet policy not found", 404);
+    const published: any = req.body.rules === undefined && req.body.policyId ? await Version.findOne({ company, policy, status: "published", effectiveFrom: { $lte: new Date(`${date}T00:00:00Z`) } }).sort({ effectiveFrom: -1, versionNumber: -1 }).lean() : null;
+    if (req.body.rules === undefined && !published) throw generateError("No policy version is published for the preview date", 422);
+    const rules = normalizeTimesheetRules(req.body.rules === undefined ? published.rules : req.body.rules);
+    const scopeType = req.body.scopeType, scopeId = scopeType && scopeType !== "company" ? objectId(req.body.scopeId, "scope id") : null;
+    if (scopeType && !["company", "location", "department", "team", "employee"].includes(scopeType)) throw generateError("Invalid preview scope", 422);
+    const { page, limit, skip } = pagination(req.body, 20), match: any = { company, deletedAt: null, role: { $ne: "superadmin" } };
+    if (req.body.search) { const expression = new RegExp(escapeRegex(shortText(req.body.search, "Employee search", 1, 100)), "i"); match.$or = [{ name: expression }, { code: expression }]; }
+    const employees = await User.find(match).select("_id company name code joiningDate createdAt employmentEndDate department team officeLocation reportingManager").sort({ name: 1, _id: 1 }).skip(skip).limit(limit).lean();
+    const version = { _id: new mongoose.Types.ObjectId(), policy, status: "published", effectiveFrom: new Date(`${date}T00:00:00Z`), versionNumber: Number.MAX_SAFE_INTEGER, rules };
+    const assignment = scopeType ? { _id: new mongoose.Types.ObjectId(), company, resource: policy, resourceType: "timesheet_policy", scopeType, scopeId, effectiveFrom: version.effectiveFrom } : undefined;
+    const rows = await buildOperationsDays(company, employees, [date], undefined, new Date(), true, undefined, { policy, version, assignment });
+    const conflict = assignment ? Boolean(await Assignment.exists({ company, resourceType: "timesheet_policy", scopeType, scopeId, effectiveFrom: { $lte: version.effectiveFrom }, $or: [{ effectiveTo: null }, { effectiveTo: { $gt: version.effectiveFrom } }] })) : false;
+    const data = rows.map((row) => ({ employee: row.employee, applies: String(row._day.context.policies.timesheetPolicy?.version?._id) === String(version._id), requiredMinutes: row._day.requirement.requiredMinutes, payrollMode: row._day.rules?.payrollMode || "report_only", deadlineAt: row._day.eligibility.deadlineAt, editableUntilAt: row._day.eligibility.editableUntilAt, setupIssues: row._day.eligibility.setupIssues }));
+    const total = await User.countDocuments(match);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ success: true, data, conflict, summaryScope: "page", proposedAssignment: Boolean(assignment), pagination: { page, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (error) { next(error); }
+};
 
 const effectiveDate = (value: any) => new Date(`${dateKey(value, "Effective from date")}T00:00:00Z`);
 
@@ -75,10 +104,12 @@ export const getTimesheetPolicy = handler(async (req, ctx) => {
 });
 
 export const createTimesheetPolicy = handler(async (req, ctx, session) => {
+  const rules = normalizeTimesheetRules(req.body.rules);
+  if (rules.approvalWorkflowId) await resolveEffectiveApprovalWorkflowReference({ company: ctx.company, workflowId: rules.approvalWorkflowId, requestType: "timesheet_submission", at: effectiveDate(req.body.effectiveFrom) });
   const [policy]: any[] = await Policy.create([{ company: ctx.company, name: shortText(req.body.name, "Policy name", 2, 120),
     code: projectCode(req.body.code, req.body.name), description: shortText(req.body.description || "", "Description", 0, 1000), createdBy: ctx.actor }], { session });
   const [version] = await Version.create([{ company: ctx.company, policy: policy._id, versionNumber: 1,
-    effectiveFrom: effectiveDate(req.body.effectiveFrom), rules: normalizeTimesheetRules(req.body.rules),
+    effectiveFrom: effectiveDate(req.body.effectiveFrom), rules,
     changeReason: shortText(req.body.changeReason || "Initial timesheet policy", "Change reason", 3, 500), createdBy: ctx.actor }], { session });
   await audit(ctx, session, "timesheet_policy", policy._id, "created", { versionId: version._id, rules: version.rules });
   return { data: { policy, version }, message: "Timesheet policy draft created" };
@@ -115,6 +146,7 @@ export const changeTimesheetPolicyVersion = (action: "update" | "publish" | "can
     changes.status = "cancelled"; changes.cancelledAt = new Date(); changes.cancelledBy = ctx.actor;
     changes.cancellationReason = shortText(req.body.reason, "Cancellation reason", 3, 500);
   }
+  if (action !== "cancel" && changes.rules?.approvalWorkflowId) await resolveEffectiveApprovalWorkflowReference({ company: ctx.company, workflowId: changes.rules.approvalWorkflowId, requestType: "timesheet_submission", at: changes.effectiveFrom || version.effectiveFrom });
   await touch(policy, ctx, session);
   const updated = await Version.findOneAndUpdate({ _id: version._id, company: ctx.company, revision: version.revision, status: "draft" }, { $set: changes, $inc: { revision: 1 } }, { new: true, runValidators: true, session }).lean();
   if (!updated) throw generateError("Draft changed. Refresh before saving.", 409);

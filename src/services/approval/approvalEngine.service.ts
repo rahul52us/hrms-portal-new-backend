@@ -13,8 +13,8 @@ import {
 } from "./approvalDecision.utils";
 import { approvalWorkflowVersionSupportsRequestType } from "./approvalWorkflowVersion.utils";
 
-type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim" | "attendance_regularization_request" | "attendance_overtime_review";
-type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest" | "AttendanceOvertimeReview";
+type RequestType = "leave_request" | "leave_encashment_request" | "remote_work_request" | "comp_off_claim" | "attendance_regularization_request" | "attendance_overtime_review" | "timesheet_submission";
+type RequestModel = "LeaveRequest" | "LeaveCancellationRequest" | "LeaveEncashmentRequest" | "RemoteWorkRequest" | "CompOffClaim" | "AttendanceRegularizationRequest" | "AttendanceOvertimeReview" | "TimesheetSubmission";
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -27,6 +27,7 @@ function objectId(value: unknown, label: string) {
 }
 
 function permissionFor(requestType: RequestType) {
+  if (requestType === "timesheet_submission") return PERMISSION_KEYS.APPROVE_TIMESHEETS;
   if (requestType === "remote_work_request") return PERMISSION_KEYS.APPROVE_REMOTE_WORK_REQUESTS;
   if (requestType === "attendance_regularization_request") {
     return PERMISSION_KEYS.APPROVE_ATTENDANCE_REGULARIZATIONS;
@@ -269,6 +270,23 @@ function approvalResult(instance: any) {
       .filter((approver: any) => approver.status === "pending")
       .map((approver: any) => approver.user),
   };
+}
+
+export async function createReportingManagerTimesheetApproval(options: {
+  company: mongoose.Types.ObjectId; requestId: mongoose.Types.ObjectId; employee: any;
+  actorId: mongoose.Types.ObjectId; session: ClientSession;
+}) {
+  const manager = await activeUser(options.company, options.employee.reportingManager, options.session);
+  if (!manager || String(manager._id) === String(options.employee._id)) throw generateError("Assign an active reporting manager before submitting a timesheet", 422);
+  const [instance] = await ApprovalInstance.create([{
+    company: options.company, requestType: "timesheet_submission", requestModel: "TimesheetSubmission",
+    request: options.requestId, employee: options.employee._id, routingSource: "reporting_manager",
+    workflow: null, workflowVersion: null, workflowVersionNumber: 1, workflowNameSnapshot: "Reporting manager",
+    status: "pending", currentStepOrder: 1,
+    steps: [{ order: 1, nameSnapshot: "Reporting manager", approverType: "reporting_manager", approvalRule: "any", status: "pending", approvers: [{ ...approverSnapshot(manager), status: "pending" }] }],
+    history: [{ action: "created", actor: options.actorId, actorNameSnapshot: options.employee.name || "Employee", at: new Date() }],
+  }], { session: options.session });
+  return approvalResult(instance);
 }
 
 export async function approveApprovalInstance(options: {

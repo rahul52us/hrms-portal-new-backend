@@ -1,8 +1,13 @@
 import Company from "../../schemas/company/Company";
 
 export const PERMISSION_KEYS = {
+  VIEW_TIMESHEETS: "view_timesheets",
+  EXPORT_TIMESHEETS: "export_timesheets",
+  MANAGE_TIMESHEET_EXCEPTIONS: "manage_timesheet_exceptions",
+  REASSIGN_TIMESHEET_APPROVALS: "reassign_timesheet_approvals",
   VIEW_PROJECTS: "view_projects",
   MANAGE_PROJECTS: "manage_projects",
+  APPROVE_TIMESHEETS: "approve_timesheets",
   VIEW_DASHBOARD: "view_dashboard",
   VIEW_USERS: "view_users",
   CREATE_USERS: "create_users",
@@ -67,6 +72,11 @@ type PermissionDefinition = {
 };
 
 const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  { key: PERMISSION_KEYS.VIEW_TIMESHEETS, label: "View Timesheets", description: "View company timesheets and reports. HR and department heads retain their assigned organization scope; reporting/project relations independently permit scoped reports.", category: "Timesheets" },
+  { key: PERMISSION_KEYS.EXPORT_TIMESHEETS, label: "Export Timesheets", description: "Download scoped timesheet reports; no salary data is included.", category: "Timesheets" },
+  { key: PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS, label: "Manage Timesheet Exceptions", description: "Grant/revoke audited employee-day exemptions and deadline extensions within organization scope. Cannot change your own day or locked/pending/approved work.", category: "Timesheets" },
+  { key: PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS, label: "Reassign Timesheet Approvals", description: "Replace a pending reviewer in the current level within historical HR scope. Preserves work, decisions and any/all rules; no self-assignment or own-request reassignment.", category: "Timesheets" },
+  { key: PERMISSION_KEYS.APPROVE_TIMESHEETS, label: "Approve Timesheets", description: "Participate in scoped HR timesheet approval queues. Reporting-manager and named-user approval still follows the snapshotted workflow.", category: "Timesheets" },
   { key: PERMISSION_KEYS.VIEW_PROJECTS, label: "View Projects", description: "View the project management workspace when managing projects or employees, or as Company Admin / HR Admin. Employees select assigned projects inside timesheets.", category: "Projects" },
   { key: PERMISSION_KEYS.MANAGE_PROJECTS, label: "Manage Projects", description: "Create projects and manage work types and employee assignments within scope. Project managers also manage their assigned projects.", category: "Projects" },
   {
@@ -405,6 +415,10 @@ const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, 
 );
 
 const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+  PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+  PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+  PERMISSION_KEYS.APPROVE_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -461,6 +475,10 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+  PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+  PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+  PERMISSION_KEYS.APPROVE_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -509,6 +527,10 @@ const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+  PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+  PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+  PERMISSION_KEYS.APPROVE_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -537,6 +559,8 @@ const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+  PERMISSION_KEYS.APPROVE_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -581,6 +605,9 @@ const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 export const INDIVIDUAL_OVERRIDE_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+  PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+  PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
   PERMISSION_KEYS.MANAGE_PROJECTS,
   PERMISSION_KEYS.VIEW_PAYROLL,
@@ -604,6 +631,8 @@ const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
 };
 
 export const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
+  [PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS]: [PERMISSION_KEYS.VIEW_TIMESHEETS],
+  [PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS]: [PERMISSION_KEYS.VIEW_TIMESHEETS],
   [PERMISSION_KEYS.MANAGE_PROJECTS]: [PERMISSION_KEYS.VIEW_PROJECTS],
   [PERMISSION_KEYS.CREATE_USERS]: [PERMISSION_KEYS.VIEW_USERS],
   [PERMISSION_KEYS.CREATE_HR_USERS]: [PERMISSION_KEYS.VIEW_USERS],
@@ -748,6 +777,10 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "admin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+      PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+      PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+      PERMISSION_KEYS.APPROVE_TIMESHEETS,
       PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.MANAGE_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -806,6 +839,10 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hradmin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
+      PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
+      PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+      PERMISSION_KEYS.APPROVE_TIMESHEETS,
       PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.MANAGE_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
@@ -856,6 +893,8 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hr") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+      PERMISSION_KEYS.APPROVE_TIMESHEETS,
       PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,
@@ -883,6 +922,8 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "departmenthead") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
+      PERMISSION_KEYS.APPROVE_TIMESHEETS,
       PERMISSION_KEYS.VIEW_PROJECTS,
       PERMISSION_KEYS.VIEW_DASHBOARD,
       PERMISSION_KEYS.VIEW_USERS,

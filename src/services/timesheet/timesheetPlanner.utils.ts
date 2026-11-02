@@ -27,5 +27,6 @@ export function plannerDaySummary(day: any, sheet: any, today: string) {
     shortHours: Boolean(sheet && loggedMinutes > 0 && shortfallMinutes), required: day.eligibility.required,
     setupIssues: day.eligibility.setupIssues, saveIssues: day.eligibility.saveIssues, overdue: day.eligibility.overdue,
     dayType: day.context.dayType, timezone: day.context.timezone, deadlineAt: day.eligibility.deadlineAt,
-    canSave: day.eligibility.canSave && (!sheet || sheet.status === "draft") && !sheet?.payrollLockedAt };
+    exemptMinutes: day.eligibility.exemptMinutes || 0, hrExemption: Boolean(day.controls?.exemption), deadlineExtended: Boolean(day.controls?.extension),
+    canSave: day.eligibility.canSave && (!sheet || ["draft", "returned", "rejected"].includes(sheet.status)) && !sheet?.payrollLockedAt };
 }

@@ -10,11 +10,12 @@ import { getEmployeeRequestActor, resolveEmployeeRequestCompanyId } from "../lea
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
 import { dateKey, objectId, shortText } from "../project/project.utils";
 import { timesheetPagination as pagination } from "./timesheetRules.utils";
-import { historicalProjectStates, resolveTimesheetDay, timesheetContextSnapshot } from "./timesheetContext.service";
+import { historicalProjectStates, resolveTimesheetDay, timesheetContextSnapshot, timesheetWorkFingerprint } from "./timesheetContext.service";
 import { addDateDays, validateTimesheetEntries } from "./timesheet.utils";
 import { loadMyTimesheetPlanner } from "./timesheetPlanner.service";
+import { fenceTimesheetDay } from "./timesheetDayControl.utils";
 
-function ownContext(req: any) {
+export function ownContext(req: any) {
   const actor = getEmployeeRequestActor(req);
   if (actor.role === "superadmin") throw generateError("Timesheets require a company employee account", 403);
   if (req.query.employeeId !== undefined || req.body?.employeeId !== undefined) throw generateError("These endpoints only access your own timesheets", 403);
@@ -32,14 +33,15 @@ const matchFor = (ctx: any, date: string) => ({ company: ctx.company, employee: 
 const dateFor = (req: any) => dateKey(req.params.date, "Attendance date")!;
 const assignmentMatch = (ctx: any, date: string) => ({ company: ctx.company, employee: ctx.employee, status: "assigned", effectiveFrom: { $lte: date }, $or: [{ effectiveTo: null }, { effectiveTo: { $gte: date } }] });
 
-function serializeDay(day: Awaited<ReturnType<typeof resolveTimesheetDay>>, sheet: any) {
+export function serializeDay(day: Awaited<ReturnType<typeof resolveTimesheetDay>>, sheet: any) {
   const snapshot = timesheetContextSnapshot(day);
-  return { attendanceDate: day.context.attendanceDate, serverNow: new Date().toISOString(), timesheet: sheet, eligibility: {
-    ...day.eligibility, canSave: day.eligibility.canSave && (!sheet || sheet.status === "draft") && !sheet?.payrollLockedAt,
+  return { attendanceDate: day.context.attendanceDate, serverNow: new Date().toISOString(), timesheet: sheet, controls: day.controls, eligibility: {
+    ...day.eligibility, canSave: day.eligibility.canSave && (!sheet || ["draft", "returned", "rejected"].includes(sheet.status)) && !sheet?.payrollLockedAt,
+    canSubmit: day.eligibility.canSubmit && Boolean(sheet?.entries.length) && ["draft", "returned", "rejected"].includes(sheet?.status) && !sheet?.payrollLockedAt,
   }, context: snapshot, loggedMinutes: sheet?.loggedMinutes || 0,
     requiredMinutes: day.requirement.requiredMinutes,
     shortfallMinutes: day.requirement.requiredMinutes == null ? null : Math.max(0, day.requirement.requiredMinutes - (sheet?.loggedMinutes || 0)),
-    contextChanged: Boolean(sheet && JSON.stringify(sheet.contextSnapshot) !== JSON.stringify(snapshot)),
+    contextChanged: Boolean(sheet && (timesheetWorkFingerprint(sheet.contextSnapshot) !== timesheetWorkFingerprint(snapshot) || sheet.requiredMinutes !== day.requirement.requiredMinutes)),
   };
 }
 
@@ -132,10 +134,11 @@ export const saveMyTimesheetDraft = handler(async (req, ctx) => {
     await session.withTransaction(async () => {
       const priorInTransaction = await Revision.findOne(retryMatch).session(session).lean();
       if (priorInTransaction) { result = replay(priorInTransaction, hash); return; }
+      const control = await fenceTimesheetDay(match, session);
       const sheet: any = await Timesheet.findOne(match).session(session).lean();
       if ((sheet?.revision || 0) !== req.body.revision) throw generateError("Timesheet changed. Refresh before saving.", 409);
-      if (sheet && (sheet.status !== "draft" || sheet.payrollLockedAt)) throw generateError("Only unlocked draft timesheets can be edited", 409);
-      const day = await resolveTimesheetDay(ctx.company, ctx.employee, date);
+      if (sheet && (!["draft", "returned", "rejected"].includes(sheet.status) || sheet.payrollLockedAt)) throw generateError("Only unlocked draft or returned/rejected timesheets can be edited", 409);
+      const day = await resolveTimesheetDay(ctx.company, ctx.employee, date, new Date(), undefined, false, control);
       if (!day.eligibility.canSave) {
         const issue = [...day.eligibility.setupIssues, ...day.eligibility.saveIssues][0];
         throw generateError(`${issue.code}: ${issue.message}`, 422);
@@ -159,7 +162,7 @@ export const saveMyTimesheetDraft = handler(async (req, ctx) => {
         contextSnapshot: timesheetContextSnapshot(day), updatedBy: ctx.actor._id, revision: req.body.revision + 1 };
       let saved: any;
       if (sheet) {
-        saved = await Timesheet.findOneAndUpdate({ ...match, revision: sheet.revision, status: "draft", payrollLockedAt: null }, { $set: values }, { new: true, session, runValidators: true }).lean();
+        saved = await Timesheet.findOneAndUpdate({ ...match, revision: sheet.revision, status: { $in: ["draft", "returned", "rejected"] }, payrollLockedAt: null }, { $set: values }, { new: true, session, runValidators: true }).lean();
         if (!saved) throw generateError("Timesheet changed. Refresh before saving.", 409);
       } else {
         const [created] = await Timesheet.create([{ ...match, ...values, createdBy: ctx.actor._id }], { session });

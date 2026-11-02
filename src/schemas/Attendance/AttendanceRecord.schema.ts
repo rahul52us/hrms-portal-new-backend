@@ -363,6 +363,7 @@ AttendanceRecordSchema.index({ company: 1, employee: 1, attendanceDate: -1 });
 AttendanceRecordSchema.index({ company: 1, department: 1, attendanceDate: -1 });
 AttendanceRecordSchema.index({ company: 1, teamId: 1, attendanceDate: -1 });
 AttendanceRecordSchema.index({ company: 1, officeLocation: 1, attendanceDate: -1 });
+AttendanceRecordSchema.index({ company: 1, updatedAt: 1, _id: 1 });
 
 const AttendanceRecord =
   (mongoose.models.AttendanceRecord as mongoose.Model<AttendanceRecordI>) ||

@@ -52,6 +52,7 @@ export function validateTimesheetEntries(options: {
 }) {
   const { input, rules, context, requirement, record, now } = options;
   if (!Array.isArray(input) || input.length > rules.maximumDailyEntries) throw generateError(`Entries must be a list of at most ${rules.maximumDailyEntries}`, 422);
+  if (input.length && !record?.punchSessions?.some((session: any) => session.punchIn)) throw generateError("Punch in or request attendance regularization before logging work", 422);
   const knownIds = new Set(options.existingEntries.map((e) => e.entryId));
   const usedIds = new Set<string>();
   const day = context.attendanceDate;
@@ -61,9 +62,6 @@ export function validateTimesheetEntries(options: {
   const scheduleStart = localInstant(day, context.schedule.startTime, context.timezone);
   const scheduleEnd = localInstant(overnight ? nextDay : day, context.schedule.endTime, context.timezone);
   const midpoint = (scheduleStart.getTime() + scheduleEnd.getTime()) / 2;
-  const intervals = (record?.punchSessions || []).filter((s: any) => s.punchIn).map((s: any) => ({
-    start: new Date(s.punchIn).getTime(), end: Math.min(now.getTime(), s.punchOut ? new Date(s.punchOut).getTime() : now.getTime()),
-  }));
   const result = input.map((entry: any) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw generateError("Each entry must be an object", 400);
     const entryId = entry.entryId === undefined ? randomUUID() : entry.entryId;
@@ -87,8 +85,7 @@ export function validateTimesheetEntries(options: {
     if (entry.startDate < day || entry.endDate > (overnight ? nextDay : day) || start >= dayEnd.getTime() || end > dayEnd.getTime() || end <= start) throw generateError("Entry must have a positive duration within this attendance day", 422);
     if (end > now.getTime()) throw generateError("Future work cannot be logged", 422);
     const minutes = (end - start) / 60000;
-    if (!Number.isSafeInteger(minutes) || minutes < rules.minimumEntryMinutes || minutes % rules.minuteIncrement) throw generateError(`Entry duration must be at least ${rules.minimumEntryMinutes} minutes in ${rules.minuteIncrement}-minute increments`, 422);
-    if (!intervals.some((interval: any) => start >= interval.start && end <= interval.end)) throw generateError("Entry must fit a punched work interval; correct missing or incorrect punches through regularization", 422);
+    if (!Number.isSafeInteger(minutes) || minutes < rules.minimumEntryMinutes) throw generateError(`Entry duration must be a whole number of minutes, at least ${rules.minimumEntryMinutes} minute(s)`, 422);
     if (requirement.fullLeave || requirement.leavePortions.includes("first_half") && start < midpoint || requirement.leavePortions.includes("second_half") && end > midpoint) throw generateError("Entry overlaps approved leave", 422);
     return { entryId, project: project._id, workType: workType._id, assignment: assignment._id,
       projectNameSnapshot: project.name, projectCodeSnapshot: project.code, projectRevisionSnapshot: project.revision,
@@ -101,9 +98,8 @@ export function validateTimesheetEntries(options: {
   }
   const total = result.reduce((sum: number, entry: any) => sum + entry.minutes, 0);
   // The scheduled target already excludes unpaid breaks. Do not subtract lunch again from split entries or partial attendance.
-  const punchedMinutes = intervals.reduce((sum: number, interval: any) => sum + Math.max(0, (interval.end - interval.start) / 60000), 0);
   const baseLimit = requirement.workingMinutes === 0 && !requirement.fullLeave ? requirement.fullMinutes || 0 : requirement.workingMinutes || 0;
-  const limit = Math.min(punchedMinutes, baseLimit + (rules.allowExtraHours ? rules.maximumExtraMinutes : 0));
+  const limit = baseLimit + (rules.allowExtraHours ? rules.maximumExtraMinutes : 0);
   if (total > limit) throw generateError(`Logged time exceeds the allowed ${Math.floor(limit)} minutes for this day`, 422);
   return { entries: result, loggedMinutes: total };
 }

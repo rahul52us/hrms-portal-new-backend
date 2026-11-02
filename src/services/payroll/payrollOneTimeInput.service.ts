@@ -1,4 +1,5 @@
 import { NextFunction, Response } from "express";
+import { TimesheetPayrollCorrection } from "../../schemas/Timesheet/TimesheetPayroll.schema";
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import PayrollEmployeeInput from "../../schemas/Payroll/PayrollEmployeeInput.schema";
@@ -379,6 +380,12 @@ export async function cancelPayrollOneTimeInputService(req: any, res: Response, 
       if (input.status === "cancelled") return;
       if (run.status !== "draft") throw generateError("One-time inputs can only be changed on a draft payroll run", 409);
       if (Number(run.version) !== expectedVersion) throw generateError("Payroll run changed. Refresh and try again", 409);
+      if (input.sourceType === "timesheet_correction") {
+        const correction: any = await TimesheetPayrollCorrection.findOne({ company: companyObjectId, payrollOneTimeInput: input._id, status: "settled" }).session(session);
+        if (!correction) throw generateError("Timesheet settlement evidence is missing", 409);
+        if (await TimesheetPayrollCorrection.exists({ company: companyObjectId, sourceInput: correction.sourceInput, employee: correction.employee, _id: { $ne: correction._id }, createdAt: { $gt: correction.createdAt } }).session(session)) throw generateError("A later Timesheet correction depends on this settlement", 409);
+        correction.status = "open"; correction.routingCancelled = true; await correction.save({ session });
+      }
       const cancelledAt = new Date();
       const inputUpdate = await PayrollOneTimeInput.updateOne(
         { _id: input._id, company: companyObjectId, status: "active" },

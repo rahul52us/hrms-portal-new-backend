@@ -26,6 +26,8 @@ const schema = new Schema({
   attendanceDate: { type: String, required: true, immutable: true },
   timezone: { type: String, required: true },
   status: { type: String, enum: ["draft", "submitted", "returned", "rejected", "approved"], default: "draft", required: true },
+  currentSubmission: { type: Schema.Types.ObjectId, ref: "TimesheetSubmission", default: null },
+  submissionCount: { type: Number, default: 0, min: 0 },
   entries: { type: [timesheetEntrySchema], default: [], validate: [(value: any[]) => value.length <= 100, "Too many entries"] },
   loggedMinutes: { type: Number, required: true, min: 0 },
   requiredMinutes: { type: Number, default: null, min: 0 },
@@ -33,6 +35,7 @@ const schema = new Schema({
   revision: { type: Number, required: true, min: 1 },
   contextSnapshot: { type: Schema.Types.Mixed, required: true },
   payrollLockedAt: { type: Date, default: null },
+  payrollInput: { type: Schema.Types.ObjectId, ref: "TimesheetPayrollInput", default: null },
   createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
   updatedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });

@@ -443,6 +443,10 @@ export async function renderPayrollPayslipPdf(options: {
   detail("Paid days", result.payrollDays?.paidDays, margin + 10, margin + 78, y - 48);
   detail("LOP days", result.payrollDays?.unpaidDays, width / 2 + 5, width / 2 + 59, y - 48);
   y -= 80;
+  if (Number(result.payrollDays?.timesheetLopDays || 0) > 0) {
+    drawText(`LOP breakdown: attendance ${result.payrollDays.attendanceLopDays || 0} day(s), timesheet ${result.payrollDays.timesheetLopDays} day(s)`, margin, y + 8, 8, regular, muted);
+    y -= 12;
+  }
 
   const recurring = Array.isArray(result.recurringComponents) ? result.recurringComponents : [];
   const oneTime = Array.isArray(result.oneTimeInputs) ? result.oneTimeInputs : [];

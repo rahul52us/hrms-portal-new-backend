@@ -13,6 +13,7 @@ export interface PayrollFinalizedResultI extends Document {
   identity: Record<string, unknown>;
   organization: Record<string, unknown>;
   payrollDays: Record<string, number>;
+  timesheetPayroll?: Record<string, unknown>;
   recurringComponents: Array<Record<string, unknown>>;
   oneTimeInputs: Array<Record<string, unknown>>;
   statutoryContributions: Array<Record<string, unknown>>;
@@ -43,6 +44,7 @@ const PayrollFinalizedResultSchema = new Schema<PayrollFinalizedResultI>(
     identity: { type: Schema.Types.Mixed, required: true, immutable: true },
     organization: { type: Schema.Types.Mixed, required: true, immutable: true },
     payrollDays: { type: Schema.Types.Mixed, required: true, immutable: true },
+    timesheetPayroll: { type: Schema.Types.Mixed, immutable: true },
     recurringComponents: { type: [Schema.Types.Mixed] as any, required: true, default: [], immutable: true },
     oneTimeInputs: { type: [Schema.Types.Mixed] as any, required: true, default: [], immutable: true },
     statutoryContributions: { type: [Schema.Types.Mixed] as any, required: true, default: [], immutable: true },

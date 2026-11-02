@@ -13,6 +13,8 @@ export const PAYROLL_RUN_STATUSES = [
 export const PAYROLL_PAYOUT_STATUSES = ["not_started", "processing", "paid"] as const;
 
 export interface PayrollRunI extends Document {
+  timesheetPayrollInput?: mongoose.Types.ObjectId | null;
+  timesheetAdditionalLopDays?: number;
   company: mongoose.Types.ObjectId;
   companyNameSnapshot: string;
   companyCodeSnapshot: string;
@@ -116,6 +118,8 @@ const PayrollRunSchema = new Schema<PayrollRunI>(
     attendanceTotals: { type: Schema.Types.Mixed, required: true, default: {}, immutable: true },
     attendanceLockedAt: { type: Date, required: true, immutable: true },
     attendanceLockedBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
+    timesheetPayrollInput: { type: Schema.Types.ObjectId, ref: "TimesheetPayrollInput", default: null },
+    timesheetAdditionalLopDays: { type: Number, default: 0, min: 0 },
     attendanceInputStatus: { type: String, enum: ["pending", "prepared"], required: true, default: "pending", index: true },
     employeeInputCount: { type: Number, required: true, min: 0, default: 0 },
     employeeInputIssueCount: { type: Number, required: true, min: 0, default: 0 },

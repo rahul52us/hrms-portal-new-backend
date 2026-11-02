@@ -7,6 +7,7 @@ export const APPROVAL_REQUEST_TYPES = [
   "comp_off_claim",
   "attendance_regularization_request",
   "attendance_overtime_review",
+  "timesheet_submission",
 ] as const;
 
 export interface ApprovalWorkflowI extends Document {

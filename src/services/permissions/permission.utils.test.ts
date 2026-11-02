@@ -156,6 +156,16 @@ function testHrCanReceiveWorkforcePolicyManagementOverride() {
   );
 }
 
+function testTimesheetExportDoesNotRequireCompanyView() {
+  const validation = validateUserPermissionOverrides({
+    role: "user",
+    permissions: { [PERMISSION_KEYS.EXPORT_TIMESHEETS]: true },
+  });
+  assert.equal(validation.valid, true);
+  assert.equal(validation.effectivePermissions[PERMISSION_KEYS.EXPORT_TIMESHEETS], true);
+  assert.equal(validation.effectivePermissions[PERMISSION_KEYS.VIEW_TIMESHEETS], false);
+}
+
 testPayrollExecutiveDefaults();
 testEmployeeAccessRoleDoesNotChangeOrganizationalRole();
 testCompanyRoleConfigurationAndIndividualOverride();
@@ -165,5 +175,6 @@ testUserOverrideCanExplicitlyDenyInheritedPermission();
 testPayrollPermissionsCanBeDelegatedIndividually();
 testSystemPermissionCannotBeDelegatedIndividually();
 testHrCanReceiveWorkforcePolicyManagementOverride();
+testTimesheetExportDoesNotRequireCompanyView();
 
 console.log("Permission access-role tests passed");

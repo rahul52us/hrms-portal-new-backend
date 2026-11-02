@@ -28,7 +28,9 @@ let count = 0;
 function test(name: string, action: () => void) { action(); count++; console.log(`PASS ${name}`); }
 test("strict policy validation and blank numeric rejection", () => {
   assert.deepEqual(normalizeTimesheetRules(), rules);
-  for (const bad of [{ required: "true" }, { minimumEntryMinutes: 16 }, { minuteIncrement: 0 }, { maxBackdateDays: "31" }, { maxBackdateDays: 0 }, { minimumNotesLength: 0 }, { notesRequired: false }, { maximumDailyEntries: 101 }, { allowExtraHours: true }, { bogus: true }]) assert.throws(() => normalizeTimesheetRules(bad));
+  for (const bad of [{ required: "true" }, { minimumEntryMinutes: 0 }, { minimumEntryMinutes: 1.5 }, { maxBackdateDays: "31" }, { maxBackdateDays: 0 }, { minimumNotesLength: 0 }, { notesRequired: false }, { maximumDailyEntries: 101 }, { allowExtraHours: true }, { bogus: true }]) assert.throws(() => normalizeTimesheetRules(bad));
+  assert.equal(normalizeTimesheetRules({ minimumEntryMinutes: 16, minuteIncrement: 15 }).minimumEntryMinutes, 16);
+  assert.equal("minuteIncrement" in normalizeTimesheetRules({ minuteIncrement: 15 }, { ...rules, minuteIncrement: 30 }), false);
 });
 test("net target excludes lunch once", () => {
   assert.equal(workRequirement(base, []).requiredMinutes, 480);
@@ -64,12 +66,21 @@ test("overlap rejected and adjacency permitted", () => {
   assert.throws(() => validate([entry("09:30", "11:00"), entry("10:30", "11:30")]), /overlap/);
   assert.equal(validate([entry("09:30", "11:00"), entry("11:00", "11:30")]).loggedMinutes, 120);
 });
-test("zero, negative, increment, note, invalid type and assignment checks", () => {
-  for (const bad of [entry("10:00", "10:00"), entry("11:00", "10:00"), entry("10:00", "10:16"), entry("10:00", "10:30", { notes: "x" }), entry("10:00", "10:30", { workTypeId: String(id()) }), entry("10:00", "10:30", { projectId: String(id()) })]) assert.throws(() => validate([bad]));
+test("zero, negative, note, invalid type and assignment checks", () => {
+  for (const bad of [entry("10:00", "10:00"), entry("11:00", "10:00"), entry("10:00", "10:30", { notes: "x" }), entry("10:00", "10:30", { workTypeId: String(id()) }), entry("10:00", "10:30", { projectId: String(id()) })]) assert.throws(() => validate([bad]));
 });
-test("split punches cannot be bridged through a break", () => {
+
+test("exact minute durations work even with legacy increment rules", () => {
+  for (const [end, minutes] of [["10:01", 1], ["10:16", 16], ["10:26", 26], ["10:27", 27], ["10:46", 46]] as const) {
+    assert.equal(validate([entry("10:00", end)], { rules: { ...rules, minuteIncrement: 15 } }).loggedMinutes, minutes);
+  }
+  assert.throws(() => validate([entry("10:00", "10:14")], { rules: { ...rules, minimumEntryMinutes: 15 } }), /at least 15/);
+  assert.equal(validate([entry("17:47", "18:13")], { record: { punchSessions: [{ punchIn: localInstant(base.attendanceDate, "17:47", base.timezone!), punchOut: localInstant(base.attendanceDate, "18:13", base.timezone!) }] }, rules: { ...rules, minimumEntryMinutes: 15, minuteIncrement: 15 } }).loggedMinutes, 26);
+  assert.equal(validate([entry("17:47", "18:14")], { record: { punchSessions: [{ punchIn: localInstant(base.attendanceDate, "17:47", base.timezone!), punchOut: localInstant(base.attendanceDate, "18:13", base.timezone!) }] } }).loggedMinutes, 27);
+});
+test("entries can span gaps between punches", () => {
   const record = { punchSessions: [{ punchIn: localInstant(base.attendanceDate, "09:30", base.timezone!), punchOut: localInstant(base.attendanceDate, "13:00", base.timezone!) }, { punchIn: localInstant(base.attendanceDate, "14:00", base.timezone!), punchOut: localInstant(base.attendanceDate, "18:30", base.timezone!) }] };
-  assert.throws(() => validate([entry("12:30", "14:30")], { record }), /punched work interval/);
+  assert.equal(validate([entry("12:30", "14:30")], { record }).loggedMinutes, 120);
   assert.equal(validate([entry("09:30", "13:00"), entry("14:00", "18:30")], { record }).loggedMinutes, 480);
 });
 test("open attendance permits only work already done", () => {
@@ -82,6 +93,14 @@ test("partial attendance does not shrink the required full-day target", () => {
   assert.equal(workRequirement(base, []).requiredMinutes, 480);
   const record = { punchSessions: [{ punchIn: localInstant(base.attendanceDate, "14:00", base.timezone!), punchOut: localInstant(base.attendanceDate, "18:00", base.timezone!) }] };
   assert.equal(validate([entry("14:00", "18:00")], { record }).loggedMinutes, 240);
+  assert.equal(validate([entry("09:30", "13:00"), entry("14:00", "18:30")], { record }).loggedMinutes, 480, "Logged work uses the schedule limit, not punched minutes");
+  assert.equal(validate([entry("18:00", "18:27")], { record }).loggedMinutes, 27);
+  assert.throws(() => validate([entry("09:30", "18:30")], { record }), /exceeds/);
+});
+
+test("a punch-in is still required for work, including optional off-days", () => {
+  for (const record of [null, {}, { punchSessions: [] }, { punchSessions: [{ punchOut: new Date() }] }]) assert.throws(() => validate([entry("10:00", "10:27")], { record }), /Punch in or request/);
+  assert.equal(validate([], { record: null }).loggedMinutes, 0);
 });
 test("daily target and explicitly permitted extra-hours caps", () => {
   assert.throws(() => validate([entry("09:30", "18:30")]), /exceeds/);

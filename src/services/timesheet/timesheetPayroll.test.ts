@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { buildEmployeeDayContext } from "../attendance/employeeDayContext.utils";
+import { buildTimesheetDay, timesheetContextSnapshot } from "./timesheetContext.service";
+import { DEFAULT_TIMESHEET_RULES, normalizeTimesheetRules } from "./timesheetRules.utils";
+import { calculateTimesheetPayrollDay } from "./timesheetPayroll.utils";
+import { buildDraftPayrollResults, prorateMinorAmount } from "../payroll/payrollCalculation.service";
+const id = () => new mongoose.Types.ObjectId(), recordId = id(), date = "2026-09-25", now = new Date("2026-11-02T12:00:00Z");
+function fixture(options: any = {}) {
+  const rules = { ...DEFAULT_TIMESHEET_RULES, payrollMode: "shortfall", deadlineDaysAfterShift: 0, maxBackdateDays: 0, ...options.rules };
+  const context = buildEmployeeDayContext({ attendanceDate: date, policyResolution: { employee: {}, organizationAssignment: { _id: id() }, at: new Date(date),
+    workSchedule: { assignment: {}, version: { rules: { timezone: "Asia/Kolkata", workingDays: ["Friday"], saturdayRule: "all_off", startTime: "09:30", endTime: "18:30", unpaidBreakMinutes: 60 } } },
+    holidayCalendar: { assignment: {}, version: { holidays: [] } }, timesheetPolicy: { assignment: {}, version: { rules } } } });
+  const record = { _id: recordId, revisionNumber: 1, punchSessions: [{ punchIn: new Date("2026-09-25T04:00:00Z"), punchOut: new Date("2026-09-25T13:00:00Z") }] };
+  const leaves = options.portion ? [{ unit: "days", dayBreakdown: [{ attendanceDate: date, portion: options.portion, requestedUnits: options.portion === "full" ? 1 : 0.5 }] }] : [];
+  const day = buildTimesheetDay({ employee: options.employee || {}, context, record, leaves, assigned: true, now, control: options.control });
+  const sheet: any = options.missing ? null : { _id: id(), revision: 1, status: options.status || "approved", loggedMinutes: options.logged ?? 480, requiredMinutes: day.requirement.requiredMinutes, contextSnapshot: timesheetContextSnapshot(day) };
+  const attendance = { attendanceRecord: recordId, attendanceRevisionNumber: 1, paidUnits: 1, unpaidUnits: 0, leaveUnits: 0, paidLeave: false, ...options.attendance };
+  return { day, sheet, attendance };
+}
+const calculate = (options: any = {}) => { const f = fixture(options); return calculateTimesheetPayrollDay(f.day, f.sheet, f.attendance, now); };
+assert.equal(calculate().additionalLopDays, 0);
+assert.equal(calculate({ logged: 240 }).additionalLopDays, 0.5);
+assert.equal(calculate({ missing: true }).additionalLopDays, 1);
+for (const status of ["draft", "returned", "rejected"]) assert.equal(calculate({ status, logged: 240 }).additionalLopDays, 1);
+assert.equal(calculate({ logged: 240, attendance: { paidUnits: 0.5, unpaidUnits: 0.5 } }).additionalLopDays, 0);
+assert.equal(calculate({ missing: true, attendance: { paidUnits: 0, unpaidUnits: 1 } }).additionalLopDays, 0);
+assert.equal(calculate({ portion: "first_half", logged: 240, attendance: { paidLeave: true, leaveUnits: 0.5 } }).additionalLopDays, 0);
+assert.equal(calculate({ portion: "first_half", missing: true, attendance: { paidLeave: true, leaveUnits: 0.5 } }).additionalLopDays, 0.5);
+assert.equal(calculate({ portion: "first_half", logged: 240, attendance: { paidUnits: 0.5, unpaidUnits: 0.5, leaveUnits: 0.5 } }).additionalLopDays, 0);
+assert.equal(calculate({ portion: "full", missing: true }).additionalLopDays, 0);
+assert.equal(calculate({ missing: true, control: { exemption: { mode: "full_day", eventId: id() } } }).additionalLopDays, 0);
+assert.ok(calculate({ status: "submitted" }).blockers.some((b) => /pending/.test(b)));
+assert.ok(calculate({ rules: { maxBackdateDays: 366 } }).blockers.some((b) => /cutoff/.test(b)));
+assert.ok(calculate({ rules: { payrollMode: "block" }, logged: 240 }).blockers.some((b) => /blocks payroll/.test(b)));
+assert.equal(calculate({ rules: { payrollMode: "report_only" }, missing: true }).additionalLopDays, 0);
+assert.equal(calculate({ rules: { payrollMode: "report_only" }, status: "submitted" }).blockers.length, 0);
+assert.ok(calculate({ attendance: { attendanceRevisionNumber: 2 } }).blockers.some((b) => /Attendance changed/.test(b)));
+assert.equal(calculate({ logged: 479 }).additionalLopDays, 0.002083);
+assert.equal(calculate({ employee: { joiningDate: new Date("2026-10-01") }, missing: true }).additionalLopDays, 0);
+assert.equal(calculate({ employee: { employmentEndDate: new Date("2026-09-01") }, missing: true }).additionalLopDays, 0);
+for (const rules of [{ reminderEveryDays: 0 }, { approverEscalationDays: 0 }, { remindBeforeHours: 169 }, { remindersEnabled: "true" }]) assert.throws(() => normalizeTimesheetRules(rules));
+const company = id(), employee = id(), component = id(), run = { _id: id(), company, periodKey: "2026-09", cycleStartDate: "2026-08-26", cycleEndDate: "2026-09-25", version: 1, employeeSnapshotVersion: 1, currency: "INR", currencyMinorUnits: 2, roundingMode: "nearest", statutoryEnabledModules: [] };
+const payrollInputs = [{ _id: id(), employee, employeeNameSnapshot: "Employee", employeeCodeSnapshot: "SS-1", payrollAttendance: { paidDays: 30, unpaidDays: 0 }, inputIssues: [] }];
+const employeeSnapshots = [{ _id: id(), employee, identity: { name: "Employee", code: "SS-1" }, issues: [], compensation: { assigned: true, currency: "INR", componentAmounts: [{ salaryComponent: component, componentCode: "BASIC", componentName: "Basic", category: "earning", monthlyAmountMinor: 3000000, prorateOnUnpaidDays: true }] } }];
+const result = buildDraftPayrollResults({ run, payrollInputs, employeeSnapshots, oneTimeInputs: [], actorId: id(), calculationVersion: 1, timesheetInputs: [{ _id: id(), input: id(), employee, additionalLopDays: 0.5, sourceHash: "proof" }] }).documents[0];
+assert.equal(result.payrollDays.paidDays, 29.5); assert.equal(result.payrollDays.unpaidDays, 0.5);
+assert.equal(result.payrollDays.attendanceLopDays, 0); assert.equal(result.payrollDays.timesheetLopDays, 0.5);
+assert.equal(result.recurringComponents[0].payableAmountMinor, 2950000);
+assert.equal(payrollInputs[0].payrollAttendance.paidDays, 30, "Attendance input is never changed by Timesheet LOP");
+assert.equal(prorateMinorAmount(Number.MAX_SAFE_INTEGER, 29997917, 30000000, "floor"), Number(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(29997917) / BigInt(30000000)));
+console.log("Timesheet payroll unit checks passed: approved/missing/pending/block/report-only, paid/unpaid leave, attendance double-charge prevention, exemptions, cutoffs, precise fractions and salary proration");

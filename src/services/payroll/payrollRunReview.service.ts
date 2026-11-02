@@ -1,4 +1,5 @@
 import { NextFunction, Response } from "express";
+import { claimTimesheetPayrollHandoff } from "../timesheet/timesheetPayroll.service";
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import EmployeePayrollResult from "../../schemas/Payroll/EmployeePayrollResult.schema";
@@ -181,6 +182,8 @@ export async function submitPayrollRunForReviewService(req: any, res: Response, 
       if (!run) throw generateError("Payroll run not found", 404);
       if (run.status !== "draft") throw generateError("Only a draft payroll run can be submitted for review", 409);
       if (Number(run.version) !== version) throw generateError("Payroll run changed. Refresh and try again", 409);
+      const timesheetHandoff = await claimTimesheetPayrollHandoff(run, actorId, session);
+      if (String(timesheetHandoff?.input._id || "") !== String(run.timesheetPayrollInput || "")) throw generateError("Timesheet handoff changed after calculation. Recalculate payroll before review.", 409);
 
       const statistics = await getPayrollReviewStatistics(companyObjectId, run, session);
       const blockers = payrollReviewBlockers(run, statistics);

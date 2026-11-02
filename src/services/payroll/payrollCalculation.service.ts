@@ -1,4 +1,5 @@
 import { NextFunction, Response } from "express";
+import { claimTimesheetPayrollHandoff } from "../timesheet/timesheetPayroll.service";
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import EmployeePayrollResult from "../../schemas/Payroll/EmployeePayrollResult.schema";
@@ -95,11 +96,11 @@ export function prorateMinorAmount(
   if (!Number.isSafeInteger(paidUnits) || !Number.isSafeInteger(totalUnits) || paidUnits < 0 || totalUnits < 1 || paidUnits > totalUnits) {
     throw new Error("Payroll days are invalid for proration");
   }
-  const quotient = Math.floor(amount / totalUnits);
-  const remainder = amount % totalUnits;
-  const whole = quotient * paidUnits;
-  const fractionNumerator = remainder * paidUnits;
-  const result = whole + roundDivision(fractionNumerator, totalUnits, roundingMode);
+  const numerator = BigInt(amount) * BigInt(paidUnits), denominator = BigInt(totalUnits);
+  const rounded = roundingMode === "floor" ? numerator / denominator
+    : roundingMode === "ceil" ? (numerator + denominator - BigInt(1)) / denominator
+    : (numerator + denominator / BigInt(2)) / denominator;
+  const result = Number(rounded);
   if (!Number.isSafeInteger(result) || result < 0 || result > amount) {
     throw new Error("Prorated salary amount exceeds the supported range");
   }
@@ -192,9 +193,11 @@ export function buildDraftPayrollResults(options: {
   calculationVersion: number;
   calculatedAt?: Date;
   priorTaxHistoryByEmployee?: Map<string, PriorTaxHistory>;
+  timesheetInputs?: any[];
 }) {
   const calculatedAt = options.calculatedAt || new Date();
   const snapshotsByEmployee = new Map(options.employeeSnapshots.map((item) => [idString(item.employee), item]));
+  const timesheetsByEmployee = new Map((options.timesheetInputs || []).map((item) => [idString(item.employee), item]));
   const oneTimeByEmployee = new Map<string, any[]>();
   for (const input of options.oneTimeInputs) {
     const key = idString(input.employee);
@@ -232,17 +235,22 @@ export function buildDraftPayrollResults(options: {
       });
     }
 
-    const paidDays = Math.round(Number(payrollInput.payrollAttendance?.paidDays || 0) * 100) / 100;
-    const unpaidDays = Math.round(Number(payrollInput.payrollAttendance?.unpaidDays || 0) * 100) / 100;
-    const totalDays = Math.round((paidDays + unpaidDays) * 100) / 100;
+    const basePaidDays = Math.round(Number(payrollInput.payrollAttendance?.paidDays || 0) * 100) / 100;
+    const attendanceLopDays = Math.round(Number(payrollInput.payrollAttendance?.unpaidDays || 0) * 100) / 100;
+    const timesheetInput: any = timesheetsByEmployee.get(employeeId);
+    const timesheetLopDays = Math.min(Math.max(0, basePaidDays), Number(timesheetInput?.additionalLopDays || 0));
+    if (!Number.isFinite(timesheetLopDays) || timesheetLopDays < 0) throw generateError("Invalid Timesheet payroll handoff", 409);
+    const paidDays = Math.round((basePaidDays - timesheetLopDays) * 1000000) / 1000000;
+    const unpaidDays = Math.round((attendanceLopDays + timesheetLopDays) * 1000000) / 1000000;
+    const totalDays = Math.round((basePaidDays + attendanceLopDays) * 100) / 100;
     const approvedOvertimeMinutes = Math.round(Number(payrollInput.payrollAttendance?.approvedOvertimeMinutes || 0));
     const dayValuesValid = [paidDays, unpaidDays, totalDays].every(Number.isFinite)
       && paidDays >= 0
       && unpaidDays >= 0
       && totalDays > 0
       && totalDays <= 366;
-    const paidUnits = dayValuesValid ? Math.round(paidDays * 100) : 0;
-    const totalUnits = dayValuesValid ? Math.round(totalDays * 100) : 0;
+    const paidUnits = dayValuesValid ? Math.round(paidDays * 1000000) : 0;
+    const totalUnits = dayValuesValid ? Math.round(totalDays * 1000000) : 0;
     if (!dayValuesValid) {
       addIssue(issues, {
         code: "invalid_payroll_days",
@@ -544,7 +552,8 @@ export function buildDraftPayrollResults(options: {
         officeLocation: payrollInput.officeLocation || null,
         officeLocationName: text(payrollInput.officeLocationNameSnapshot),
       },
-      payrollDays: { paidDays, unpaidDays, totalDays, approvedOvertimeMinutes },
+      payrollDays: { paidDays, unpaidDays, totalDays, approvedOvertimeMinutes, ...(timesheetInput ? { attendanceLopDays, timesheetLopDays } : {}) },
+      ...(timesheetInput ? { timesheetPayroll: { input: timesheetInput.input, employeeInput: timesheetInput._id, sourceHash: timesheetInput.sourceHash, additionalLopDays: timesheetLopDays } } : {}),
       recurringComponents,
       oneTimeInputs,
       statutoryContributions,
@@ -606,6 +615,7 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
       if (run.employeeSnapshotStatus !== "prepared") throw generateError("Prepare employee payroll snapshots before calculating payroll", 409);
       if (Number(run.version) !== expectedVersion) throw generateError("Payroll run changed. Refresh and try again", 409);
       const calculationVersion = Number(run.calculationVersion || 0) + 1;
+      const timesheetHandoff = await claimTimesheetPayrollHandoff(run, actorId, session);
       const payrollInputs: any[] = await PayrollEmployeeInput.find({ company: companyObjectId, payrollRun: run._id })
         .sort({ employeeCodeSnapshot: 1 })
         .session(session)
@@ -613,6 +623,10 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
       if (!payrollInputs.length) throw generateError("Payroll run has no employee inputs to calculate", 409);
       if (payrollInputs.length !== Number(run.employeeInputCount || 0)) {
         throw generateError("Payroll employee input count does not match the run", 409);
+      }
+      if (timesheetHandoff) {
+        const covered = new Set(timesheetHandoff.employees.map((employee: any) => idString(employee.employee)));
+        if (payrollInputs.some((input: any) => input.attendanceMonthlySummary && !covered.has(idString(input.employee)))) throw generateError("Timesheet handoff does not cover every employee in this attendance cycle", 409);
       }
       const employeeSnapshots: any[] = await PayrollEmployeeSnapshot.find({
         company: companyObjectId,
@@ -644,6 +658,7 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
         actorId,
         calculationVersion,
         priorTaxHistoryByEmployee,
+        timesheetInputs: timesheetHandoff?.employees,
       });
       for (let index = 0; index < built.documents.length; index += 500) {
         await EmployeePayrollResult.insertMany(built.documents.slice(index, index + 500), { session, ordered: true });
@@ -665,6 +680,8 @@ export async function calculateDraftPayrollService(req: any, res: Response, next
             lastCalculationReason: reason,
             calculatedAt,
             calculatedBy: actorId,
+            timesheetPayrollInput: timesheetHandoff?.input._id || null,
+            timesheetAdditionalLopDays: timesheetHandoff?.input.additionalLopDays || 0,
           },
           $inc: { version: 1 },
         },

@@ -171,7 +171,7 @@ export async function resolvePayrollCompany(
 
 export async function writePayrollAudit(options: {
   company: mongoose.Types.ObjectId;
-  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "employee_statutory" | "employee_tax_declaration" | "compensation_import" | "payroll_run" | "payroll_input" | "statutory_profile" | "statutory_filing" | "payslip";
+  entityType: "payroll_settings" | "salary_component" | "salary_structure" | "employee_compensation" | "employee_statutory" | "employee_tax_declaration" | "compensation_import" | "payroll_run" | "payroll_input" | "statutory_profile" | "statutory_filing" | "payslip" | "timesheet_payroll";
   entityId: mongoose.Types.ObjectId;
   action: string;
   actor: mongoose.Types.ObjectId;

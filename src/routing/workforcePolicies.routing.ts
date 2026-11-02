@@ -62,7 +62,8 @@ import {
   updateRemoteWorkPolicyService,
   updateRemoteWorkPolicyVersionService,
 } from "../services/workforcePolicy/remoteWorkPolicy.service";
-import { archiveTimesheetPolicy, changeTimesheetPolicyVersion, createTimesheetPolicy, createTimesheetPolicyVersion, getTimesheetPolicy, listTimesheetPolicies } from "../services/workforcePolicy/timesheetPolicy.service";
+import { archiveTimesheetPolicy, changeTimesheetPolicyVersion, createTimesheetPolicy, createTimesheetPolicyVersion, getTimesheetPolicy, listTimesheetPolicies, previewTimesheetPolicy } from "../services/workforcePolicy/timesheetPolicy.service";
+import { guardTimesheetWrite } from "../services/timesheet/timesheetWriteGuard";
 
 const workforcePoliciesRouting = express.Router();
 
@@ -70,6 +71,7 @@ workforcePoliciesRouting.use(authenticate);
 
 workforcePoliciesRouting.get("/timesheet-policies", listTimesheetPolicies);
 workforcePoliciesRouting.post("/timesheet-policies", createTimesheetPolicy);
+workforcePoliciesRouting.post("/timesheet-policies/preview", guardTimesheetWrite, previewTimesheetPolicy);
 workforcePoliciesRouting.get("/timesheet-policies/:policyId", getTimesheetPolicy);
 workforcePoliciesRouting.post("/timesheet-policies/:policyId/versions", createTimesheetPolicyVersion);
 workforcePoliciesRouting.put("/timesheet-policies/:policyId/versions/:versionId", changeTimesheetPolicyVersion("update"));

@@ -63,6 +63,7 @@ WorkforcePolicyAssignmentSchema.index({
   effectiveFrom: -1,
 });
 WorkforcePolicyAssignmentSchema.index({ company: 1, resource: 1, effectiveFrom: -1 });
+WorkforcePolicyAssignmentSchema.index({ company: 1, updatedAt: 1, _id: 1 });
 
 const WorkforcePolicyAssignment =
   (mongoose.models.WorkforcePolicyAssignment as mongoose.Model<WorkforcePolicyAssignmentI>) ||

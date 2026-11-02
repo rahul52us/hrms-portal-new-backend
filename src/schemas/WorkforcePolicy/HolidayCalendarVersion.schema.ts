@@ -59,6 +59,7 @@ const HolidayCalendarVersionSchema = new Schema<HolidayCalendarVersionI>(
 
 HolidayCalendarVersionSchema.index({ company: 1, calendar: 1, versionNumber: 1 }, { unique: true });
 HolidayCalendarVersionSchema.index({ company: 1, calendar: 1, status: 1, effectiveFrom: -1 });
+HolidayCalendarVersionSchema.index({ company: 1, updatedAt: 1, _id: 1 });
 
 const HolidayCalendarVersion =
   (mongoose.models.HolidayCalendarVersion as mongoose.Model<HolidayCalendarVersionI>) ||

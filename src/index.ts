@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { startTimesheetScheduler } from "./services/timesheet/timesheetScheduler";
 import express, { NextFunction, Request, Response } from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -41,6 +42,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(["/api/timesheets", "/api/workforce-policies/timesheet-policies"], bodyParser.json({ limit: "256kb" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -122,6 +124,7 @@ const startServer = async () => {
       startLeaveAccrualScheduler();
       const attendanceSchedulerStarted = startAttendanceProcessorScheduler();
       startPayrollOperationsScheduler();
+      startTimesheetScheduler();
       recoverPayrollOperationalJobs()
         .then((count) => {
           if (count) console.log(`Recovered ${count} payroll operations job(s)`);

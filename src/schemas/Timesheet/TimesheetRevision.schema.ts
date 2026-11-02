@@ -11,6 +11,7 @@ const schema = new Schema({
   action: { type: String, required: true, default: "draft_saved", immutable: true },
   actor: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
   snapshot: { type: Schema.Types.Mixed, required: true, immutable: true },
+  actionEvidence: { type: Schema.Types.Mixed, immutable: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 schema.index({ company: 1, timesheet: 1, revision: 1 }, { unique: true });
 schema.index({ company: 1, employee: 1, attendanceDate: 1, requestId: 1 }, { unique: true });

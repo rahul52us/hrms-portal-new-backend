@@ -28,6 +28,7 @@ export interface EmployeePayrollResultI extends Document {
   identity: Record<string, unknown>;
   organization: Record<string, unknown>;
   payrollDays: Record<string, number>;
+  timesheetPayroll?: Record<string, unknown>;
   recurringComponents: Array<Record<string, unknown>>;
   oneTimeInputs: Array<Record<string, unknown>>;
   statutoryContributions: Array<Record<string, unknown>>;
@@ -77,6 +78,8 @@ const PayrollDaysSchema = new Schema(
     unpaidDays: { type: Number, required: true },
     totalDays: { type: Number, required: true },
     approvedOvertimeMinutes: { type: Number, required: true },
+    attendanceLopDays: Number,
+    timesheetLopDays: Number,
   },
   { _id: false }
 );
@@ -111,7 +114,7 @@ const OneTimeInputSchema = new Schema(
     amountMinor: { type: Number, required: true, min: 1, validate: safeInteger },
     reason: { type: String, required: true, trim: true },
     reference: { type: String, trim: true },
-    sourceType: { type: String, enum: ["manual", "finalized_correction"], required: true, default: "manual" },
+    sourceType: { type: String, enum: ["manual", "finalized_correction", "timesheet_correction"], required: true, default: "manual" },
     sourcePayrollRun: { type: Schema.Types.ObjectId, ref: "PayrollRun", default: null },
     sourcePeriodKey: { type: String, match: /^\d{4}-(0[1-9]|1[0-2])$/ },
     sourceFinalizationVersion: { type: Number, min: 1, default: null },
@@ -190,6 +193,7 @@ const EmployeePayrollResultSchema = new Schema<EmployeePayrollResultI>(
     identity: { type: IdentitySchema, required: true, immutable: true },
     organization: { type: OrganizationSchema, required: true, immutable: true },
     payrollDays: { type: PayrollDaysSchema, required: true, immutable: true },
+    timesheetPayroll: { type: Schema.Types.Mixed, immutable: true },
     recurringComponents: { type: [RecurringComponentSchema], default: [], immutable: true },
     oneTimeInputs: { type: [OneTimeInputSchema], default: [], immutable: true },
     statutoryContributions: { type: [StatutoryContributionSchema], default: [], immutable: true },
