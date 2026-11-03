@@ -4,6 +4,9 @@
   "description": "",
   "main": "src/index.ts",
   "scripts": {
+    "test:onboarding": "ts-node src/services/onboarding/onboardingTemplate.test.ts",
+    "test:onboarding:live": "ts-node src/services/onboarding/onboardingTemplate.live.test.ts",
+    "test:onboarding:ui": "ts-node src/services/onboarding/onboardingTemplate.live.test.ts --ui",
     "test:postman": "node ../scripts/verify-postman-collection.cjs",
     "payroll:access-retention:repair": "ts-node src/scripts/repairPayrollAccessRetentionIndex.ts",
     "payroll:access-retention:repair:apply": "ts-node src/scripts/repairPayrollAccessRetentionIndex.ts --apply",

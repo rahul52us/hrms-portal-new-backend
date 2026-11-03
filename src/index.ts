@@ -42,7 +42,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(["/api/timesheets", "/api/workforce-policies/timesheet-policies"], bodyParser.json({ limit: "256kb" }));
+app.use(["/api/timesheets", "/api/workforce-policies/timesheet-policies", "/api/onboarding"], bodyParser.json({ limit: "256kb" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 

@@ -1,0 +1,20 @@
+import express from "express";
+import authenticate from "../modules/config/authenticate";
+import { getTemplate, listTemplates, mutateTemplate, templateHistory, templateOptions, templatePeople } from "../services/onboarding/onboardingTemplate.service";
+
+const router = express.Router();
+router.use(authenticate);
+router.use((_req, res, next) => { res.setHeader("Cache-Control", "private, no-store"); next(); });
+router.get("/options", templateOptions);
+router.get("/people", templatePeople);
+router.get("/templates", listTemplates);
+router.post("/templates", mutateTemplate("created"));
+router.get("/templates/:templateId", getTemplate);
+router.put("/templates/:templateId", mutateTemplate("updated"));
+router.post("/templates/:templateId/publish", mutateTemplate("published"));
+router.post("/templates/:templateId/discard-draft", mutateTemplate("discarded"));
+router.post("/templates/:templateId/archive", mutateTemplate("archived"));
+router.post("/templates/:templateId/restore", mutateTemplate("restored"));
+router.get("/templates/:templateId/versions", templateHistory("versions"));
+router.get("/templates/:templateId/audit", templateHistory("audit"));
+export default router;
