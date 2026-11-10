@@ -24,6 +24,7 @@ const schema = new Schema({
   hasDraft: { type: Boolean, default: true, required: true },
   publishedVersion: { type: Number, default: 0, required: true },
   revision: { type: Number, default: 1, required: true },
+  assignmentFence: { type: Number, default: 0 },
   createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, immutable: true },
   updatedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
 }, { timestamps: true });

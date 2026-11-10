@@ -6,7 +6,8 @@ import mongoose from "mongoose";
 import { createCatchError } from "../../config/helper/function";
 import companyDetails from "../../schemas/company/companyDetails";
 import MasterData from "../../schemas/masterData/masterData.schema";
-import { uploadFile } from "../uploadDoc.repository";
+import { auditCompanyLogo, prepareCompanyLogo } from "../../services/storage/companyLogo.service";
+import { attachPrivateStoredFile, queuePrivateStoredFileCleanup } from "../../services/storage/privateStoredFile.service";
 import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
 
 const DEFAULT_THEME_COLOR = "#2563EB";
@@ -310,6 +311,7 @@ export const getCompanyById = async (id: any): Promise<any | null> => {
 };
 
 export const createManagedCompany = async (data: any) => {
+  let stagedLogo: any;
   try {
     const tenantSlug = normalizeTenantSlug(data.tenantSlug || data.company_name);
     if (!tenantSlug) {
@@ -415,19 +417,20 @@ export const createManagedCompany = async (data: any) => {
     });
 
     if (data.logo?.filename && data.logo?.buffer) {
-      const extension = data.logo.type === "image/png" ? "png" : "jpg";
-      const url = await uploadFile({
-        ...data.logo,
-        filename: `company-${company._id}-logo-${new mongoose.Types.ObjectId()}.${extension}`,
-      });
-      company.logo = {
-        name: data.logo.filename,
-        url,
-        type: data.logo.type,
-      };
+      const prepared = await prepareCompanyLogo(company, createdBy, data.logo);
+      stagedLogo = prepared.staged;
+      company.logo = prepared.logo;
     }
 
-    const savedCompany = await company.save();
+    // R2 PUT happens before this transaction; only a committed company may expose the staged logo.
+    const savedCompany = company;
+    await mongoose.connection.transaction(async (session) => {
+      const saved = await savedCompany.save({ session });
+      if (stagedLogo) {
+        await attachPrivateStoredFile(stagedLogo, session);
+        await auditCompanyLogo(saved._id, createdBy, null, saved.logo, session);
+      }
+    });
 
     try {
       await Promise.all([
@@ -452,6 +455,7 @@ export const createManagedCompany = async (data: any) => {
         }).save(),
       ]);
     } catch (setupError) {
+      // A committed logo remains private audit evidence after provisioning rollback; the image route requires its company.
       await Promise.allSettled([
         Company.deleteOne({ _id: savedCompany._id }),
         CompanyPolicy.deleteMany({ company: savedCompany._id }),
@@ -468,7 +472,10 @@ export const createManagedCompany = async (data: any) => {
       message: `${savedCompany.company_name} company has been created successfully`,
     };
   } catch (err: any) {
+    if (err?.statusCode) return { status: "error", statusCode: err.statusCode, message: err.message, data: err.message };
     return createCatchError(err);
+  } finally {
+    if (stagedLogo) await queuePrivateStoredFileCleanup(stagedLogo._id).catch(() => console.warn("Company logo upload cleanup is pending."));
   }
 };
 

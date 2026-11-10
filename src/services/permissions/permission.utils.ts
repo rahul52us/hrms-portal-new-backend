@@ -1,6 +1,8 @@
 import Company from "../../schemas/company/Company";
 
 export const PERMISSION_KEYS = {
+  VIEW_ONBOARDING: "view_onboarding",
+  MANAGE_ONBOARDING: "manage_onboarding",
   VIEW_ONBOARDING_TEMPLATES: "view_onboarding_templates",
   MANAGE_ONBOARDING_TEMPLATES: "manage_onboarding_templates",
   VIEW_TIMESHEETS: "view_timesheets",
@@ -74,6 +76,8 @@ type PermissionDefinition = {
 };
 
 const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  { key: PERMISSION_KEYS.VIEW_ONBOARDING, label: "View Employee Onboarding", description: "View employee checklists within company, HR department/team/location, department-head or direct-report scope. Employees and assigned task owners retain their own task access.", category: "Onboarding" },
+  { key: PERMISSION_KEYS.MANAGE_ONBOARDING, label: "Manage Employee Onboarding", description: "Assign published checklists, reassign tasks, review documents, waive/reopen tasks, reschedule and cancel within employee scope. Separate from company-wide template configuration.", category: "Onboarding" },
   { key: PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, label: "View Onboarding Templates", description: "View company-wide joining checklist templates, published versions and template history. Does not grant access to employee onboarding records.", category: "Onboarding" },
   { key: PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES, label: "Manage Onboarding Templates", description: "Create, edit, publish, archive and restore company-wide checklist templates; search active company task owners. Does not grant access to employee onboarding records.", category: "Onboarding" },
   { key: PERMISSION_KEYS.VIEW_TIMESHEETS, label: "View Timesheets", description: "View company timesheets and reports. HR and department heads retain their assigned organization scope; reporting/project relations independently permit scoped reports.", category: "Timesheets" },
@@ -419,6 +423,7 @@ const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, 
 );
 
 const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
   PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -480,6 +485,7 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
   PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -533,6 +539,7 @@ const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
   PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -566,6 +573,7 @@ const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
   PERMISSION_KEYS.APPROVE_TIMESHEETS,
   PERMISSION_KEYS.VIEW_PROJECTS,
@@ -612,6 +620,7 @@ const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 export const INDIVIDUAL_OVERRIDE_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
   PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -639,6 +648,7 @@ const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
 };
 
 export const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
+  [PERMISSION_KEYS.MANAGE_ONBOARDING]: [PERMISSION_KEYS.VIEW_ONBOARDING],
   [PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES]: [PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES],
   [PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS]: [PERMISSION_KEYS.VIEW_TIMESHEETS],
   [PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS]: [PERMISSION_KEYS.VIEW_TIMESHEETS],
@@ -786,6 +796,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "admin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
       PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
       PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
       PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -849,6 +860,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hradmin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
       PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
       PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
       PERMISSION_KEYS.MANAGE_TIMESHEET_EXCEPTIONS,
@@ -904,6 +916,7 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hr") {
     return createPermissionRecord([
+      PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
       PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
       PERMISSION_KEYS.APPROVE_TIMESHEETS,
       PERMISSION_KEYS.VIEW_PROJECTS,

@@ -9,8 +9,6 @@ import {
   updateUserProfileDetails,
   updateFamilyDetails,
   updateWorkExperienceDetails,
-  updateDocumentDetails,
-  getDocumentDetails,
   updateCompanyDetails,
   getManagerUsers,
   getManagerUsersCounts,
@@ -39,6 +37,7 @@ import {
 } from "../../config/helper/function";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
+import { getEmployeeDocuments, updateEmployeeDocuments } from "../storage/employeeDocuments.service";
 
 // create the new User of the particular User
 const createUserservice = async (
@@ -392,23 +391,7 @@ const updateDocumentService = async (
   res: Response,
   next: NextFunction
 ) => {
-  try {
-    req.body.id = new mongoose.Types.ObjectId(req.params.id);
-    const { status, data } = await updateDocumentDetails(req.body);
-    if (status === "success") {
-      res.status(200).send({
-        status: "success",
-        data: data,
-      });
-    } else {
-      res.status(400).send({
-        status: "error",
-        data: data,
-      });
-    }
-  } catch (err) {
-    next(err);
-  }
+  return updateEmployeeDocuments(req, res, next);
 };
 
 const getDocumentService = async (
@@ -416,23 +399,7 @@ const getDocumentService = async (
   res: Response,
   next: NextFunction
 ) => {
-  try {
-    const id = new mongoose.Types.ObjectId(req.params.id);
-    const { status, data } = await getDocumentDetails({ id });
-    if (status === "success") {
-      res.status(200).send({
-        status: "success",
-        data,
-      });
-    } else {
-      res.status(400).send({
-        status: "error",
-        data,
-      });
-    }
-  } catch (err) {
-    next(err);
-  }
+  return getEmployeeDocuments(req, res, next);
 };
 
 const updateQualifcationService = async (

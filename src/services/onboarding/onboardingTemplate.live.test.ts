@@ -11,6 +11,19 @@ import Version from "../../schemas/Onboarding/OnboardingTemplateVersion.schema";
 import Audit from "../../schemas/Onboarding/OnboardingTemplateAudit.schema";
 import Company from "../../schemas/company/Company";
 import User from "../../schemas/User/User";
+import Instance from "../../schemas/Onboarding/EmployeeOnboarding.schema";
+import InstanceAudit from "../../schemas/Onboarding/EmployeeOnboardingAudit.schema";
+import OnboardingDocument from "../../schemas/Onboarding/OnboardingDocument.schema";
+import Notification from "../../schemas/Notification/notification.schema";
+import PrivateFile from "../../schemas/Storage/PrivateStoredFile.schema";
+import EmployeeDocuments from "../../schemas/User/Document";
+import EmployeeDocumentAudit from "../../schemas/Storage/EmployeeDocumentAudit.schema";
+import LeaveAttachment from "../../schemas/Leave/LeaveAttachment.schema";
+import LeaveRequest from "../../schemas/Leave/LeaveRequest.schema";
+import Correction from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
+import Approval from "../../schemas/Approval/ApprovalInstance.schema";
+import MasterData from "../../schemas/masterData/masterData.schema";
+import CompanyLogoAudit from "../../schemas/Storage/CompanyLogoAudit.schema";
 
 async function freePort() {
   const server = createServer();
@@ -20,6 +33,13 @@ async function freePort() {
   return port;
 }
 async function run() {
+  if (process.argv.includes("--r2")) {
+    assert.equal(process.env.NODE_ENV, "test");
+    assert.match(process.env.R2_TEST_ENDPOINT || "", /^http:\/\/127\.0\.0\.1:\d+\/r2$/);
+  } else {
+    process.env.HRMS_DOCUMENT_STORAGE = "mongodb";
+    delete process.env.R2_TEST_ENDPOINT;
+  }
   const root = path.resolve(process.cwd(), ".."), output = path.join(root, "output"); mkdirSync(output, { recursive: true });
   const dbPath = mkdtempSync(path.join(output, ".onboarding-test-mongo-")), mongoPort = await freePort();
   const mongo = spawn(process.env.ONBOARDING_TEST_MONGOD || "C:/Program Files/MongoDB/Server/8.0/bin/mongod.exe", ["--dbpath", dbPath, "--port", String(mongoPort), "--replSet", "hrms-onboarding-test", "--bind_ip", "127.0.0.1", "--logpath", path.join(dbPath, "mongod.log")], { windowsHide: true, stdio: "ignore" });
@@ -120,6 +140,29 @@ async function run() {
     assert.equal((await call(viewer, "/options")).data.canManage, false);
     const large = await fetch(`${base}/api/onboarding/templates`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token(hradmin)}` }, body: JSON.stringify({ name: "x".repeat(270000) }) }); assert.equal(large.status, 413);
     console.log("Onboarding live API passed: auth, delegated/view-only permissions, tenant isolation, validation, owner lookup, retries, stale and concurrent writes, immutable versions/audit, discard, archive/restore and inactive-company/body limits.");
+    if (process.argv.some((argument) => ["--instances", "--instances-ui"].includes(argument))) {
+      const result = await (await import("./employeeOnboarding.live")).testEmployeeOnboarding({ company, hradmin, admin, hr, employee, other, viewer, disabled, base, token, call });
+      if (process.argv.includes("--instances-ui")) {
+        const child = spawn(process.execPath, [path.join(root, "scripts/verify-employee-onboarding-ui.cjs")], { windowsHide: true, stdio: "inherit", env: { ...process.env, ONBOARDING_TEST_API_URL: base, ONBOARDING_TEST_ADMIN_TOKEN: token(hradmin), ONBOARDING_TEST_EMPLOYEE_TOKEN: token(employee), ONBOARDING_TEST_MANAGER_TOKEN: token(admin), ONBOARDING_TEST_EMPLOYEE_ID: result.employeeId } });
+        const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (value) => resolve(value ?? 1)); }); assert.equal(code, 0, "Employee onboarding browser checks failed");
+      }
+    }
+    if (process.argv.includes("--storage-flows")) {
+      await (await import("../storage/privateStorageFlows.live")).testPrivateStorageFlows({ company, hradmin, admin, hr, employee, other, viewer, base, token });
+    }
+    if (process.argv.includes("--company-logos")) {
+      await (await import("../storage/companyLogo.live")).testCompanyLogos({ company, admin, employee, other, platform, base, token });
+    }
+    if (process.argv.includes("--storage-ui")) {
+      await User.collection.updateOne({ _id: employee }, { $unset: { deletedAt: "" } });
+      await MasterData.create({ company, createdBy: hradmin, documentTypes: ["Identity proof"] });
+      const child = spawn(process.execPath, [path.join(root, "scripts/verify-private-storage-ui.cjs")], { windowsHide: true, stdio: "inherit", env: { ...process.env, ONBOARDING_TEST_API_URL: base, ONBOARDING_TEST_ADMIN_TOKEN: token(hradmin), ONBOARDING_TEST_EMPLOYEE_TOKEN: token(employee), ONBOARDING_TEST_MANAGER_TOKEN: token(admin), ONBOARDING_TEST_EMPLOYEE_ID: String(employee) } });
+      const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (value) => resolve(value ?? 1)); }); assert.equal(code, 0, "Private storage browser checks failed");
+    }
+    if (process.argv.includes("--logos-ui")) {
+      const child = spawn(process.execPath, [path.join(root, "scripts/verify-company-logo-ui.cjs")], { windowsHide: true, stdio: "inherit", env: { ...process.env, ONBOARDING_TEST_API_URL: base, ONBOARDING_TEST_ADMIN_TOKEN: token(admin) } });
+      const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (value) => resolve(value ?? 1)); }); assert.equal(code, 0, "Company logo browser checks failed");
+    }
     if (process.argv.includes("--ui")) {
       const child = spawn(process.execPath, [path.join(root, "scripts/verify-onboarding-ui.cjs")], { windowsHide: true, stdio: "inherit", env: { ...process.env, ONBOARDING_TEST_API_URL: base, ONBOARDING_TEST_ADMIN_TOKEN: token(hradmin), ONBOARDING_TEST_VIEWER_TOKEN: token(viewer), ONBOARDING_TEST_TEMPLATE_ID: id } });
       const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (value) => resolve(value ?? 1)); }); assert.equal(code, 0, "Onboarding browser checks failed");
@@ -127,7 +170,9 @@ async function run() {
   } finally {
     if (application) await new Promise<void>((resolve) => application!.close(() => resolve()));
     if (mongoose.connection.readyState === 1 && /^hrms_onboarding_test_/.test(mongoose.connection.name)) {
-      for (const model of [Template, Version, Audit]) await model.collection.deleteMany({ company: { $in: [company, otherCompany] } });
+      for (const model of [Template, Version, Audit, Instance, InstanceAudit, OnboardingDocument, Notification]) await model.collection.deleteMany({ company: { $in: [company, otherCompany] } });
+      for (const model of [PrivateFile, EmployeeDocumentAudit, CompanyLogoAudit, LeaveAttachment, LeaveRequest, Correction, Approval, MasterData]) await model.collection.deleteMany({ company: { $in: [company, otherCompany] } });
+      await EmployeeDocuments.collection.deleteMany({ user: { $in: people } });
       await User.collection.deleteMany({ _id: { $in: people } }); await Company.collection.deleteMany({ _id: { $in: [company, otherCompany] } });
     }
     await mongoose.disconnect();

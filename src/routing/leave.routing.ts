@@ -17,6 +17,7 @@ import {
   rejectLeaveRequestService,
   withdrawLeaveRequestService,
   uploadLeaveAttachmentService,
+  downloadLeaveAttachmentService,
   verifyLeaveRequestDocumentsService,
   waiveLeaveRequestDocumentsService,
 } from "../services/leave/leaveRequest.service";
@@ -52,6 +53,7 @@ leaveRouting.get("/eligible", getEligibleLeaveTypesService);
 leaveRouting.get("/balances", listLeaveBalancesService);
 leaveRouting.get("/transactions", listLeaveTransactionsService);
 leaveRouting.post("/attachments", uploadLeaveAttachmentService);
+leaveRouting.get("/attachments/:attachmentId/download", downloadLeaveAttachmentService);
 leaveRouting.post("/balances/adjustments", adjustLeaveBalanceService);
 leaveRouting.post("/balances/rebuild", rebuildLeaveBalanceService);
 leaveRouting.post("/accruals/run", runLeaveAccrualCatchUpService);

@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { validateCompanyLogo } from "./companyLogo.service";
+import { companyLogoKey, isPrivateStorageKey } from "./privateObjectStorage";
+import { createManagedCompanyValidation } from "../company/utils/validations";
+import { storedFileKey } from "./privateStoredFile.service";
+
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aV1cAAAAASUVORK5CYII=", "base64");
+const upload = { filename: "brand.png", type: "image/png", buffer: `data:image/png;base64,${png.toString("base64")}` };
+assert.equal(validateCompanyLogo(upload).size, png.length);
+assert.throws(() => validateCompanyLogo({ ...upload, type: "image/jpeg" }));
+assert.throws(() => validateCompanyLogo({ ...upload, buffer: Buffer.alloc(2_000_001) }), /2,000,000 bytes or smaller/);
+assert.throws(() => validateCompanyLogo({ ...upload, buffer: "data:image/png;base64,TVo=" }));
+const company = new mongoose.Types.ObjectId(), file = new mongoose.Types.ObjectId();
+const key = companyLogoKey(String(company), String(file));
+assert.equal(isPrivateStorageKey(key), true);
+assert.equal(storedFileKey({ _id: file, company, purpose: "company_logo" }), key);
+assert.throws(() => storedFileKey({ _id: file, company, purpose: "unknown" }));
+const payload = { company_name: "Storage Logo Test", companyCode: "SLT", tenantSlug: "storage-logo-test", companyEmail: "logo@example.test", mobileNo: "9999900001", logo: upload, isLogoEdit: true, expectedLogoUrl: "" };
+assert.equal(createManagedCompanyValidation.validate(payload).error, undefined);
+console.log("Company logo unit tests passed: byte/MIME/size checks, private namespace and expected-source payload.");

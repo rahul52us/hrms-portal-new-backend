@@ -8,6 +8,9 @@ export interface LeaveAttachmentI extends Document {
   type: string;
   size: number;
   linkedRequest?: mongoose.Types.ObjectId | null;
+  privateFile?: mongoose.Types.ObjectId | null;
+  uploadRequestId?: string;
+  uploadRequestHash?: string;
   createdAt?: Date;
 }
 
@@ -20,11 +23,15 @@ const LeaveAttachmentSchema = new Schema<LeaveAttachmentI>(
     type: { type: String, required: true, trim: true },
     size: { type: Number, min: 1, required: true },
     linkedRequest: { type: Schema.Types.ObjectId, ref: "LeaveRequest", default: null, index: true },
+    privateFile: { type: Schema.Types.ObjectId, ref: "PrivateStoredFile", default: null },
+    uploadRequestId: { type: String },
+    uploadRequestHash: { type: String, select: false },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
 LeaveAttachmentSchema.index({ company: 1, uploadedBy: 1, createdAt: -1 });
+LeaveAttachmentSchema.index({ company: 1, uploadedBy: 1, uploadRequestId: 1 }, { unique: true, partialFilterExpression: { uploadRequestId: { $type: "string" } } });
 
 const LeaveAttachment =
   (mongoose.models.LeaveAttachment as mongoose.Model<LeaveAttachmentI>) ||

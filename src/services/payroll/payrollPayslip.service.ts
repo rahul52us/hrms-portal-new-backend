@@ -10,6 +10,7 @@ import PayrollPayslip, { PAYSLIP_TEMPLATE_VERSION } from "../../schemas/Payroll/
 import PayrollRun from "../../schemas/Payroll/PayrollRun.schema";
 import { writePayrollAccessLog } from "./payrollAccess.service";
 import { sendPayrollNotificationSafely } from "./payrollNotification.service";
+import { loadHistoricalCompanyLogo } from "../storage/companyLogo.service";
 import {
   ensurePayrollRunManager,
   getPayrollActor,
@@ -99,6 +100,7 @@ export function payslipContentHash(value: {
   return sha256(value);
 }
 
+/** Freeze identity, money and branding at issuance; later company or employee edits must not rewrite issued slips. */
 export function buildPayrollPayslipDocuments(options: {
   run: any;
   results: any[];
@@ -130,6 +132,7 @@ export function buildPayrollPayslipDocuments(options: {
           name: text(options.company.logo.name),
           url: text(options.company.logo.url),
           type: text(options.company.logo.type).toLowerCase(),
+          ...(options.company.logo.privateFileId ? { privateFileId: id(options.company.logo.privateFileId), sha256: text(options.company.logo.sha256) } : {}),
         }
       : null,
     registeredAddress,
@@ -238,10 +241,16 @@ function lineLabel(line: MoneyLine) {
 const MAX_PAYSLIP_LOGO_BYTES = 2_000_000;
 const PAYSLIP_LOGO_TYPES = new Set(["image/png", "image/jpeg"]);
 
-async function loadPayslipLogo(logo: any) {
+async function loadPayslipLogo(logo: any, company: any) {
   const configuredType = text(logo?.type).toLowerCase();
   const source = text(logo?.url);
   if (!source || !PAYSLIP_LOGO_TYPES.has(configuredType)) return null;
+
+  if (logo.privateFileId) {
+    // An issued payslip pins an immutable asset; replacing the live logo must not rebrand old salary slips.
+    try { return await loadHistoricalCompanyLogo(company, logo); }
+    catch { return null; } // Branding remains optional; a storage outage must not block access to salary amounts.
+  }
 
   if (source.startsWith("data:")) {
     const match = /^data:(image\/(?:png|jpeg));base64,([a-z0-9+/=]+)$/i.exec(source);
@@ -278,6 +287,7 @@ async function loadPayslipLogo(logo: any) {
   }
 }
 
+/** Render issued snapshots without recalculating salary; optional branding failures do not block financial access. */
 export async function renderPayrollPayslipPdf(options: {
   payslip: any;
   run: any;
@@ -289,7 +299,7 @@ export async function renderPayrollPayslipPdf(options: {
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const logoAsset = await loadPayslipLogo(payslip.companySnapshot?.logo);
+  const logoAsset = await loadPayslipLogo(payslip.companySnapshot?.logo, payslip.company);
   let logoImage: any = null;
   if (logoAsset) {
     try {

@@ -713,6 +713,14 @@ export async function getAttendanceRegularizationRequestService(req: any, res: R
       company,
     }));
     if (!request) throw generateError("Attendance correction request not found", 404);
+    ensureCanViewRegularizationRequest(actor, request);
+    return res.status(200).json({ success: true, data: request });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export function ensureCanViewRegularizationRequest(actor: any, request: any) {
     const employee = {
       _id: request.employee?._id || request.employee,
       department: request.departmentNameSnapshot,
@@ -726,10 +734,6 @@ export async function getAttendanceRegularizationRequestService(req: any, res: R
     if (!participant && !isEmployeeInActorScope(actor, employee, PERMISSION_KEYS.VIEW_ATTENDANCE)) {
       throw generateError("You cannot view this attendance correction", 403);
     }
-    return res.status(200).json({ success: true, data: request });
-  } catch (error) {
-    next(error);
-  }
 }
 
 export async function approveAttendanceRegularizationRequestService(req: any, res: Response, next: NextFunction) {

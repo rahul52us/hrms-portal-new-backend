@@ -3,9 +3,8 @@ import BankDetails from "../../schemas/User/BankDetails";
 // import bcrypt from "bcrypt";
 import WorkExperience from "../../schemas/User/WorkExperience";
 import { generateError } from "../../config/Error/functions";
-import { deleteFile, uploadFile, uploadToBunny } from "../uploadDoc.repository";
+import { deleteFile, uploadFile } from "../uploadDoc.repository";
 import FamilyDetails from "../../schemas/User/FamilyDetails";
-import Documents from "../../schemas/User/Document";
 import { updateUserRoleService } from "../../services/auth/auth.service";
 import mongoose from "mongoose";
 import User from "../../schemas/User/User";
@@ -1078,140 +1077,6 @@ const updateWorkExperienceDetails = async (data: any) => {
   }
 };
 
-async function uploadDocument(originalDoc: any, data: any, fieldName: string) {
-  try {
-    if (
-      data[fieldName] &&
-      data[fieldName]?.isAdd === 1 &&
-      data[fieldName]?.filename &&
-      data[fieldName]?.buffer
-    ) {
-      const { filename, type } = data[fieldName];
-      const url = await uploadFile(data[fieldName]);
-      return { name: filename, url, type, validTill: "", effectiveFrom: "" };
-    }
-    if (
-      data[fieldName] &&
-      data[fieldName]?.isDeleted === 1 &&
-      originalDoc[fieldName]
-    ) {
-      const deleted = await deleteFile(originalDoc[fieldName]?.name);
-      return null;
-    }
-    return originalDoc[fieldName];
-  } catch (error: any) {
-    return null;
-  }
-}
-
-async function updateDocumentDetails(data: any) {
-  try {
-    const { documents = [] } = data;
-    const docum =
-      (await Documents.findOne({ user: data.id })) ||
-      (await Documents.create({
-        user: data.id,
-        createdBy: data.createdBy || data.id,
-        documents: [],
-      }));
-
-    const uploadedDocuments: any[] = [];
-
-    const extractUploadSource = (fileLike: any) => {
-      if (!fileLike) return null;
-      if (typeof fileLike === "string") {
-        return {
-          file: fileLike,
-          filename: "document",
-          type: "application/octet-stream",
-        };
-      }
-
-      return {
-        file:
-          fileLike.file ||
-          fileLike.buffer ||
-          fileLike.base64 ||
-          fileLike.data ||
-          null,
-        filename: fileLike.filename || fileLike.name || fileLike.originalName || "document",
-        type: fileLike.type || fileLike.mimetype || "application/octet-stream",
-      };
-    };
-
-    for (const entry of documents) {
-      try {
-        const previousFile = entry?.file || {};
-        const uploadSource = extractUploadSource(previousFile);
-        let finalFile = previousFile;
-
-        if (entry?.isAdd && uploadSource?.file) {
-          const uploadedUrl = await uploadFile(uploadSource.file);
-
-          finalFile = {
-            name: uploadSource.filename || `${data.id}-document`,
-            url: uploadedUrl,
-            type: uploadSource.type || "application/octet-stream",
-            path: uploadedUrl,
-          };
-        }
-
-        uploadedDocuments.push({
-          ...entry,
-          file: finalFile?.url ? finalFile : previousFile?.url ? previousFile : undefined,
-          uploadedAt: entry?.uploadedAt || new Date(),
-        });
-      } catch (err: any) {
-        console.error("Error uploading employee document:", err?.message || err);
-      }
-    }
-
-    docum.documents = uploadedDocuments;
-    docum.updatedAt = new Date();
-    await docum.save();
-
-    return {
-      statusCode: statusCode.success,
-      status: "success",
-      data: docum,
-    };
-  } catch (err) {
-    return {
-      statusCode: statusCode.serverError,
-      status: "error",
-      data: err,
-    };
-  }
-}
-
-async function getDocumentDetails(data: any) {
-  try {
-    const docum = await Documents.findOne({ user: data.id });
-    if (!docum) {
-      return {
-        statusCode: statusCode.info,
-        status: "success",
-        data: {
-          user: data.id,
-          documents: [],
-        },
-      };
-    }
-
-    return {
-      statusCode: statusCode.success,
-      status: "success",
-      data: docum,
-    };
-  } catch (err) {
-    return {
-      statusCode: statusCode.serverError,
-      status: "error",
-      data: err,
-    };
-  }
-}
-
 async function updateQualificationDetails(data: any) {
   try {
     const docum = await Qualification.findOne({ user: data.id });
@@ -2087,8 +1952,6 @@ export {
   updateFamilyDetails,
   updateQualificationDetails,
   updateWorkExperienceDetails,
-  updateDocumentDetails,
-  getDocumentDetails,
   updateCompanyDetails,
   updatePermissions,
   getManagerUsersCounts,

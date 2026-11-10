@@ -48,6 +48,7 @@ export function validateUploadSignature(options: {
   declaredMimeType: unknown;
   allowedMimeTypes: readonly string[];
   maxBytes: number;
+  maxBytesLabel?: string;
 }) {
   const declaredMimeType = normalizeMimeType(options.declaredMimeType);
   if (!options.allowedMimeTypes.includes(declaredMimeType)) {
@@ -56,7 +57,8 @@ export function validateUploadSignature(options: {
 
   const { buffer, dataUriMimeType } = decodeUploadData(options.data);
   if (buffer.length === 0 || buffer.length > options.maxBytes) {
-    throw generateError(`Upload must be ${Math.floor(options.maxBytes / (1024 * 1024))} MB or smaller`, 422);
+    const limit = options.maxBytesLabel || `${Math.floor(options.maxBytes / (1024 * 1024))} MB`;
+    throw generateError(`Upload must be ${limit} or smaller`, 422);
   }
   if (dataUriMimeType && dataUriMimeType !== declaredMimeType) {
     throw generateError("Upload data does not match its declared content type", 422);

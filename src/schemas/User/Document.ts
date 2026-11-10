@@ -11,6 +11,9 @@ interface DocumentInfo {
 }
 
 export interface DocumentInterface extends Document {
+  company?: mongoose.Types.ObjectId;
+  storageSchemaVersion?: number;
+  revision?: number;
   user: mongoose.Schema.Types.ObjectId;
   createdBy: mongoose.Schema.Types.ObjectId;
   documents: Array<{
@@ -23,6 +26,9 @@ export interface DocumentInterface extends Document {
 
 const DocumentSchema: Schema<DocumentInterface> = new Schema<DocumentInterface>(
   {
+    company: { type: Schema.Types.ObjectId, ref: "Company" },
+    storageSchemaVersion: { type: Number },
+    revision: { type: Number, default: 0, min: 0 },
     user: {
       type: Schema.Types.ObjectId,
       required: true,
@@ -44,6 +50,8 @@ const DocumentSchema: Schema<DocumentInterface> = new Schema<DocumentInterface>(
     },
   }
 );
+
+DocumentSchema.index({ company: 1, user: 1, storageSchemaVersion: 1 }, { unique: true, partialFilterExpression: { storageSchemaVersion: 2 } });
 
 const DocumentModel = mongoose.model<DocumentInterface>(
   "Document",

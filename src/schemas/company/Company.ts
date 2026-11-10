@@ -19,6 +19,8 @@ export interface CompanyI extends Document {
     name?: string;
     url?: string;
     type?: string;
+    privateFileId?: mongoose.Types.ObjectId;
+    sha256?: string;
   };
   registeredAddress?: {
     addressLine1?: string;
@@ -134,7 +136,9 @@ const companySchema = new mongoose.Schema<CompanyI>({
     },
     type: {
       type: String
-    }
+    },
+    privateFileId: { type: mongoose.Schema.Types.ObjectId, ref: "PrivateStoredFile" },
+    sha256: { type: String },
   },
   registeredAddress: {
     addressLine1: {

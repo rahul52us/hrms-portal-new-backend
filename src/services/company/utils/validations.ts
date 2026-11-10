@@ -135,6 +135,7 @@ export const createManagedCompanyValidation = Joi.object({
     )
     .allow(null),
   isLogoEdit: Joi.boolean().optional(),
+  expectedLogoUrl: Joi.string().max(2000).allow("", null).optional(),
   deletedFiles: Joi.array().items(Joi.string()).optional(),
   companyAdmin: companyAdminSchema,
 });

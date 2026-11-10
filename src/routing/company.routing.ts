@@ -29,8 +29,10 @@ import {
   updateWorkTimingService,
 } from "../services/company/company.service";
 import authenticate from "../modules/config/authenticate";
+import { getCompanyLogo } from "../services/storage/companyLogo.service";
 
 const router = express.Router();
+router.get("/logos/:companyId/:fileId", authenticate, getCompanyLogo);
 
 router.post("/create", createCompany);
 router.post("/manage", authenticate, createManagedCompanyService);

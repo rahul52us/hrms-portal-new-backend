@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { canAccessEmployeeDocuments } from "./employeeDocuments.service";
+import { attachEffectivePermissions } from "../permissions/permission.utils";
+import { employeeDocumentKey, isPrivateStorageKey, requestAttachmentKey } from "./privateObjectStorage";
+import File from "../../schemas/Storage/PrivateStoredFile.schema";
+
+const id = () => new mongoose.Types.ObjectId(), company = id(), location = id();
+const employee: any = { _id: id(), company, role: "user", department: "Engineering", team: "Python", officeLocation: location };
+const actor = (role: string, extra: any = {}) => attachEffectivePermissions({ user: { _id: id(), company, role, ...extra } });
+assert.equal(canAccessEmployeeDocuments({ ...employee }, employee, true), true);
+assert.equal(canAccessEmployeeDocuments(actor("user"), employee), false);
+assert.equal(canAccessEmployeeDocuments(actor("admin"), employee, true), true);
+assert.equal(canAccessEmployeeDocuments(actor("hradmin", { company: id() }), employee), false);
+const hr: any = actor("hr", { hrScope: { departments: ["Engineering"], teams: ["Python"], officeLocations: [location] } });
+assert.equal(canAccessEmployeeDocuments(hr, employee, true), true);
+for (const change of [{ department: "Sales" }, { team: "React" }, { officeLocation: id() }]) assert.equal(canAccessEmployeeDocuments(hr, { ...employee, ...change }), false);
+assert.equal(canAccessEmployeeDocuments(hr, { ...employee, role: "admin" }, true), false);
+assert.equal(canAccessEmployeeDocuments(actor("hr", { hrScope: {} }), employee), false);
+assert.equal(canAccessEmployeeDocuments(actor("departmenthead", { department: "Engineering" }), employee), true);
+assert.equal(canAccessEmployeeDocuments(actor("departmenthead", { department: "Sales" }), employee), false);
+assert.equal(isPrivateStorageKey(employeeDocumentKey(String(company), String(employee._id), String(id()))), true);
+assert.equal(isPrivateStorageKey(requestAttachmentKey(String(company), String(id()))), true);
+assert.equal(isPrivateStorageKey(`companies/${company}/request-attachments/../${id()}`), false);
+assert.equal(File.schema.path("bytes").options.select, false);
+console.log("Employee document access tests passed: self, company/department/HR scope, private keys and hidden binary fields.");

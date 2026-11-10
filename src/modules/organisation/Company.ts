@@ -19,6 +19,8 @@ import companyDetails from "../../schemas/company/companyDetails";
 import { createManagedCompanyValidation } from "../../services/company/utils/validations";
 import { normalizeCompanyCode } from "../../services/employeeCode/employeeCode.utils";
 import { ensureCompanyManagementAccess } from "../../services/company/utils/activityGuards";
+import { auditCompanyLogo, prepareCompanyLogo } from "../../services/storage/companyLogo.service";
+import { attachPrivateStoredFile, queuePrivateStoredFileCleanup } from "../../services/storage/privateStoredFile.service";
 import {
   ensurePermission,
   PERMISSION_KEYS,
@@ -399,6 +401,7 @@ const updateOrganisationCompany = async (
   res: Response,
   next: NextFunction
 ) => {
+  let stagedLogo: any;
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       throw generateError("Invalid company id", 400);
@@ -493,6 +496,7 @@ const updateOrganisationCompany = async (
       const validatedCompany = { ...value };
       delete validatedCompany.logo;
       delete validatedCompany.isLogoEdit;
+      delete validatedCompany.expectedLogoUrl;
       delete validatedCompany.deletedFiles;
       delete validatedCompany.companyAdmin;
       const updatePayload: any = {
@@ -506,17 +510,16 @@ const updateOrganisationCompany = async (
         updatedAt: new Date(),
       };
 
-      if (logoInput && isLogoEdit) {
-        const extension = logoInput.type === "image/png" ? "png" : "jpg";
-        const url = await uploadFile({
-          ...logoInput,
-          filename: `company-${_id}-logo-${new mongoose.Types.ObjectId()}.${extension}`,
-        });
-        updatePayload.logo = {
-          name: logoInput.filename,
-          url,
-          type: logoInput.type,
-        };
+      const changesLogo = logoInput === null || Boolean(logoInput?.buffer && isLogoEdit);
+      let unchangedLogo = false;
+      if (changesLogo && !Object.prototype.hasOwnProperty.call(value, "expectedLogoUrl")) throw generateError("Send expectedLogoUrl from the loaded company before changing its logo", 422);
+      if (logoInput?.buffer && isLogoEdit) {
+        const prepared = await prepareCompanyLogo(comp, req.userId, logoInput, value.expectedLogoUrl);
+        stagedLogo = prepared.staged; unchangedLogo = prepared.unchanged;
+        updatePayload.logo = prepared.logo;
+      } else if (logoInput === null) {
+        unchangedLogo = !comp.logo?.url;
+        if (!unchangedLogo && String(value.expectedLogoUrl || "") !== String(comp.logo?.url || "")) throw generateError("Company logo changed. Reload company settings before saving.", 409);
       }
 
       const updateOperation: any = { $set: updatePayload };
@@ -524,11 +527,16 @@ const updateOrganisationCompany = async (
         updateOperation.$unset = { logo: 1 };
       }
 
-      const updatedCompany: any = await Company.findByIdAndUpdate(
-        _id,
-        updateOperation,
-        { new: true }
-      );
+      let updatedCompany: any;
+      await mongoose.connection.transaction(async (session) => {
+        // Compare the source link, not an array position or client file ID, so concurrent replacements cannot win twice.
+        const logoGuard = changesLogo ? { "logo.url": comp.logo?.url || { $in: [null, ""] } } : {};
+        const saved = await Company.findOneAndUpdate({ _id, ...logoGuard }, updateOperation, { new: true, session, runValidators: true });
+        if (!saved) throw generateError("Company logo changed. Reload company settings before saving.", 409);
+        if (stagedLogo) await attachPrivateStoredFile(stagedLogo, session);
+        if (changesLogo && !unchangedLogo) await auditCompanyLogo(_id, req.userId, comp.logo, saved.logo, session);
+        updatedCompany = saved;
+      });
 
       res.status(statusCode.success).send({
         message: "Company has been updated successfully",
@@ -548,6 +556,8 @@ const updateOrganisationCompany = async (
       message: err?.message,
       data: err?.message,
     });
+  } finally {
+    if (stagedLogo) await queuePrivateStoredFileCleanup(stagedLogo._id).catch(() => console.warn("Company logo upload cleanup is pending."));
   }
 };
 

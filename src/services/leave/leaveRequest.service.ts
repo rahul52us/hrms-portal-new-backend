@@ -1,5 +1,10 @@
 import { NextFunction, Response } from "express";
 import mongoose from "mongoose";
+import { createHash } from "crypto";
+import PrivateStoredFile from "../../schemas/Storage/PrivateStoredFile.schema";
+import AttendanceRegularizationRequest from "../../schemas/Attendance/AttendanceRegularizationRequest.schema";
+import { ensureCanViewRegularizationRequest } from "../attendance/attendanceRegularization.service";
+import { attachPrivateStoredFile, privateStoredFileBytes, privateUploadName, privateUploadRequestId, queuePrivateStoredFileCleanup, sendPrivateFile, stagePrivateStoredFile } from "../storage/privateStoredFile.service";
 import { generateError } from "../../config/Error/functions";
 import EmployeeLeaveBalance from "../../schemas/Leave/EmployeeLeaveBalance.schema";
 import LeaveBalanceTransaction from "../../schemas/Leave/LeaveBalanceTransaction.schema";
@@ -35,7 +40,6 @@ import {
 import { calculateEmployeeLeaveRequest } from "./leaveRequestCalculator.service";
 import { parseAttendanceDate } from "../attendance/employeeDayContext.utils";
 import { resolveLeaveYear } from "./leaveRequestCalculator.utils";
-import { uploadFile } from "../../repository/uploadDoc.repository";
 import {
   LEAVE_DOCUMENT_MIME_TYPES,
   validateUploadSignature,
@@ -735,10 +739,13 @@ export async function createLeaveRequestService(req: any, res: Response, next: N
 }
 
 export async function uploadLeaveAttachmentService(req: any, res: Response, next: NextFunction) {
+  let staged: any, session: mongoose.ClientSession | undefined;
+  res.setHeader("Cache-Control", "private, no-store");
   try {
     const actor = getLeaveActor(req);
     const company = resolveLeaveCompanyId(actor, req.body?.companyId);
-    const name = text(req.body?.name);
+    const name = privateUploadName(req.body?.name);
+    const requestId = privateUploadRequestId(req.body?.requestId);
     const type = text(req.body?.type).toLowerCase();
     const size = Number(req.body?.size || 0);
     const data = text(req.body?.data);
@@ -758,15 +765,26 @@ export async function uploadLeaveAttachmentService(req: any, res: Response, next
     if (Math.abs(actualSize - size) > 2) {
       throw generateError("Attachment size does not match the uploaded data", 422);
     }
-    const url = await uploadFile({ filename: name, buffer: data });
-    const attachment = await LeaveAttachment.create({
-      company,
-      uploadedBy: actor._id,
-      name,
-      type,
-      size: actualSize,
-      url,
-    });
+    const hash = createHash("sha256").update(JSON.stringify({ name, type, size: actualSize, sha256: createHash("sha256").update(validated.buffer).digest("hex") })).digest("hex");
+    let attachment: any = await LeaveAttachment.findOne({ company, uploadedBy: actor._id, uploadRequestId: requestId }).select("+uploadRequestHash").lean();
+    let replayed = Boolean(attachment);
+    if (attachment && attachment.uploadRequestHash !== hash) throw generateError("Upload requestId was already used for a different file", 409);
+    if (!attachment) {
+      staged = await stagePrivateStoredFile({ company, uploadedBy: actor._id, purpose: "request_attachment", name, type, bytes: validated.buffer });
+      const _id = new mongoose.Types.ObjectId();
+      session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          await attachPrivateStoredFile(staged, session!);
+          [attachment] = await LeaveAttachment.create([{ _id, company, uploadedBy: actor._id, name, type, size: actualSize, url: `/leave/attachments/${_id}/download`, privateFile: staged._id, uploadRequestId: requestId, uploadRequestHash: hash }], { session });
+        });
+      } catch (error: any) {
+        if (error?.code !== 11000) throw error;
+        attachment = await LeaveAttachment.findOne({ company, uploadedBy: actor._id, uploadRequestId: requestId }).select("+uploadRequestHash").lean();
+        if (!attachment || attachment.uploadRequestHash !== hash) throw generateError("Upload requestId was already used for a different file", 409);
+        replayed = true;
+      }
+    }
     return res.status(201).json({
       success: true,
       data: {
@@ -777,10 +795,38 @@ export async function uploadLeaveAttachmentService(req: any, res: Response, next
         url: attachment.url,
       },
       message: "Leave attachment uploaded",
+      replayed,
     });
   } catch (error) {
     next(error);
+  } finally {
+    await session?.endSession();
+    if (staged) await queuePrivateStoredFileCleanup(staged._id).catch(() => console.warn("Request attachment cleanup is pending."));
   }
+}
+
+export async function downloadLeaveAttachmentService(req: any, res: Response, next: NextFunction) {
+  res.setHeader("Cache-Control", "private, no-store");
+  try {
+    const actor = getLeaveActor(req), company = resolveLeaveCompanyId(actor, req.query?.companyId);
+    const attachment: any = await LeaveAttachment.findOne({ _id: objectId(req.params.attachmentId, "attachment id"), company }).lean();
+    if (!attachment?.privateFile) throw generateError("Private attachment not found", 404);
+    if (!attachment.linkedRequest) {
+      if (String(attachment.uploadedBy) !== String(actor._id)) throw generateError("Private attachment not found", 404);
+    } else {
+      const match = { _id: attachment.linkedRequest, company, "attachments.attachment": attachment._id };
+      const leave = await populateRequest(LeaveRequest.findOne(match));
+      if (leave) ensureCanViewRequest(actor, leave);
+      else {
+        const correction = await AttendanceRegularizationRequest.findOne(match).populate("approvalInstance");
+        if (!correction) throw generateError("Private attachment not found", 404);
+        ensureCanViewRegularizationRequest(actor, correction);
+      }
+    }
+    const file: any = await PrivateStoredFile.findOne({ _id: attachment.privateFile, company, purpose: "request_attachment", uploadedBy: attachment.uploadedBy, storageStatus: "attached" }).select("+bytes").lean();
+    if (!file) throw generateError("Private attachment not found", 404);
+    sendPrivateFile(res, file, await privateStoredFileBytes(file));
+  } catch (error) { next(error); }
 }
 
 export async function addLeaveRequestDocumentsService(req: any, res: Response, next: NextFunction) {

@@ -1,10 +1,26 @@
 import express from "express";
 import authenticate from "../modules/config/authenticate";
+import multer from "multer";
+import { generateError } from "../config/Error/functions";
+import { downloadOnboardingDocument, employeeOnboardingHistory, getEmployeeOnboarding, listEmployeeOnboarding, mutateEmployeeOnboarding, onboardingEmployees, onboardingOwners, onboardingPublishedTemplates, onboardingWorkspace } from "../services/onboarding/employeeOnboarding.service";
 import { getTemplate, listTemplates, mutateTemplate, templateHistory, templateOptions, templatePeople } from "../services/onboarding/onboardingTemplate.service";
 
 const router = express.Router();
 router.use(authenticate);
 router.use((_req, res, next) => { res.setHeader("Cache-Control", "private, no-store"); next(); });
+router.get("/workspace", onboardingWorkspace);
+router.get("/employees", onboardingEmployees);
+router.get("/owners", onboardingOwners);
+router.get("/assignment-templates", onboardingPublishedTemplates);
+router.get("/instances", listEmployeeOnboarding);
+router.post("/instances", mutateEmployeeOnboarding("assign"));
+router.get("/instances/:instanceId", getEmployeeOnboarding);
+router.get("/instances/:instanceId/audit", employeeOnboardingHistory);
+router.post("/instances/:instanceId/actions", mutateEmployeeOnboarding("instance"));
+router.post("/instances/:instanceId/tasks/:taskId/actions", mutateEmployeeOnboarding("task"));
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 5, fieldSize: 2000 } }).single("file");
+router.post("/instances/:instanceId/tasks/:taskId/documents", (req, res, next) => upload(req, res, (error: any) => error ? next(generateError(error.code === "LIMIT_FILE_SIZE" ? "Document must be 5 MB or smaller" : "Invalid document upload", error.code === "LIMIT_FILE_SIZE" ? 413 : 422)) : next()), mutateEmployeeOnboarding("upload"));
+router.get("/instances/:instanceId/tasks/:taskId/documents/:documentId", downloadOnboardingDocument);
 router.get("/options", templateOptions);
 router.get("/people", templatePeople);
 router.get("/templates", listTemplates);

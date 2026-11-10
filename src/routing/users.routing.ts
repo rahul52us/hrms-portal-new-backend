@@ -1,5 +1,6 @@
 import express from "express";
 import authenticate from "../modules/config/authenticate";
+import { downloadEmployeeDocument } from "../services/storage/employeeDocuments.service";
 import {
   updateBankDetialsService,
   createUserservice,
@@ -72,6 +73,7 @@ router.put('/workExperience/:id',authenticate,updateWorkExperienceService)
 // router.put('/salaryStructure/:id',authenticate,UpdateSalaryStructureService)
 router.put('/updateDocuments/:id',authenticate,updateDocumentService)
 router.get('/updateDocuments/:id',authenticate,getDocumentService)
+router.get('/updateDocuments/:id/files/:fileId',authenticate,downloadEmployeeDocument)
 router.put('/qualifications/:id',authenticate,updateQualifcationService)
 router.put('/permissions/:id',authenticate,updatePermissionsService)
 router.get('/users/roles',authenticate,getUserRoleUser)
