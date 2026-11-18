@@ -31,6 +31,9 @@ export function inOnboardingScope(actor: any, employee: any, permission: string 
   if (actor.role === "departmenthead") return Boolean(actor.department) && matches([actor.department], employee.department);
   return valueId(employee.reportingManager) === valueId(actor._id);
 }
+export const managesOnboardingEmployee = (actor: any, employee: any) => hasPermission(actor, PERMISSION_KEYS.VIEW_ONBOARDING) && inOnboardingScope(actor, employee, PERMISSION_KEYS.MANAGE_ONBOARDING);
+export const ownsOnboardingTask = (actor: any, employee: any, task: any) => task.assignees.some((person: any) => valueId(person.user) === valueId(actor)) && (task.owner !== "hr" || task.ownerResolution === "manual" || managesOnboardingEmployee(actor, employee));
+export const visibleOnboardingTask = (actor: any, employee: any, task: any) => inOnboardingScope(actor, employee) || ownsOnboardingTask(actor, employee, task) || task.kind === "asset_provisioning" && valueId(actor) === valueId(employee);
 export function validateOnboardingTimezone(value: unknown) {
   if (typeof value !== "string" || value.length > 80) throw generateError("Choose a valid timezone", 422);
   try { new Intl.DateTimeFormat("en", { timeZone: value }).format(); } catch { throw generateError("Choose a valid timezone", 422); }

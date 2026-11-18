@@ -15,6 +15,13 @@ assert.equal(normalized.name, "Engineering joiner");
 assert.equal(normalized.nameKey, "engineering joiner");
 assert.equal(normalized.tasks[0].dueDays, -3);
 assert.equal(normalized.tasks[0].ownerUser, null);
+const assetTask = { ...task, kind: "asset_provisioning", owner: "hr", requiresDocument: false, assetRequirement: { category: "laptop", quantity: 2, receiptRequired: true } };
+assert.deepEqual(normalizeTemplate({ ...input, tasks: [assetTask] }).tasks[0].assetRequirement, assetTask.assetRequirement);
+for (const delta of [{ owner: "employee" }, { requiresDocument: true }, { assetRequirement: null }, { assetRequirement: { ...assetTask.assetRequirement, quantity: 0 } }, { assetRequirement: { ...assetTask.assetRequirement, quantity: 21 } }, { assetRequirement: { ...assetTask.assetRequirement, quantity: 1.5 } }, { assetRequirement: { ...assetTask.assetRequirement, receiptRequired: "true" } }, { assetRequirement: { ...assetTask.assetRequirement, category: "invalid code" } }, { assetRequirement: { ...assetTask.assetRequirement, assetId: id() } }]) {
+  assert.throws(() => normalizeTemplate({ ...input, tasks: [{ ...assetTask, ...delta }] }));
+}
+assert.throws(() => normalizeTemplate({ ...input, tasks: [{ ...task, assetRequirement: assetTask.assetRequirement }] }));
+assert.equal(normalizeTemplate({ ...input, tasks: [{ ...assetTask, assetRequirement: { ...assetTask.assetRequirement, category: "standing_desk" } }] }).tasks[0].assetRequirement?.category, "standing_desk", "Tenant catalog validation runs transactionally in the service, after syntax validation");
 assert.equal(normalizeTemplate({ ...input, tasks: [] }).tasks.length, 0, "Incomplete drafts may have no tasks");
 for (const invalid of [null, {}, { ...input, name: "a" }, { ...input, tasks: Array(101).fill(task) }, { ...input, tasks: [{ ...task, dueDays: 1.5 }] }, { ...input, tasks: [{ ...task, dueDays: -91 }] }, { ...input, tasks: [{ ...task, dueDays: 366 }] }, { ...input, tasks: [{ ...task, required: "false" }] }, { ...input, tasks: [{ ...task, requiresDocument: 1 }] }, { ...input, tasks: [{ ...task, owner: "manager" }] }, { ...input, tasks: [{ ...task, ownerUser: id() }] }, { ...input, tasks: [{ ...task, owner: "specific_user" }] }]) {
   assert.throws(() => normalizeTemplate(invalid));

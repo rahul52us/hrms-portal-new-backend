@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { AssetClearance, AssetClearanceEvent, AssetEmployeeControl } from "../../schemas/Assets/AssetClearance.schema";
+import { attachEffectivePermissions, getDefaultPermissionsForRole, PERMISSION_KEYS } from "../permissions/permission.utils";
+import { canManageClearances } from "./assetClearance.guard";
+import { clearanceCustodyMatch, clearanceDto, visibleClearance } from "./assetClearance.utils";
+
+// Pure schema/capability checks only; integration races and UI scenarios are documented separately.
+const id = () => new mongoose.Types.ObjectId(), company = id(), employee = id();
+const actor = (role = "hradmin", userId = id(), permissions?: any) => ({ company, actor: attachEffectivePermissions({ user: { _id: userId, company, role, permissions } }) });
+const ctx = actor(), row = { _id: id(), employee, isCurrent: true, status: "open", revision: 2, issueSequenceCutoff: 9, openedAt: new Date() };
+const control = { clearance: row._id, issueBlocked: true }, ready = { ready: true, evidenceRevision: 7, outstanding: 0, pendingWriteOffs: 0, integrityFindings: 0 };
+assert.equal(clearanceDto(ctx, row, ready, control).canClear, true);
+assert.equal(clearanceDto(actor("hradmin", employee), row, ready, control).canClear, false);
+assert.equal(clearanceDto(ctx, row, { ...ready, ready: false }, control).canClear, false);
+assert.equal(clearanceDto(ctx, row, ready, { ...control, clearance: id() }).canClear, false);
+assert.equal(clearanceDto(ctx, { ...row, isCurrent: false, status: "cancelled" }, ready, control).canCancel, false);
+const cleared = { ...row, status: "cleared", clearanceEvidence: { evidenceRevision: 7 } };
+assert.equal(clearanceDto(ctx, cleared, ready, control).isCurrentlyClear, true);
+assert.equal(clearanceDto(ctx, cleared, { ...ready, evidenceRevision: 8 }, control).isCurrentlyClear, false);
+assert.equal(clearanceDto(ctx, cleared, ready, control).canReopen, true);
+assert.equal(clearanceDto(ctx, cleared, ready, control).canClear, false);
+assert.equal(visibleClearance(actor("user", employee), row), true);
+assert.equal(visibleClearance(actor("user"), row), false);
+assert.equal(canManageClearances(actor("user", id(), { view_assets: true, manage_assets: true, manage_asset_clearances: true })), true);
+assert.equal(canManageClearances(actor("hradmin", id(), { manage_assets: false })), false);
+assert.equal(getDefaultPermissionsForRole("hradmin")[PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES], true);
+assert.equal(getDefaultPermissionsForRole("hr")[PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES], false);
+const match: any = clearanceCustodyMatch(company, row);
+assert.equal(match.$and[0].$or[0].employeeAssetSequence.$lte, 9);
+assert.equal(match.$and[0].$or[1].employeeAssetSequence.$exists, false);
+assert.ok(AssetEmployeeControl.schema.indexes().some(([fields, options]: any) => fields.company && fields.employee && options.unique));
+assert.ok(AssetClearance.schema.indexes().some(([fields, options]: any) => fields.company && fields.employee && options.unique && options.partialFilterExpression?.isCurrent === true));
+assert.ok(AssetClearanceEvent.schema.indexes().some(([fields, options]: any) => fields.company && fields.actor && fields.requestId && options.unique));
+console.log("Asset clearance assertions passed: nonself permissions, source evidence, terminal history and unique case/control indexes.");

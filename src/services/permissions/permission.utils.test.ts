@@ -166,6 +166,25 @@ function testTimesheetExportDoesNotRequireCompanyView() {
   assert.equal(validation.effectivePermissions[PERMISSION_KEYS.VIEW_TIMESHEETS], false);
 }
 
+function testAssetDefaultsAndIndividualDelegation() {
+  for (const role of ["admin", "hradmin"]) {
+    const permissions = getDefaultPermissionsForRole(role);
+    assert.equal(permissions[PERMISSION_KEYS.VIEW_ASSETS], true);
+    assert.equal(permissions[PERMISSION_KEYS.MANAGE_ASSETS], true);
+  }
+  for (const role of ["hr", "departmenthead", "user", "payrollexecutive"]) {
+    assert.equal(getDefaultPermissionsForRole(role)[PERMISSION_KEYS.VIEW_ASSETS], false);
+    assert.equal(getDefaultPermissionsForRole(role)[PERMISSION_KEYS.MANAGE_ASSETS], false);
+  }
+  const allowed = validateUserPermissionOverrides({ role: "user", permissions: { view_assets: true, manage_assets: true } });
+  assert.equal(allowed.valid, true);
+  assert.equal(allowed.effectivePermissions[PERMISSION_KEYS.MANAGE_ASSETS], true);
+  assert.equal(allowed.effectivePermissions[PERMISSION_KEYS.VIEW_PAYROLL], false);
+  const missingView = validateUserPermissionOverrides({ role: "user", permissions: { manage_assets: true } });
+  assert.equal(missingView.valid, false);
+}
+
+testAssetDefaultsAndIndividualDelegation();
 testPayrollExecutiveDefaults();
 testEmployeeAccessRoleDoesNotChangeOrganizationalRole();
 testCompanyRoleConfigurationAndIndividualOverride();

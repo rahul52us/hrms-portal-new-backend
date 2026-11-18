@@ -9,6 +9,9 @@ import { getEmployeeRequestActor, resolveEmployeeRequestCompanyId } from "../lea
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
 import { ensurePermission, hasPermission, PERMISSION_KEYS } from "../permissions/permission.utils";
 import { assertPublishable, normalizeTemplate, objectId, pagination, searchRegex, text } from "./onboardingTemplate.utils";
+import { resolveTaskPolicies } from "./onboardingPolicy.utils";
+import { AssetCategory } from "../../schemas/Assets/AssetCategory.schema";
+import { categoryPage, resolveTaskAssetCategories } from "../assets/assetCategory.utils";
 
 export function templateContext(req: any, write = false) {
   const actor = getEmployeeRequestActor(req);
@@ -40,6 +43,11 @@ function read(fn: (req: any, ctx: Context) => Promise<any>) {
   };
 }
 export const templateOptions = read(async (_req, ctx) => ({ data: { canManage: hasPermission(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES) } }));
+export const templateAssetCategories = read(async (req, ctx) => {
+  if (req.query.state && req.query.state !== "active") throw generateError("Template category lookup returns active categories only", 400);
+  const result = await categoryPage(ctx.company, { ...req.query, state: "active" });
+  return { ...result, data: result.data.map(({ code, name, builtin }) => ({ code, name, builtin })) };
+});
 export const templatePeople = read(async (req, ctx) => {
   ensurePermission(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES);
   const { page, limit, skip } = pagination(req.query), search = searchRegex(req.query.search);
@@ -68,6 +76,7 @@ export const mutateTemplate = (action: Action) => async (req: any, res: any, nex
   try {
     const ctx = templateContext(req, true);
     await ensureCompanyManagementAccess({ actor: ctx.actor, requestedCompanyId: String(ctx.company), actionLabel: "manage onboarding templates" });
+    await AssetCategory.init();
     const requestId = text(req.body?.requestId, "Request id", 8, 100);
     if (!/^[A-Za-z0-9_-]+$/.test(requestId)) throw generateError("Invalid request id", 422);
     const hash = createHash("sha256").update(JSON.stringify({ action, target: req.params.templateId || null, body: req.body })).digest("hex");
@@ -90,11 +99,15 @@ export const mutateTemplate = (action: Action) => async (req: any, res: any, nex
         if (action === "created" || action === "updated") {
           changes = normalizeTemplate(req.body, before?.tasks);
           await validateOwners(ctx, changes.tasks, session!);
+          await resolveTaskPolicies(ctx.company, changes.tasks, session!);
+          await resolveTaskAssetCategories(ctx.company, changes.tasks, session!);
           changes.hasDraft = true;
         } else if (action === "published") {
           assertPublishable(before);
-          const tasks = before.tasks.map((task: any) => ({ ...task }));
+          const tasks = before.tasks.map((task: any) => ({ ...task, assetRequirement: task.assetRequirement ? { ...task.assetRequirement } : null }));
           await validateOwners(ctx, tasks, session!);
+          await resolveTaskPolicies(ctx.company, tasks, session!);
+          await resolveTaskAssetCategories(ctx.company, tasks, session!);
           const version = before.publishedVersion + 1;
           await Version.create([{ company: ctx.company, template: before._id, version, content: { ...content(before), tasks }, reason, publishedBy: ctx.actor._id }], { session });
           changes = { status: "published", hasDraft: false, publishedVersion: version, tasks };

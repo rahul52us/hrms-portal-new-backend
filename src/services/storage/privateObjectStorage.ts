@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { generateError } from "../../config/Error/functions";
 
 export type PrivateObjectReference = { storageBucket: string; storageKey: string };
@@ -49,15 +49,27 @@ export function requestAttachmentKey(company: string, file: string) {
   return `companies/${company}/request-attachments/${file}`;
 }
 
+/** Inventory evidence never shares an employee-proof or public image namespace. */
+export function assetDocumentKey(company: string, asset: string, file: string) {
+  if (![company, asset, file].every((id) => /^[a-f0-9]{24}$/i.test(id))) throw generateError("Invalid asset document reference", 422);
+  return `companies/${company}/assets/${asset}/documents/${file}`;
+}
+
 /** Keep branding assets in a distinct namespace; a logo reference must never resolve to an employee proof. */
 export function companyLogoKey(company: string, file: string) {
   if (![company, file].every((id) => /^[a-f0-9]{24}$/i.test(id))) throw generateError("Invalid company logo reference", 422);
   return `companies/${company}/logos/${file}`;
 }
 
+/** Platform superadmins have no tenant; never put their photo inside an arbitrary company's namespace. */
+export function profilePhotoKey(company: string | null, employee: string, file: string) {
+  if (![employee, file, ...(company ? [company] : [])].every((id) => /^[a-f0-9]{24}$/i.test(id))) throw generateError("Invalid profile photo reference", 422);
+  return company ? `companies/${company}/employees/${employee}/photos/${file}` : `platform/users/${employee}/photos/${file}`;
+}
+
 export function isPrivateStorageKey(key: string) {
   const id = "[a-f0-9]{24}";
-  return new RegExp(`^companies/${id}/(?:onboarding/${id}/tasks/${id}/${id}|employees/${id}/documents/${id}|request-attachments/${id}|logos/${id})$`, "i").test(key);
+  return new RegExp(`^(?:companies/${id}/(?:onboarding/${id}/tasks/${id}/${id}|employees/${id}/(?:documents|photos)/${id}|assets/${id}/documents/${id}|request-attachments/${id}|logos/${id})|platform/users/${id}/photos/${id})$`, "i").test(key);
 }
 
 function reference(input: PrivateObjectReference) {
@@ -108,5 +120,17 @@ export async function deletePrivateDocument(input: PrivateObjectReference) {
   const { config, Bucket, Key } = reference(input), connection = client(config);
   try { await connection.send(new DeleteObjectCommand({ Bucket, Key }), { abortSignal: AbortSignal.timeout(20000) }); }
   catch { throw generateError("Document cleanup is pending because storage is unavailable", 503); }
+  finally { connection.destroy(); }
+}
+
+/** Approved erasure needs positive absence verification, not merely an accepted DELETE. */
+export async function erasePrivateDocument(input: PrivateObjectReference) {
+  const { config, Bucket, Key } = reference(input), connection = client(config);
+  try {
+    await connection.send(new DeleteObjectCommand({ Bucket, Key }), { abortSignal: AbortSignal.timeout(20000) });
+    try { await connection.send(new HeadObjectCommand({ Bucket, Key }), { abortSignal: AbortSignal.timeout(20000) }); }
+    catch (error: any) { if (error.$metadata?.httpStatusCode === 404) return; throw error; }
+    throw new Error("Stored object is still present");
+  } catch { throw generateError("Stored content erasure could not be verified. Retry after checking storage.", 503); }
   finally { connection.destroy(); }
 }

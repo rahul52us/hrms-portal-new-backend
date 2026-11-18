@@ -6,6 +6,8 @@ export interface UserPicture {
   name?: string;
   url?: string;
   type?: string;
+  privateFileId?: mongoose.Types.ObjectId;
+  sha256?: string;
 }
 
 export interface UserInterface extends Document {
@@ -67,6 +69,8 @@ const UserPictureSchema = new Schema<UserPicture>(
     name: { type: String, trim: true },
     url: { type: String, trim: true },
     type: { type: String, trim: true },
+    privateFileId: { type: Schema.Types.ObjectId, ref: "PrivateStoredFile" },
+    sha256: { type: String, match: /^[a-f0-9]{64}$/ },
   },
   { _id: false }
 );

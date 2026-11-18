@@ -36,6 +36,17 @@ export async function createRequestNotifications(
   return NotificationSchema.create(documents, session ? { session } : undefined);
 }
 
+/** Scheduled checks can retry safely: the shared dedupe key preserves already-read notifications instead of replacing them. */
+export async function upsertRequestNotifications(options: RequestNotificationOptions, session?: ClientSession) {
+  await NotificationSchema.init();
+  const documents = buildRequestNotificationDocuments(options);
+  if (!documents.length) return 0;
+  const result = await NotificationSchema.bulkWrite(documents.map((document) => ({ updateOne: {
+    filter: { dedupeKey: document.dedupeKey }, update: { $setOnInsert: document }, upsert: true,
+  } })), { session, ordered: true });
+  return result.upsertedCount;
+}
+
 function actorNotificationScope(req: any) {
   const recipient = String(req?.userId || req?.user?._id || req?.bodyData?._id || "").trim();
   if (!mongoose.Types.ObjectId.isValid(recipient)) {

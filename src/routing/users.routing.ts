@@ -1,5 +1,6 @@
 import express from "express";
 import authenticate from "../modules/config/authenticate";
+import { getProfilePhoto, updateProfilePhoto } from "../services/storage/profilePhoto.service";
 import { downloadEmployeeDocument } from "../services/storage/employeeDocuments.service";
 import {
   updateBankDetialsService,
@@ -46,6 +47,8 @@ const setMeIdParam = (req: any, res: any, next: any) => {
   req.params.id = req.userId;
   next();
 };
+router.get("/profile-photos/:employeeId/:fileId", authenticate, getProfilePhoto);
+router.put("/profile-photos/:employeeId", authenticate, updateProfilePhoto);
 router.get("/me/profile-details", authenticate, setMeIdParam, getManagedUserProfileDetailsHandler);
 router.put("/me/profile/personal", authenticate, setMeIdParam, updateManagedUserPersonalDetailsHandler);
 router.put("/me/profile/family", authenticate, setMeIdParam, updateManagedUserFamilyContactsHandler);

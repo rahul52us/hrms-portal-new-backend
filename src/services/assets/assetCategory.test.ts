@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { AssetCategory, AssetCategoryEvent, ASSET_CATEGORIES, ASSET_CATEGORY_PATTERN, BUILTIN_ASSET_CATEGORIES } from "../../schemas/Assets/AssetCategory.schema";
+import { Asset } from "../../schemas/Assets/Asset.schema";
+import { attachEffectivePermissions, getDefaultPermissionsForRole, PERMISSION_KEYS } from "../permissions/permission.utils";
+import { canManageAssetCategories, categoryName, categoryNameKey } from "./assetCategory.utils";
+import { assetDto, inventoryMatch, normalizedAsset } from "./asset.utils";
+
+const company = new mongoose.Types.ObjectId(), actor = (role: string, permissions?: any) => ({ company, actor: attachEffectivePermissions({ user: { _id: new mongoose.Types.ObjectId(), company, role, permissions } }) });
+// Pure syntax/permission/snapshot checks; tenant resolution and concurrent archive races need isolated integration QA.
+assert.deepEqual(ASSET_CATEGORIES, Object.keys(BUILTIN_ASSET_CATEGORIES));
+assert.equal(BUILTIN_ASSET_CATEGORIES.constructor, undefined);
+assert.equal(categoryNameKey("  Standing   Desk "), "standing desk");
+assert.equal(categoryName("Standing   Desk"), "Standing Desk");
+for (const name of ["Laptop", " laptop ", "Other", "x", "".padEnd(81, "a")]) assert.throws(() => categoryName(name));
+for (const code of ["standing_desk", "constructor", "category_123"]) assert.equal(ASSET_CATEGORY_PATTERN.test(code), true);
+for (const code of ["invalid code", "Uppercase", "_chair", "a".repeat(41)]) assert.equal(ASSET_CATEGORY_PATTERN.test(code), false);
+assert.equal(normalizedAsset({ name: "Unit", category: "standing_desk", condition: "new" }).category, "standing_desk");
+assert.equal(inventoryMatch(actor("hradmin"), { category: "standing_desk" }).category, "standing_desk");
+assert.equal(assetDto(actor("hradmin"), { category: "standing_desk", categoryName: "Earlier category label" }).categoryName, "Earlier category label");
+assert.equal(assetDto(actor("hradmin"), { category: "laptop" }).categoryName, "Laptop");
+assert.equal(assetDto(actor("hradmin"), { category: "constructor" }).categoryName, "constructor");
+assert.equal(canManageAssetCategories(actor("hradmin")), true);
+assert.equal(canManageAssetCategories(actor("hr")), false);
+assert.equal(canManageAssetCategories(actor("user", { view_assets: true, manage_asset_categories: true })), true);
+assert.equal(canManageAssetCategories(actor("hradmin", { view_assets: false })), false);
+assert.equal(getDefaultPermissionsForRole("hradmin")[PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES], true);
+assert.equal(getDefaultPermissionsForRole("hr")[PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES], false);
+assert.ok(AssetCategory.schema.indexes().some(([fields, options]: any) => fields.company && fields.code && options.unique));
+assert.ok(AssetCategory.schema.indexes().some(([fields, options]: any) => fields.company && fields.nameKey && options.unique && !options.partialFilterExpression));
+assert.ok(AssetCategoryEvent.schema.indexes().some(([fields, options]: any) => fields.company && fields.actor && fields.requestId && options.unique));
+assert.equal(Asset.schema.path("categoryName").options.maxlength, 80);
+console.log("Asset category assertions passed: stable codes, prototype-safe built-ins, historical labels, separate permissions and unique identities.");

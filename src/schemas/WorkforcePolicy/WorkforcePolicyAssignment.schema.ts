@@ -1,4 +1,13 @@
 import mongoose, { Document, Schema } from "mongoose";
+import AttendancePolicy from "./AttendancePolicy.schema";
+import WorkSchedule from "./WorkSchedule.schema";
+import HolidayCalendar from "./HolidayCalendar.schema";
+import LeavePolicy from "./LeavePolicy.schema";
+import RemoteWorkPolicy from "./RemoteWorkPolicy.schema";
+import TimesheetPolicy from "./TimesheetPolicy.schema";
+
+// refPath resolves model names at runtime; register every target here, not incidentally through service imports.
+const POLICY_RESOURCE_MODELS = { AttendancePolicy, WorkSchedule, HolidayCalendar, LeavePolicy, RemoteWorkPolicy, TimesheetPolicy };
 
 export const POLICY_RESOURCE_TYPES = [
   "attendance_policy",
@@ -13,7 +22,7 @@ export const POLICY_SCOPE_TYPES = ["company", "location", "department", "team", 
 export interface WorkforcePolicyAssignmentI extends Document {
   company: mongoose.Types.ObjectId;
   resourceType: (typeof POLICY_RESOURCE_TYPES)[number];
-  resourceModel: "AttendancePolicy" | "WorkSchedule" | "HolidayCalendar" | "LeavePolicy" | "RemoteWorkPolicy" | "TimesheetPolicy";
+  resourceModel: keyof typeof POLICY_RESOURCE_MODELS;
   resource: mongoose.Types.ObjectId;
   scopeType: (typeof POLICY_SCOPE_TYPES)[number];
   scopeId?: mongoose.Types.ObjectId | null;
@@ -36,7 +45,7 @@ const WorkforcePolicyAssignmentSchema = new Schema<WorkforcePolicyAssignmentI>(
     resourceType: { type: String, enum: POLICY_RESOURCE_TYPES, required: true, index: true },
     resourceModel: {
       type: String,
-      enum: ["AttendancePolicy", "WorkSchedule", "HolidayCalendar", "LeavePolicy", "RemoteWorkPolicy", "TimesheetPolicy"],
+      enum: Object.keys(POLICY_RESOURCE_MODELS),
       required: true,
     },
     resource: { type: Schema.Types.ObjectId, refPath: "resourceModel", required: true, index: true },

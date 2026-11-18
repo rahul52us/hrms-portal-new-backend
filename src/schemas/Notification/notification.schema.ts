@@ -96,6 +96,7 @@ const notificationSchema = new Schema({
 notificationSchema.index({ isRead: 1, createdAt: -1 });
 notificationSchema.index({ company: 1, recipient: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ company: 1, recipient: 1, createdAt: -1 });
+notificationSchema.index({ company: 1, entityType: 1, entityId: 1, eventType: 1, "metadata.taskId": 1, recipient: 1, createdAt: -1 }, { partialFilterExpression: { "metadata.taskId": { $exists: true } } });
 notificationSchema.index(
   { dedupeKey: 1 },
   { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } }

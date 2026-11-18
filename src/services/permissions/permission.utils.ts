@@ -1,6 +1,15 @@
 import Company from "../../schemas/company/Company";
 
 export const PERMISSION_KEYS = {
+  APPROVE_ASSET_DISPOSALS: "approve_asset_disposals",
+  MANAGE_ASSET_DOCUMENTS: "manage_asset_documents",
+  MANAGE_ASSET_CATEGORIES: "manage_asset_categories",
+  IMPORT_ASSETS: "import_assets",
+  EXPORT_ASSETS: "export_assets",
+  VIEW_ASSETS: "view_assets",
+  MANAGE_ASSETS: "manage_assets",
+  APPROVE_ASSET_WRITE_OFFS: "approve_asset_write_offs",
+  MANAGE_ASSET_CLEARANCES: "manage_asset_clearances",
   VIEW_ONBOARDING: "view_onboarding",
   MANAGE_ONBOARDING: "manage_onboarding",
   VIEW_ONBOARDING_TEMPLATES: "view_onboarding_templates",
@@ -76,6 +85,15 @@ type PermissionDefinition = {
 };
 
 const PERMISSION_DEFINITIONS: PermissionDefinition[] = [
+  { key: PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS, label: "Approve Asset Disposal", description: "Independently approve/reject sale, scrap or donation of retired company-held equipment. Requires View/Manage Assets; no requester self-approval. Approval is not physical disposal, payment, depreciation or accounting posting.", category: "Assets" },
+  { key: PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS, label: "Manage Asset Documents", description: "Upload/replace, edit details, archive and restore company inventory files with retained versions and audit. Requires View Assets, not physical custody authority. Files remain private to inventory viewers, not employee My Assets.", category: "Assets" },
+  { key: PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES, label: "Manage Asset Categories", description: "Create, rename, archive and restore company asset categories with audit history. Requires View Assets, not custody-management authority. Built-ins stay fixed; historical equipment and published onboarding references remain intact.", category: "Assets" },
+  { key: PERMISSION_KEYS.IMPORT_ASSETS, label: "Import Asset Inventory", description: "Preview and create new equipment from bounded CSV imports. Requires View/Manage Assets; creator confirms the reviewed batch. Never updates existing equipment or creates custody.", category: "Assets" },
+  { key: PERMISSION_KEYS.EXPORT_ASSETS, label: "Export Asset Inventory", description: "Download filtered CSV/XLSX inventory including custodian names/codes and internal notes, queue private expiring large CSV exports, or generate QR label PDFs without employee data. Requires View Assets. Inventory exports are audited; label generation is read-only.", category: "Assets" },
+  { key: PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES, label: "Manage Asset Clearances", description: "Open employee asset-clearance cases, freeze new issues, review outstanding custody and certify/reopen/cancel clearance. Company-wide; requires View/Manage Assets and another employee. No employee exit, account disabling or payroll settlement.", category: "Assets" },
+  { key: PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS, label: "Approve Asset Write-offs", description: "Independently approve/reject confirmed loss write-offs and record/reverse recovery receipts. Requires View/Manage Assets; no self/requester approval, salary deduction, payment or general-ledger posting.", category: "Assets" },
+  { key: PERMISSION_KEYS.VIEW_ASSETS, label: "View Asset Inventory", description: "View company-wide inventory, private files, purchase costs/warranties, disposal terms, custody, incidents, service costs, loss/recovery register, clearances and audit. Separate from employee My Assets and scoped employee-profile/payroll permissions.", category: "Assets" },
+  { key: PERMISSION_KEYS.MANAGE_ASSETS, label: "Manage Assets", description: "Manage inventory/custody, repairs, retirement, purchase/warranty profiles and reminders; propose/record independently approved physical disposal. Company-wide authority; no payroll/accounting payment, depreciation or receipt acknowledgement for another employee.", category: "Assets" },
   { key: PERMISSION_KEYS.VIEW_ONBOARDING, label: "View Employee Onboarding", description: "View employee checklists within company, HR department/team/location, department-head or direct-report scope. Employees and assigned task owners retain their own task access.", category: "Onboarding" },
   { key: PERMISSION_KEYS.MANAGE_ONBOARDING, label: "Manage Employee Onboarding", description: "Assign published checklists, reassign tasks, review documents, waive/reopen tasks, reschedule and cancel within employee scope. Separate from company-wide template configuration.", category: "Onboarding" },
   { key: PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, label: "View Onboarding Templates", description: "View company-wide joining checklist templates, published versions and template history. Does not grant access to employee onboarding records.", category: "Onboarding" },
@@ -423,6 +441,13 @@ const PERMISSION_METADATA_BY_KEY = PERMISSION_DEFINITIONS.reduce<Record<string, 
 );
 
 const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+  PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+  PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+  PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+  PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+  PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+  PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
   PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
@@ -485,6 +510,13 @@ const ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+  PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+  PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+  PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+  PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+  PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+  PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
   PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
@@ -539,6 +571,13 @@ const HR_ADMIN_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+  PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+  PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+  PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+  PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+  PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+  PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
   PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
@@ -573,6 +612,13 @@ const HR_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 const DEPARTMENT_HEAD_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+  PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+  PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+  PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+  PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+  PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+  PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
   PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_TIMESHEETS, PERMISSION_KEYS.EXPORT_TIMESHEETS,
   PERMISSION_KEYS.APPROVE_TIMESHEETS,
@@ -620,6 +666,13 @@ const PAYROLL_EXECUTIVE_ALLOWED_PERMISSION_KEYS: PermissionKey[] = [
 ];
 
 export const INDIVIDUAL_OVERRIDE_PERMISSION_KEYS: PermissionKey[] = [
+  PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+  PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+  PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+  PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+  PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+  PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+  PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
   PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
   PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
   PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
@@ -648,6 +701,14 @@ const ROLE_ALLOWED_PERMISSION_KEYS: Record<string, PermissionKey[]> = {
 };
 
 export const PERMISSION_DEPENDENCIES: Partial<Record<PermissionKey, PermissionKey[]>> = {
+  [PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS]: [PERMISSION_KEYS.VIEW_ASSETS],
+  [PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES]: [PERMISSION_KEYS.VIEW_ASSETS],
+  [PERMISSION_KEYS.IMPORT_ASSETS]: [PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS],
+  [PERMISSION_KEYS.EXPORT_ASSETS]: [PERMISSION_KEYS.VIEW_ASSETS],
+  [PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES]: [PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS],
+  [PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS]: [PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS],
+  [PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS]: [PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS],
+  [PERMISSION_KEYS.MANAGE_ASSETS]: [PERMISSION_KEYS.VIEW_ASSETS],
   [PERMISSION_KEYS.MANAGE_ONBOARDING]: [PERMISSION_KEYS.VIEW_ONBOARDING],
   [PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES]: [PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES],
   [PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS]: [PERMISSION_KEYS.VIEW_TIMESHEETS],
@@ -796,6 +857,13 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "admin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+      PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+      PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+      PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+      PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+      PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+      PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
       PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
       PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
       PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,
@@ -860,6 +928,13 @@ export function getDefaultPermissionsForRole(roleInput: unknown) {
 
   if (role === "hradmin") {
     return createPermissionRecord([
+      PERMISSION_KEYS.APPROVE_ASSET_DISPOSALS,
+      PERMISSION_KEYS.MANAGE_ASSET_DOCUMENTS,
+      PERMISSION_KEYS.MANAGE_ASSET_CATEGORIES,
+      PERMISSION_KEYS.IMPORT_ASSETS, PERMISSION_KEYS.EXPORT_ASSETS,
+      PERMISSION_KEYS.MANAGE_ASSET_CLEARANCES,
+      PERMISSION_KEYS.APPROVE_ASSET_WRITE_OFFS,
+      PERMISSION_KEYS.VIEW_ASSETS, PERMISSION_KEYS.MANAGE_ASSETS,
       PERMISSION_KEYS.VIEW_ONBOARDING, PERMISSION_KEYS.MANAGE_ONBOARDING,
       PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES, PERMISSION_KEYS.MANAGE_ONBOARDING_TEMPLATES,
       PERMISSION_KEYS.REASSIGN_TIMESHEET_APPROVALS,

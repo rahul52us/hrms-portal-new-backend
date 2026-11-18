@@ -1,7 +1,18 @@
 import mongoose, { Schema } from "mongoose";
+import { ASSET_CATEGORY_PATTERN } from "../Assets/AssetCategory.schema";
 
 export const TASK_OWNERS = ["employee", "reporting_manager", "hr", "specific_user"] as const;
+export const assetRequirementSchema = new Schema({
+  category: { type: String, match: ASSET_CATEGORY_PATTERN, required: true }, categoryName: { type: String, maxlength: 80 },
+  quantity: { type: Number, min: 1, max: 20, required: true, validate: Number.isInteger },
+  receiptRequired: { type: Boolean, required: true },
+}, { _id: false });
 export const taskSchema = new Schema({
+  kind: { type: String, enum: ["standard", "policy_acknowledgement", "asset_provisioning"], default: "standard" },
+  assetRequirement: { type: assetRequirementSchema, default: null },
+  policyVersionId: { type: Schema.Types.ObjectId, default: null },
+  policyNameSnapshot: { type: String, default: "" },
+  policyVersionNumber: { type: Number, default: null },
   title: { type: String, required: true, trim: true, maxlength: 150 },
   instructions: { type: String, default: "", maxlength: 2000 },
   owner: { type: String, enum: TASK_OWNERS, required: true },

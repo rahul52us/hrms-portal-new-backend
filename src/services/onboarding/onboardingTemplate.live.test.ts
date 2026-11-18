@@ -33,6 +33,8 @@ async function freePort() {
   return port;
 }
 async function run() {
+  // Storage regressions must not inherit a real scanner from .env; scanner protocol QA uses an isolated fixture.
+  process.env.HRMS_MALWARE_SCANNER = "disabled";
   if (process.argv.includes("--r2")) {
     assert.equal(process.env.NODE_ENV, "test");
     assert.match(process.env.R2_TEST_ENDPOINT || "", /^http:\/\/127\.0\.0\.1:\d+\/r2$/);

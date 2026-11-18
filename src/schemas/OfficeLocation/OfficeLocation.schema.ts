@@ -12,6 +12,7 @@ export interface OfficeLocationI extends Document {
   latitude?: number | null;
   longitude?: number | null;
   is_active: boolean;
+  assetImportFence?: number;
   deletedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
@@ -48,6 +49,8 @@ const OfficeLocationSchema = new Schema<OfficeLocationI>(
     pinCode: { type: String, trim: true },
     latitude: { type: Number, min: -90, max: 90, default: null },
     longitude: { type: Number, min: -180, max: 180, default: null },
+    // Imports touch this field transactionally so a concurrent archive/rename cannot escape revalidation.
+    assetImportFence: { type: Number, select: false },
     is_active: {
       type: Boolean,
       default: true,

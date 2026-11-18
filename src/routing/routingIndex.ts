@@ -23,6 +23,7 @@ import payrollRouting from "./payroll.routing";
 import projectsRouting from "./projects.routing";
 import timesheetsRouting from "./timesheets.routing";
 import onboardingRouting from "./onboarding.routing";
+import assetsRouting from "./assets.routing";
 
 const importRoutings = (app: any) => {
   app.use("/api/auth", userRouting);
@@ -51,6 +52,7 @@ const importRoutings = (app: any) => {
   app.use('/api/projects', projectsRouting);
   app.use('/api/timesheets', timesheetsRouting);
   app.use('/api/onboarding', onboardingRouting);
+  app.use('/api/assets', assetsRouting);
 };
 
 export default importRoutings;

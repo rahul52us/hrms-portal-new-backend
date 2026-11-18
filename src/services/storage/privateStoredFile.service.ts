@@ -2,22 +2,29 @@ import mongoose, { ClientSession } from "mongoose";
 import { createHash } from "crypto";
 import File from "../../schemas/Storage/PrivateStoredFile.schema";
 import { generateError } from "../../config/Error/functions";
-import { companyLogoKey, deletePrivateDocument, documentStorageProvider, employeeDocumentKey, putPrivateDocument, r2Configuration, readPrivateDocument, requestAttachmentKey } from "./privateObjectStorage";
+import { assetDocumentKey, companyLogoKey, deletePrivateDocument, documentStorageProvider, employeeDocumentKey, profilePhotoKey, putPrivateDocument, r2Configuration, readPrivateDocument, requestAttachmentKey } from "./privateObjectStorage";
+import { scanPrivateUpload } from "./malwareScanner";
 
 export function storedFileKey(file: any) {
   if (file.purpose === "employee_document") return employeeDocumentKey(String(file.company), String(file.employee), String(file._id));
   if (file.purpose === "company_logo") return companyLogoKey(String(file.company), String(file._id));
+  if (file.purpose === "profile_photo") return profilePhotoKey(file.company ? String(file.company) : null, String(file.employee), String(file._id));
   if (file.purpose === "request_attachment") return requestAttachmentKey(String(file.company), String(file._id));
+  if (file.purpose === "asset_document") return assetDocumentKey(String(file.company), String(file.asset), String(file._id));
   throw generateError("Invalid private document purpose", 422);
 }
 /** Persist the upload journal before PUT so a timeout or process crash leaves a recoverable object reference. */
-export async function stagePrivateStoredFile(input: { company: any; employee?: any; uploadedBy: any; purpose: "request_attachment" | "employee_document" | "company_logo"; name: string; type: string; bytes: Buffer }) {
+export async function stagePrivateStoredFile(input: { company: any; employee?: any; asset?: any; uploadedBy: any; purpose: "request_attachment" | "employee_document" | "company_logo" | "profile_photo" | "asset_document"; name: string; type: string; bytes: Buffer }) {
   const _id = new mongoose.Types.ObjectId(), provider = documentStorageProvider();
-  const metadata = { _id, company: input.company, employee: input.employee || null, uploadedBy: input.uploadedBy, purpose: input.purpose,
-    name: input.name, type: input.type, size: input.bytes.length, sha256: createHash("sha256").update(input.bytes).digest("hex"),
-    storageProvider: provider, storageStatus: "staged", storageBucket: provider === "r2" ? r2Configuration().bucket : undefined };
-  const file = await File.create({ ...metadata, storageKey: storedFileKey(metadata), ...(provider === "mongodb" ? { bytes: input.bytes } : {}) });
-  try { if (provider === "r2") await putPrivateDocument(file, input.bytes, input.type); }
+  const storageBucket = provider === "r2" ? r2Configuration().bucket : undefined;
+  // Own the scanned bytes across the async call; no file/journal/R2 object exists until the gate accepts them.
+  const bytes = Buffer.from(input.bytes);
+  const scan = await scanPrivateUpload(bytes, { company: input.company, uploadedBy: input.uploadedBy, purpose: input.purpose });
+  const metadata = { _id, company: input.company, employee: input.employee || null, asset: input.asset || null, uploadedBy: input.uploadedBy, purpose: input.purpose,
+    name: input.name, type: input.type, size: bytes.length, sha256: scan.sha256, scan,
+    storageProvider: provider, storageStatus: "staged", storageBucket };
+  const file = await File.create({ ...metadata, storageKey: storedFileKey(metadata), ...(provider === "mongodb" ? { bytes } : {}) });
+  try { if (provider === "r2") await putPrivateDocument(file, bytes, input.type); }
   catch (error) { await queuePrivateStoredFileCleanup(_id).catch(() => undefined); throw error; }
   return file.toObject();
 }
@@ -43,6 +50,7 @@ export async function cleanupPrivateStoredFile(id: any) {
 /** Domain access is checked by the caller; this layer enforces immutable reference and byte integrity. */
 export async function privateStoredFileBytes(file: any) {
   if (file.storageStatus !== "attached") throw generateError("Document not found", 404);
+  if (file.scan?.sha256 && file.scan.sha256 !== file.sha256) throw generateError("Invalid upload scan reference", 503);
   if (file.storageKey !== storedFileKey(file)) throw generateError("Invalid private document storage reference", 503);
   if (file.storageProvider === "r2") return readPrivateDocument(file, file.size, file.sha256);
   const bytes = Buffer.isBuffer(file.bytes) ? file.bytes : file.bytes?.buffer ? Buffer.from(file.bytes.buffer) : null;

@@ -1,5 +1,9 @@
 import dotenv from "dotenv";
 import { startTimesheetScheduler } from "./services/timesheet/timesheetScheduler";
+import { startOnboardingScheduler } from "./services/onboarding/onboardingScheduler";
+import { startOnboardingErasureWorker } from "./services/onboarding/onboardingErasure.worker";
+import { startAssetExportWorker } from "./services/assets/assetExport.worker";
+import { startAssetWarrantyWorker } from "./services/assets/assetWarranty.worker";
 import express, { NextFunction, Request, Response } from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
@@ -42,7 +46,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(["/api/timesheets", "/api/workforce-policies/timesheet-policies", "/api/onboarding"], bodyParser.json({ limit: "256kb" }));
+app.use(["/api/timesheets", "/api/workforce-policies/timesheet-policies", "/api/onboarding", "/api/assets"], bodyParser.json({ limit: "256kb" }));
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -125,6 +129,10 @@ const startServer = async () => {
       const attendanceSchedulerStarted = startAttendanceProcessorScheduler();
       startPayrollOperationsScheduler();
       startTimesheetScheduler();
+      startOnboardingScheduler();
+      startOnboardingErasureWorker();
+      startAssetExportWorker();
+      startAssetWarrantyWorker();
       recoverPayrollOperationalJobs()
         .then((count) => {
           if (count) console.log(`Recovered ${count} payroll operations job(s)`);

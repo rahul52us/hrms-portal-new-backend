@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { generateError } from "../../config/Error/functions";
 import { TASK_OWNERS } from "../../schemas/Onboarding/OnboardingTemplate.schema";
+import { ASSET_CATEGORY_PATTERN } from "../../schemas/Assets/AssetCategory.schema";
 
 export function text(value: unknown, label: string, min: number, max: number) {
   if (typeof value !== "string" || value.trim().length < min || value.trim().length > max) {
@@ -42,7 +43,19 @@ export function normalizeTemplate(input: any, existingTasks: any[] = []) {
     if (!Number.isSafeInteger(task.dueDays) || task.dueDays < -90 || task.dueDays > 365) throw generateError(`${label}: due date must be 90 days before to 365 days after joining`, 422);
     if (typeof task.required !== "boolean" || typeof task.requiresDocument !== "boolean") throw generateError(`${label}: required and document settings must be true or false`, 422);
     if (task.owner !== "specific_user" && task.ownerUser) throw generateError(`${label}: choose a person only for a specific-user owner`, 422);
+    const kind = task.kind ?? "standard";
+    if (!["standard", "policy_acknowledgement", "asset_provisioning"].includes(kind)) throw generateError(`${label}: choose a valid task type`, 422);
+    if (kind === "policy_acknowledgement" && (task.owner !== "employee" || task.requiresDocument)) throw generateError(`${label}: policy acknowledgement must be owned by the employee and cannot require uploads`, 422);
+    if (kind !== "policy_acknowledgement" && task.policyVersionId) throw generateError(`${label}: only acknowledgement tasks can select a policy`, 422);
+    let assetRequirement: { category: string; quantity: number; receiptRequired: boolean } | null = null;
+    if (kind === "asset_provisioning") {
+      const requirement = task.assetRequirement;
+      if (!requirement || typeof requirement !== "object" || Array.isArray(requirement) || Object.keys(requirement).some((key) => !["category", "categoryName", "quantity", "receiptRequired"].includes(key)) || typeof requirement.category !== "string" || !ASSET_CATEGORY_PATTERN.test(requirement.category) || !Number.isSafeInteger(requirement.quantity) || requirement.quantity < 1 || requirement.quantity > 20 || typeof requirement.receiptRequired !== "boolean") throw generateError(`${label}: choose an asset category, 1-20 units and receipt requirement`, 422);
+      if (task.owner === "employee" || task.requiresDocument) throw generateError(`${label}: asset provisioning needs a responsible HR/manager/person owner and cannot require document uploads`, 422);
+      assetRequirement = { category: requirement.category, quantity: requirement.quantity, receiptRequired: requirement.receiptRequired };
+    } else if (task.assetRequirement) throw generateError(`${label}: only asset provisioning tasks can define equipment requirements`, 422);
     return { _id, title: text(task.title, `${label} title`, 2, 150), instructions: text(task.instructions ?? "", `${label} instructions`, 0, 2000),
+      kind, assetRequirement, policyVersionId: kind === "policy_acknowledgement" ? objectId(task.policyVersionId, `${label} published policy version`) : null, policyNameSnapshot: "", policyVersionNumber: null,
       owner: task.owner, ownerUser: task.owner === "specific_user" ? objectId(task.ownerUser, `${label} owner`) : null,
       ownerNameSnapshot: "", dueDays: task.dueDays, required: task.required, requiresDocument: task.requiresDocument };
   });

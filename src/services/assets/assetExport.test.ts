@@ -1,0 +1,26 @@
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+import { AssetExportJob, AssetExportArtifact, AssetExportChunk, AssetExportEvent, AssetExportControl } from "../../schemas/Assets/AssetExport.schema";
+import { ASYNC_EXPORT_LIMITS, exportFilters, exportHash, exportJobDto, exportKey } from "./assetExport.utils";
+import { exportStorageKey } from "./assetExport.storage";
+import { ASSET_INVENTORY_HEADERS, assetInventoryValues, assetCsvCell } from "./assetTransfer.utils";
+
+const company = new mongoose.Types.ObjectId("a".repeat(24)), job = new mongoose.Types.ObjectId("b".repeat(24)), file = new mongoose.Types.ObjectId("c".repeat(24)), ctx: any = { company, actor: { role: "hradmin" } };
+assert.deepEqual(exportFilters(ctx, {}), { search: "", status: "all", category: "all", officeLocation: "" });
+assert.equal(exportFilters(ctx, { search: " Laptop ", officeLocation: String(file) }).search, "Laptop");
+for (const filters of [null, [], "all", { search: { $ne: null } }, { status: "unknown" }, { category: "bad/category" }, { officeLocation: "bad" }]) assert.throws(() => exportFilters(ctx, filters));
+assert.equal(exportKey("export-fixture-0001"), "export-fixture-0001"); for (const key of [null, "short", "invalid request key"]) assert.throws(() => exportKey(key));
+assert.notEqual(exportHash({ reason: "Original" }), exportHash({ reason: "Changed" }));
+const privateRow = { _id: job, state: "ready", filters: {}, filterLabels: {}, reason: "QA export", revision: 4, attempts: 1, rows: 20, bytes: 2000, expiresAt: new Date(Date.now() + 10000), artifact: file, lease: "private-lease-token", requestId: "private-command-key", requestHash: "private-command-hash", retryable: true };
+const dto = exportJobDto(privateRow); assert.equal(dto.canDownload, true); assert.equal(dto.canCancel, true);
+for (const key of ["artifact", "lease", "requestId", "requestHash", "storageKey", "storageBucket"]) assert.equal((dto as any)[key], undefined);
+assert.equal(exportJobDto({ ...privateRow, expiresAt: new Date(0) }).state, "expired"); assert.equal(exportJobDto({ ...privateRow, expiresAt: new Date(0) }).canDownload, false);
+assert.equal(exportJobDto({ ...privateRow, state: "failed", attempts: 2 }).canRetry, true); assert.equal(exportJobDto({ ...privateRow, state: "failed", attempts: 3 }).canRetry, false); assert.equal(exportJobDto({ ...privateRow, state: "failed", retryable: false }).canRetry, false);
+assert.equal(exportStorageKey(company, job, file), `companies/${company}/assets/exports/${job}/${file}`); assert.throws(() => exportStorageKey(company, job, "../secret"));
+assert.equal(ASYNC_EXPORT_LIMITS.rows, 100000); assert.equal(ASYNC_EXPORT_LIMITS.bytes, 128 * 1024 * 1024);
+const row = assetInventoryValues({ tag: "000123", name: "=FORMULA()", category: "laptop", internalNotes: "line1\nline2", createdAt: new Date("2026-11-16T00:00:00Z") });
+assert.equal(row.length, ASSET_INVENTORY_HEADERS.length); assert.equal(row[3], "Laptop"); assert.equal(assetCsvCell(row[0]), '"\'000123"'); assert.equal(assetCsvCell(row[1]), '"\'=FORMULA()"');
+assert.ok(AssetExportJob.schema.indexes().some(([, options]: any) => options.unique && options.partialFilterExpression?.active === true));
+assert.ok(AssetExportChunk.schema.indexes().some(([, options]: any) => options.unique)); assert.ok(AssetExportControl.schema.indexes().some(([, options]: any) => options.unique));
+for (const model of [AssetExportJob, AssetExportArtifact, AssetExportChunk, AssetExportEvent]) assert.ok(!model.schema.indexes().some(([, options]: any) => options.expireAfterSeconds !== undefined), "No metadata TTL may bypass private-content cleanup");
+console.log("Asset export pure validation/DTO/CSV/schema checks passed");

@@ -3,8 +3,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import { generateError } from "../../config/Error/functions";
-import { generateFileName, hashBcrypt } from "../../config/helper/function";
-import { deleteFile, uploadFile } from "../../repository/uploadDoc.repository";
+import { hashBcrypt } from "../../config/helper/function";
 import ProfileDetails from "../../schemas/User/ProfileDetails";
 import User from "../../schemas/User/User";
 import TdsDeclaration from "../../schemas/User/tdsDeclaration.schema";
@@ -44,7 +43,9 @@ import {
   getUserAccountStatus,
 } from "../auth/utils/userAccountStatus";
 import { assertUserStatusChangeAllowed } from "./adminUserSecurity.utils";
-import { validateProfileImageUpload } from "../upload/uploadSecurity.utils";
+import { getEmployeeRequestActor } from "../leave/leaveAccess.utils";
+import { assertProfilePhotoWriteAccess, discardUnattachedProfilePhoto, prepareProfilePhoto, saveUserWithProfilePhoto } from "../storage/profilePhoto.service";
+import { assignOnboardingDuringCreation, parseCreationOnboarding, previewCreationOnboarding } from "../onboarding/employeeOnboarding.service";
 import {
   buildEmployeeIdentifier,
   MAX_EMPLOYEE_NUMBER_LENGTH,
@@ -453,7 +454,7 @@ function buildTemplateHeaders(uploadRole: string) {
   ];
 
   if (isUserUpload) {
-    headers.push("Designation", "Joining Date", "Reporting Manager Email (Optional)");
+    headers.push("Designation", "Joining Date", "Reporting Manager Email (Optional)", "Password");
   }
 
   return headers;
@@ -525,6 +526,7 @@ function buildTemplateRows(uploadRole: string) {
       commonRows[index].state,
       entry.designation,
       entry.joiningDate,
+      "",
       "",
     ]));
 }
@@ -600,27 +602,6 @@ function createSetupToken() {
     token: crypto.randomBytes(32).toString("hex"),
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
   };
-}
-
-async function tryUploadUserPicture(pic: any) {
-  if (!pic || !pic.filename || pic?.buffer === "" || !Object.entries(pic || {}).length) {
-    return null;
-  }
-
-  validateProfileImageUpload(pic);
-  try {
-    pic.filename = generateFileName(pic.filename);
-    const url = await uploadFile(pic);
-
-    return {
-      name: pic?.filename,
-      url,
-      type: pic?.type,
-    };
-  } catch (error: any) {
-    console.warn("Profile picture upload failed during managed user save:", error?.message || error);
-    return null;
-  }
 }
 
 async function generateUniqueEmployeeNumber(companyId: string) {
@@ -1549,6 +1530,13 @@ async function saveManagedUser({
   existingUserId?: string;
   sendSetupEmail?: boolean;
 }) {
+  const onboarding = parseCreationOnboarding(payload?.onboarding);
+  if (onboarding && existingUserId) throw generateError("Assign onboarding from Employee Details for an existing employee", 422);
+  if (onboarding) {
+    if (actor.role === "superadmin") throw generateError("Assign onboarding from an authorized company account", 403);
+    ensurePermission(actor, PERMISSION_KEYS.VIEW_ONBOARDING);
+    ensurePermission(actor, PERMISSION_KEYS.MANAGE_ONBOARDING);
+  }
   let codeInput = normalizeText(
     payload?.code || payload?.employeeNumber || payload?.employeeCode
   );
@@ -1922,35 +1910,29 @@ async function saveManagedUser({
     };
   }
 
-  if (payload?.pic?.isDeleted && user.pic?.name) {
-    await deleteFile(user.pic.name).catch(() => undefined);
-    user.pic = undefined;
-  }
-
-  const uploadedPic = await tryUploadUserPicture(payload?.pic);
-  if (uploadedPic) {
-    if (user.pic?.name) {
-      await deleteFile(user.pic.name).catch(() => undefined);
-    }
-    user.pic = uploadedPic;
-  }
-
-  await mongoose.connection.transaction(async (session) => {
-    await user.save({ session });
-    await recordEmployeeAssignmentChange({
-      user,
-      previousUser: previousAssignmentUser,
-      changedBy: actor.userId,
-      changeReason: normalizeText(
-        payload?.assignmentChangeReason ||
-          payload?.changeReason ||
-          (isCreate ? "Initial employee assignment" : "Employee assignment updated")
-      ),
-      changeType: isCreate ? "initial_assignment" : undefined,
-      source: isCreate ? "managed_user_create" : "managed_user_update",
-      session,
+  const photoChange = await prepareProfilePhoto(user, actor.userId, payload?.pic, payload?.expectedPhotoUrl, isCreate);
+  let assignedOnboarding: Awaited<ReturnType<typeof assignOnboardingDuringCreation>> | null = null;
+  try {
+    await mongoose.connection.transaction(async (session) => {
+      await saveUserWithProfilePhoto(user, photoChange, actor.userId, session);
+      if (onboarding) assignedOnboarding = await assignOnboardingDuringCreation(actor.userId, user, onboarding, session);
+      await recordEmployeeAssignmentChange({
+        user,
+        previousUser: previousAssignmentUser,
+        changedBy: actor.userId,
+        changeReason: normalizeText(
+          payload?.assignmentChangeReason ||
+            payload?.changeReason ||
+            (isCreate ? "Initial employee assignment" : "Employee assignment updated")
+        ),
+        changeType: isCreate ? "initial_assignment" : undefined,
+        source: isCreate ? "managed_user_create" : "managed_user_update",
+        session,
+      });
     });
-  });
+  } finally {
+    await discardUnattachedProfilePhoto(photoChange);
+  }
 
   await syncManagedUserTdsDeclaration(user);
 
@@ -1976,6 +1958,7 @@ async function saveManagedUser({
 
   return {
     user: populatedUser,
+    onboarding: assignedOnboarding,
     setup: setupInfo,
     companyWasAutoCreated:
       actor.role === "superadmin" &&
@@ -2340,6 +2323,9 @@ async function validateBulkRow(row: any) {
         })
       : null;
   const errors = [...row.errors];
+  // Preview must enforce the same password-only bulk contract as commit; it never returns password values.
+  if (!normalizeText(row.payload.password)) errors.push("Fill the Password column before importing this employee");
+  else if (!validatePasswordStrength(normalizeText(row.payload.password))) errors.push("Password must have at least 8 characters, uppercase, lowercase and a number");
   const reportingManagerUsername = normalizeEmail(row.payload.reportingManagerUsername);
   let resolvedReportingManager: any = null;
   let existingCodeUser: any = null;
@@ -2770,6 +2756,7 @@ export async function createManagedUserHandler(req: Request, res: Response) {
       message: getManagedUserSuccessMessage("created"),
       data: {
         user: serializeUser(result.user),
+        onboarding: result.onboarding,
         setup: result.setup || null,
       },
     });
@@ -2816,6 +2803,7 @@ export async function createCompanyAdminHandler(req: Request, res: Response) {
       message: "Company admin created successfully",
       data: {
         user: serializeUser(result.user),
+        onboarding: result.onboarding,
         setup: result.setup || null,
       },
     });
@@ -3482,6 +3470,8 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
     }
 
     const dryRun = String(req.body?.dryRun || req.query?.dryRun || "").toLowerCase() === "true";
+    const onboarding = parseCreationOnboarding(req.body?.onboarding);
+    if (onboarding && requester.role === "superadmin") throw generateError("Assign onboarding from an authorized company account", 403);
     const bulkCompanyId =
       requester.role === "superadmin"
         ? normalizeText(req.body?.companyId || req.body?.company)
@@ -3504,18 +3494,23 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
       });
     }
 
+    const onboardingPreview = onboarding ? await previewCreationOnboarding(requester.userId, bulkTargetCompanyId, onboarding) : null;
     const rows = await parseBulkWorkbook(req.file.buffer, {
       companyId: bulkCompanyId,
       companyName: bulkCompanyName,
       uploadRole: normalizeText(req.body?.uploadRole || req.body?.role),
     });
     const previewRows = await buildBulkPreview(rows);
+    if (onboarding) {
+      for (const row of previewRows) Object.assign(row, { onboardingPlanned: row.action === "CREATE" && row.errors.length === 0 });
+    }
 
     if (dryRun) {
       return res.status(200).json({
         success: true,
         data: {
           preview: previewRows,
+          onboarding: onboardingPreview,
           totalRows: previewRows.length,
         },
       });
@@ -3567,7 +3562,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
         }
 
         const result = await saveManagedUser({
-          payload: row.payload,
+          payload: { ...row.payload, ...(onboarding ? { onboarding } : {}) },
           actor: requester,
           existingUserId: undefined,
           sendSetupEmail: false,
@@ -3581,6 +3576,7 @@ export async function bulkManagedUsersHandler(req: any, res: Response) {
           success: true,
           action: "CREATE",
           user: serializeUser(result.user),
+          onboarding: result.onboarding,
         });
       } catch (error: any) {
         failedCount += 1;
@@ -3696,11 +3692,14 @@ export async function getManagedUserProfileDetailsHandler(req: Request, res: Res
 }
 
 export async function updateManagedUserPersonalDetailsHandler(req: Request, res: Response) {
+  let photoChange: Awaited<ReturnType<typeof prepareProfilePhoto>> = null;
   try {
     const targetUserId = req.params.id;
-    if (req.body?.pic?.isAdd && req.body?.pic?.buffer) {
-      validateProfileImageUpload(req.body.pic);
-    }
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) throw generateError("Invalid user id", 400);
+    const user = await User.findOne({ _id: targetUserId, deletedAt: null });
+    if (!user) throw generateError("User not found", 404);
+    const actor = getEmployeeRequestActor(req);
+    assertProfilePhotoWriteAccess(actor, user);
     let profile = await ProfileDetails.findOne({ user: targetUserId });
     if (!profile) profile = new ProfileDetails({ user: targetUserId });
     
@@ -3725,60 +3724,36 @@ export async function updateManagedUserPersonalDetailsHandler(req: Request, res:
       emergencyContactNumber: req.body.emergencyContactNumber,
       personalEmail: req.body.personalEmail,
     };
-    await profile.save();
-
-    // Sync core fields back to User collection
-    const user = await User.findById(targetUserId);
-    if (user) {
-      if (req.body.employeeNumber !== undefined) user.employeeNumber = req.body.employeeNumber;
-      if (req.body.designation !== undefined) user.designation = req.body.designation;
-      if (req.body.fullName !== undefined) user.name = req.body.fullName;
-      
-      if (req.body.dateOfBirth !== undefined) {
-        user.dateOfBirth = req.body.dateOfBirth === "" ? null : req.body.dateOfBirth;
-      }
-      if (req.body.gender !== undefined) {
-        const genderMap: Record<string, number> = { 'male': 1, 'female': 2, 'other': 3 };
-        user.gender = genderMap[String(req.body.gender).toLowerCase()] || user.gender;
-      }
-      if (req.body.mobileNumber !== undefined) user.mobileNumber = req.body.mobileNumber;
-      if (req.body.email !== undefined) user.username = req.body.email; // assuming email mapped to username
-      if (req.body.address !== undefined) user.address = req.body.address;
-      if (req.body.city !== undefined) user.city = req.body.city;
-      if (req.body.state !== undefined) user.state = req.body.state;
-      if (req.body.country !== undefined) user.country = req.body.country;
-      if (req.body.postalCode !== undefined) user.postalCode = req.body.postalCode;
-      if (req.body.department !== undefined) user.department = req.body.department;
-      if (req.body.officeLocation !== undefined) user.officeLocation = req.body.officeLocation;
-
-      if (req.body.pic) {
-        if (req.body.pic.isDeleted) {
-          user.pic = null;
-        } else if (req.body.pic.isAdd && req.body.pic.buffer) {
-          validateProfileImageUpload(req.body.pic);
-          if (req.body.pic.filename) {
-            const lastDotIndex = req.body.pic.filename.lastIndexOf('.');
-            if (lastDotIndex !== -1) {
-              const name = req.body.pic.filename.substring(0, lastDotIndex);
-              const ext = req.body.pic.filename.substring(lastDotIndex);
-              req.body.pic.filename = `${name}_${Date.now()}${ext}`;
-            } else {
-              req.body.pic.filename = `${req.body.pic.filename}_${Date.now()}`;
-            }
-          }
-          const uploadedUrl = await uploadFile(req.body.pic);
-          user.pic = { url: uploadedUrl };
-        }
-      }
-
-      console.log("DEBUG BACKEND BEFORE SAVE: department=", user.department, "location=", user.officeLocation);
-      await user.save();
-      console.log("DEBUG BACKEND AFTER SAVE!");
+    // Sync core fields back to User collection.
+    if (req.body.employeeNumber !== undefined) user.employeeNumber = req.body.employeeNumber;
+    if (req.body.designation !== undefined) user.designation = req.body.designation;
+    if (req.body.fullName !== undefined) user.name = req.body.fullName;
+    if (req.body.dateOfBirth !== undefined) user.dateOfBirth = req.body.dateOfBirth === "" ? null : req.body.dateOfBirth;
+    if (req.body.gender !== undefined) {
+      const genderMap: Record<string, number> = { male: 1, female: 2, other: 3 };
+      user.gender = genderMap[String(req.body.gender).toLowerCase()] || user.gender;
     }
+    if (req.body.mobileNumber !== undefined) user.mobileNumber = req.body.mobileNumber;
+    if (req.body.email !== undefined) user.username = req.body.email;
+    if (req.body.address !== undefined) user.address = req.body.address;
+    if (req.body.city !== undefined) user.city = req.body.city;
+    if (req.body.state !== undefined) user.state = req.body.state;
+    if (req.body.country !== undefined) user.country = req.body.country;
+    if (req.body.postalCode !== undefined) user.postalCode = req.body.postalCode;
+    if (req.body.department !== undefined) user.department = req.body.department;
+    if (req.body.officeLocation !== undefined) user.officeLocation = req.body.officeLocation;
+
+    photoChange = await prepareProfilePhoto(user, actor._id, req.body.pic, req.body.expectedPhotoUrl);
+    await mongoose.connection.transaction(async (session) => {
+      await saveUserWithProfilePhoto(user, photoChange, actor._id, session);
+      await profile!.save({ session });
+    });
 
     return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {
     return res.status(error?.statusCode || 500).json({ success: false, error: error.message || "Failed to update personal details" });
+  } finally {
+    await discardUnattachedProfilePhoto(photoChange);
   }
 }
 
