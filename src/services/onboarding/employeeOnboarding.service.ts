@@ -73,13 +73,23 @@ function ensureManager(ctx: Context) {
   ensurePermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING);
   ensurePermission(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING);
 }
-export const onboardingWorkspace = read(async (_req, ctx) => ({ data: {
-  canView: hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING), canManage: hasPermission(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING),
-  canViewTemplates: hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES),
-  canManageAutomation: canManageOnboardingAutomation(ctx.actor),
-  canManageDocumentSecurity: canManageOnboardingAutomation(ctx.actor),
-  scopes: ["mine", "tasks", ...(hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING) ? ["organization"] : [])],
-} }));
+const nonQueueTaskFilter = (actor: any) => ({ tasks: { $elemMatch: {
+  "assignees.user": actor._id, $or: [{ owner: { $ne: "hr" } }, { ownerResolution: "manual" }],
+} } });
+export const onboardingWorkspace = read(async (_req, ctx) => {
+  const canView = hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING);
+  // Own onboarding already includes employee tasks; keep a separate inbox for work on other employees.
+  const canViewAssignedTasks = canView || ["admin", "hradmin", "hr"].includes(ctx.actor.role) || Boolean(await Instance.exists({
+    company: ctx.company, employee: { $ne: ctx.actor._id }, ...nonQueueTaskFilter(ctx.actor),
+  }));
+  return { data: {
+    canView, canManage: hasPermission(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING), canViewAssignedTasks,
+    canViewTemplates: hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING_TEMPLATES),
+    canManageAutomation: canManageOnboardingAutomation(ctx.actor),
+    canManageDocumentSecurity: canManageOnboardingAutomation(ctx.actor),
+    scopes: ["mine", "tasks", ...(canView ? ["organization"] : [])],
+  } };
+});
 export const onboardingEmployees = read(async (req, ctx) => {
   ensureManager(ctx);
   const { page, limit, skip } = pagination(req.query), search = searchRegex(req.query.search);
@@ -118,7 +128,7 @@ export const listEmployeeOnboarding = read(async (req, ctx) => {
   const employeeScope = scope === "organization" ? onboardingEmployeeScope(ctx.actor) : {};
   const queueScope = Object.fromEntries(Object.entries(onboardingEmployeeScope(ctx.actor, PERMISSION_KEYS.MANAGE_ONBOARDING)).map(([key, value]) => [`employeeRecord.${key}`, value]));
   const taskAccess = scope === "tasks" ? [{ $match: { $or: [
-    { tasks: { $elemMatch: { "assignees.user": ctx.actor._id, $or: [{ owner: { $ne: "hr" } }, { ownerResolution: "manual" }] } } },
+    nonQueueTaskFilter(ctx.actor),
     ...(hasPermission(ctx.actor, PERMISSION_KEYS.VIEW_ONBOARDING) ? [queueScope] : []),
   ] } }] : [];
   const search = searchRegex(req.query.search);
