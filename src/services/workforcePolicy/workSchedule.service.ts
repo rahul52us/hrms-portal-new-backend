@@ -9,6 +9,7 @@ import WorkScheduleVersion, {
   WORK_SCHEDULE_SATURDAY_RULES,
 } from "../../schemas/WorkforcePolicy/WorkScheduleVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery } from "./workforcePolicyReadScope";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -178,6 +179,8 @@ export async function listWorkSchedulesService(req: any, res: Response, next: Ne
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
 
+    await scopePolicyResourceQuery(req, companyObjectId, "work_schedule", match);
+    const assignmentScope = await policyAssignmentReadFilter(req, companyObjectId);
     const [schedules, total] = await Promise.all([
       WorkSchedule.find(match)
         .sort({ status: 1, name: 1 })
@@ -191,6 +194,7 @@ export async function listWorkSchedulesService(req: any, res: Response, next: Ne
       ? await WorkScheduleVersion.find({
           company: companyObjectId,
           schedule: { $in: scheduleIds },
+          ...policyVersionReadFilter(req),
         })
           .sort({ versionNumber: -1 })
           .lean()
@@ -202,6 +206,7 @@ export async function listWorkSchedulesService(req: any, res: Response, next: Ne
               company: companyObjectId,
               resourceType: "work_schedule",
               resource: { $in: scheduleIds },
+              ...assignmentScope,
               $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }],
             },
           },
@@ -245,10 +250,12 @@ export async function getWorkScheduleService(req: any, res: Response, next: Next
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    await assertPolicyResourceReadable(req, companyObjectId, "work_schedule", req.params.scheduleId);
     const schedule = await findWorkSchedule(companyObjectId, req.params.scheduleId);
     const versions = await WorkScheduleVersion.find({
       company: companyObjectId,
       schedule: schedule._id,
+      ...policyVersionReadFilter(req),
     })
       .sort({ versionNumber: -1 })
       .lean();

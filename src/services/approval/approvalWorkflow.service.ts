@@ -9,6 +9,7 @@ import ApprovalWorkflowVersion, {
   ApprovalWorkflowStepI,
 } from "../../schemas/Approval/ApprovalWorkflowVersion.schema";
 import User from "../../schemas/User/User";
+import { policyVersionReadFilter, scopePolicyWorkflowQuery } from "../workforcePolicy/workforcePolicyReadScope";
 import {
   approvalWorkflowVersionRequestTypes,
   approvalWorkflowVersionSupportsRequestType,
@@ -220,13 +221,13 @@ export async function resolveEffectiveApprovalWorkflowReference(options: {
   };
 }
 
-async function listWithVersions(company: mongoose.Types.ObjectId, match: any, page: number, limit: number) {
+async function listWithVersions(req: any, company: mongoose.Types.ObjectId, match: any, page: number, limit: number) {
   const [workflows, total] = await Promise.all([
     ApprovalWorkflow.find(match).sort({ status: 1, name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
     ApprovalWorkflow.countDocuments(match),
   ]);
   const versions = workflows.length
-    ? await ApprovalWorkflowVersion.find({ company, workflow: { $in: workflows.map((item) => item._id) } })
+    ? await ApprovalWorkflowVersion.find({ company, workflow: { $in: workflows.map((item) => item._id) }, ...policyVersionReadFilter(req) })
         .sort({ versionNumber: -1 })
         .lean()
     : [];
@@ -268,7 +269,8 @@ export async function listApprovalWorkflowsService(req: any, res: Response, next
       const regex = new RegExp(escapeRegex(search), "i");
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
-    const result = await listWithVersions(companyObjectId, match, page, limit);
+    await scopePolicyWorkflowQuery(req, companyObjectId, match);
+    const result = await listWithVersions(req, companyObjectId, match, page, limit);
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
     next(error);
@@ -279,8 +281,11 @@ export async function getApprovalWorkflowService(req: any, res: Response, next: 
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query?.companyId);
-    const workflow = await findWorkflow(companyObjectId, req.params.workflowId);
-    const versions = await ApprovalWorkflowVersion.find({ company: companyObjectId, workflow: workflow._id })
+    const match: any = { company: companyObjectId, _id: new mongoose.Types.ObjectId(validateObjectId(req.params.workflowId, "approval workflow id")) };
+    await scopePolicyWorkflowQuery(req, companyObjectId, match);
+    const workflow = await ApprovalWorkflow.findOne(match);
+    if (!workflow) throw generateError("Approval workflow not found", 404);
+    const versions = await ApprovalWorkflowVersion.find({ company: companyObjectId, workflow: workflow._id, ...policyVersionReadFilter(req) })
       .sort({ versionNumber: -1 })
       .populate("steps.approverUserIds", "name username code role")
       .lean();

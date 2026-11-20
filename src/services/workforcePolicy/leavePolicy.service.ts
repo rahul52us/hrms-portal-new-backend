@@ -14,6 +14,7 @@ import LeavePolicyVersion, {
 } from "../../schemas/WorkforcePolicy/LeavePolicyVersion.schema";
 import LeaveType from "../../schemas/WorkforcePolicy/LeaveType.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery, scopePolicyLeaveTypeQuery } from "./workforcePolicyReadScope";
 import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
@@ -551,6 +552,7 @@ export async function listLeaveTypesService(req: any, res: Response, next: NextF
       const regex = new RegExp(escapeRegex(search), "i");
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
+    await scopePolicyLeaveTypeQuery(req, companyObjectId, match);
     const [data, total] = await Promise.all([
       LeaveType.find(match)
         .sort({ status: 1, displayOrder: 1, name: 1 })
@@ -722,6 +724,8 @@ export async function listLeavePoliciesService(req: any, res: Response, next: Ne
       const regex = new RegExp(escapeRegex(search), "i");
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
+    await scopePolicyResourceQuery(req, companyObjectId, "leave_policy", match);
+    const assignmentScope = await policyAssignmentReadFilter(req, companyObjectId);
     const [policies, total] = await Promise.all([
       LeavePolicy.find(match)
         .sort({ status: 1, name: 1 })
@@ -733,7 +737,7 @@ export async function listLeavePoliciesService(req: any, res: Response, next: Ne
     const policyIds = policies.map((policy) => policy._id);
     const [versions, assignments] = policyIds.length
       ? await Promise.all([
-          LeavePolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds } })
+          LeavePolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds }, ...policyVersionReadFilter(req) })
             .sort({ versionNumber: -1 })
             .lean(),
           WorkforcePolicyAssignment.aggregate([
@@ -742,6 +746,7 @@ export async function listLeavePoliciesService(req: any, res: Response, next: Ne
                 company: companyObjectId,
                 resourceType: "leave_policy",
                 resource: { $in: policyIds },
+                ...assignmentScope,
                 $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }],
               },
             },
@@ -784,8 +789,9 @@ export async function getLeavePolicyService(req: any, res: Response, next: NextF
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    await assertPolicyResourceReadable(req, companyObjectId, "leave_policy", req.params.policyId);
     const policy = await findLeavePolicy(companyObjectId, req.params.policyId);
-    const versions = await LeavePolicyVersion.find({ company: companyObjectId, policy: policy._id })
+    const versions = await LeavePolicyVersion.find({ company: companyObjectId, policy: policy._id, ...policyVersionReadFilter(req) })
       .sort({ versionNumber: -1 })
       .lean();
     return res.status(200).json({

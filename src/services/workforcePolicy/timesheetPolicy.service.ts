@@ -3,6 +3,7 @@ import { generateError } from "../../config/Error/functions";
 import Policy from "../../schemas/WorkforcePolicy/TimesheetPolicy.schema";
 import Version from "../../schemas/WorkforcePolicy/TimesheetPolicyVersion.schema";
 import Assignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery } from "./workforcePolicyReadScope";
 import User from "../../schemas/User/User";
 import { dateKey, objectId, projectCode, shortText } from "../project/project.utils";
 import { normalizeTimesheetRules, timesheetPagination as pagination } from "../timesheet/timesheetRules.utils";
@@ -82,13 +83,15 @@ export const listTimesheetPolicies = handler(async (req, ctx) => {
     const expression = new RegExp(escapeRegex(shortText(req.query.search, "Search", 1, 100)), "i");
     match.$or = [{ name: expression }, { code: expression }];
   }
+  await scopePolicyResourceQuery(req, ctx.company, "timesheet_policy", match);
+  const assignmentScope = await policyAssignmentReadFilter(req, ctx.company);
   const policies: any[] = await Policy.find(match).sort({ name: 1, _id: 1 }).skip(skip).limit(limit).lean();
   const ids = policies.map((item) => item._id);
   const [total, versions, counts] = await Promise.all([
     Policy.countDocuments(match),
-    Version.aggregate([{ $match: { company: ctx.company, policy: { $in: ids }, status: { $in: ["draft", "published"] } } },
+    Version.aggregate([{ $match: { company: ctx.company, policy: { $in: ids }, status: { $in: ["draft", "published"] }, ...policyVersionReadFilter(req) } },
       { $sort: { effectiveFrom: -1, versionNumber: -1 } }, { $group: { _id: { policy: "$policy", status: "$status" }, version: { $first: "$$ROOT" } } }]),
-    Assignment.aggregate([{ $match: { company: ctx.company, resourceType: "timesheet_policy", resource: { $in: ids }, $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }] } }, { $group: { _id: "$resource", count: { $sum: 1 } } }]),
+    Assignment.aggregate([{ $match: { company: ctx.company, resourceType: "timesheet_policy", resource: { $in: ids }, ...assignmentScope, $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }] } }, { $group: { _id: "$resource", count: { $sum: 1 } } }]),
   ]);
   return { data: policies.map((policy) => ({ ...policy,
     draftVersion: versions.find((v) => String(v._id.policy) === String(policy._id) && v._id.status === "draft")?.version || null,
@@ -98,8 +101,9 @@ export const listTimesheetPolicies = handler(async (req, ctx) => {
 });
 
 export const getTimesheetPolicy = handler(async (req, ctx) => {
+  await assertPolicyResourceReadable(req, ctx.company, "timesheet_policy", req.params.policyId);
   const policy = await policyFor(req, ctx, null);
-  const versions: any[] = await Version.find({ company: ctx.company, policy: policy._id }).sort({ versionNumber: -1 }).lean();
+  const versions: any[] = await Version.find({ company: ctx.company, policy: policy._id, ...policyVersionReadFilter(req) }).sort({ versionNumber: -1 }).lean();
   return { data: { policy, versions: versions.map((version) => ({ ...version, effectiveTo: getVersionEffectiveTo(version, versions.filter((v) => v.status === "published")) })) } };
 });
 

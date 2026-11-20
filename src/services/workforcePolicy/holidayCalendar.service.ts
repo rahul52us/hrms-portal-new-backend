@@ -4,6 +4,7 @@ import { generateError } from "../../config/Error/functions";
 import HolidayCalendar from "../../schemas/WorkforcePolicy/HolidayCalendar.schema";
 import HolidayCalendarVersion from "../../schemas/WorkforcePolicy/HolidayCalendarVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery } from "./workforcePolicyReadScope";
 import {
   ensurePolicyManager,
   ensurePolicyViewer,
@@ -92,6 +93,8 @@ export async function listHolidayCalendarsService(req: any, res: Response, next:
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
 
+    await scopePolicyResourceQuery(req, companyObjectId, "holiday_calendar", match);
+    const assignmentScope = await policyAssignmentReadFilter(req, companyObjectId);
     const [calendars, total] = await Promise.all([
       HolidayCalendar.find(match)
         .sort({ status: 1, name: 1 })
@@ -102,7 +105,7 @@ export async function listHolidayCalendarsService(req: any, res: Response, next:
     ]);
     const calendarIds = calendars.map((calendar) => calendar._id);
     const versions = calendarIds.length
-      ? await HolidayCalendarVersion.find({ company: companyObjectId, calendar: { $in: calendarIds } })
+      ? await HolidayCalendarVersion.find({ company: companyObjectId, calendar: { $in: calendarIds }, ...policyVersionReadFilter(req) })
           .sort({ versionNumber: -1 })
           .lean()
       : [];
@@ -113,6 +116,7 @@ export async function listHolidayCalendarsService(req: any, res: Response, next:
               company: companyObjectId,
               resourceType: "holiday_calendar",
               resource: { $in: calendarIds },
+              ...assignmentScope,
               $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }],
             },
           },
@@ -155,10 +159,12 @@ export async function getHolidayCalendarService(req: any, res: Response, next: N
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    await assertPolicyResourceReadable(req, companyObjectId, "holiday_calendar", req.params.calendarId);
     const calendar = await findHolidayCalendar(companyObjectId, req.params.calendarId);
     const versions = await HolidayCalendarVersion.find({
       company: companyObjectId,
       calendar: calendar._id,
+      ...policyVersionReadFilter(req),
     })
       .sort({ versionNumber: -1 })
       .lean();

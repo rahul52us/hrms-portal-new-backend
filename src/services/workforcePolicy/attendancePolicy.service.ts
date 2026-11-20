@@ -8,6 +8,7 @@ import AttendancePolicyVersion, {
 } from "../../schemas/WorkforcePolicy/AttendancePolicyVersion.schema";
 import { validatePublishedApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery } from "./workforcePolicyReadScope";
 import { normalizeAllowedNetworks } from "../attendance/attendancePunchAccess.utils";
 import {
   ensurePolicyManager,
@@ -388,6 +389,8 @@ export async function listAttendancePoliciesService(req: any, res: Response, nex
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
 
+    await scopePolicyResourceQuery(req, companyObjectId, "attendance_policy", match);
+    const assignmentScope = await policyAssignmentReadFilter(req, companyObjectId);
     const [policies, total] = await Promise.all([
       AttendancePolicy.find(match)
         .sort({ status: 1, name: 1 })
@@ -398,7 +401,7 @@ export async function listAttendancePoliciesService(req: any, res: Response, nex
     ]);
     const policyIds = policies.map((policy) => policy._id);
     const versions = policyIds.length
-      ? await AttendancePolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds } })
+      ? await AttendancePolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds }, ...policyVersionReadFilter(req) })
           .sort({ versionNumber: -1 })
           .lean()
       : [];
@@ -409,6 +412,7 @@ export async function listAttendancePoliciesService(req: any, res: Response, nex
               company: companyObjectId,
               resourceType: "attendance_policy",
               resource: { $in: policyIds },
+              ...assignmentScope,
               $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }],
             },
           },
@@ -451,10 +455,12 @@ export async function getAttendancePolicyService(req: any, res: Response, next: 
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    await assertPolicyResourceReadable(req, companyObjectId, "attendance_policy", req.params.policyId);
     const policy = await findAttendancePolicy(companyObjectId, req.params.policyId);
     const versions = await AttendancePolicyVersion.find({
       company: companyObjectId,
       policy: policy._id,
+      ...policyVersionReadFilter(req),
     })
       .sort({ versionNumber: -1 })
       .lean();

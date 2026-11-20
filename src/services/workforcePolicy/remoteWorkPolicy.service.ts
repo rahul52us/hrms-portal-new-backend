@@ -8,6 +8,7 @@ import RemoteWorkPolicyVersion, {
   RemoteWorkRules,
 } from "../../schemas/WorkforcePolicy/RemoteWorkPolicyVersion.schema";
 import WorkforcePolicyAssignment from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
+import { assertPolicyResourceReadable, policyAssignmentReadFilter, policyVersionReadFilter, scopePolicyResourceQuery } from "./workforcePolicyReadScope";
 import { resolveEffectiveApprovalWorkflowReference } from "../approval/approvalWorkflow.service";
 import {
   ensurePolicyManager,
@@ -143,6 +144,8 @@ export async function listRemoteWorkPoliciesService(req: any, res: Response, nex
       const regex = new RegExp(escapeRegex(search), "i");
       match.$or = [{ name: regex }, { code: regex }, { description: regex }];
     }
+    await scopePolicyResourceQuery(req, companyObjectId, "remote_work_policy", match);
+    const assignmentScope = await policyAssignmentReadFilter(req, companyObjectId);
     const [policies, total] = await Promise.all([
       RemoteWorkPolicy.find(match).sort({ status: 1, name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
       RemoteWorkPolicy.countDocuments(match),
@@ -150,11 +153,11 @@ export async function listRemoteWorkPoliciesService(req: any, res: Response, nex
     const policyIds = policies.map((policy) => policy._id);
     const [versions, assignments] = await Promise.all([
       policyIds.length
-        ? RemoteWorkPolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds } }).sort({ versionNumber: -1 }).lean()
+        ? RemoteWorkPolicyVersion.find({ company: companyObjectId, policy: { $in: policyIds }, ...policyVersionReadFilter(req) }).sort({ versionNumber: -1 }).lean()
         : [],
       policyIds.length
         ? WorkforcePolicyAssignment.aggregate([
-            { $match: { company: companyObjectId, resourceType: "remote_work_policy", resource: { $in: policyIds }, $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }] } },
+            { $match: { company: companyObjectId, resourceType: "remote_work_policy", resource: { $in: policyIds }, ...assignmentScope, $or: [{ effectiveTo: null }, { effectiveTo: { $gt: new Date() } }] } },
             { $group: { _id: "$resource", count: { $sum: 1 } } },
           ])
         : [],
@@ -184,8 +187,9 @@ export async function getRemoteWorkPolicyService(req: any, res: Response, next: 
   try {
     ensurePolicyViewer(req);
     const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    await assertPolicyResourceReadable(req, companyObjectId, "remote_work_policy", req.params.policyId);
     const policy = await findPolicy(companyObjectId, req.params.policyId);
-    const versions = await RemoteWorkPolicyVersion.find({ company: companyObjectId, policy: policy._id }).sort({ versionNumber: -1 }).lean();
+    const versions = await RemoteWorkPolicyVersion.find({ company: companyObjectId, policy: policy._id, ...policyVersionReadFilter(req) }).sort({ versionNumber: -1 }).lean();
     return res.status(200).json({ success: true, data: { policy: policy.toObject(), versions: serializeVersions(versions) } });
   } catch (error) {
     next(error);

@@ -24,6 +24,7 @@ import WorkforcePolicyAssignment, {
   POLICY_SCOPE_TYPES,
 } from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
 import WorkforcePolicyAuditLog from "../../schemas/WorkforcePolicy/WorkforcePolicyAuditLog.schema";
+import { policyAssignmentReadFilter, scopePolicyAuditQuery, workforceEmployeeReadScope } from "./workforcePolicyReadScope";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
 import {
   ensurePolicyManager,
@@ -289,6 +290,7 @@ export async function listPolicyAssignmentsService(req: any, res: Response, next
       match.effectiveTo = { $lte: now };
     }
 
+    Object.assign(match, await policyAssignmentReadFilter(req, companyObjectId));
     const [assignments, total] = await Promise.all([
       WorkforcePolicyAssignment.find(match)
         .populate("resource", "name code status")
@@ -791,52 +793,7 @@ export async function resolveEmployeePolicyData(options: {
 }
 
 function applyCoverageActorScope(match: any, actor: any) {
-  const role = normalizeRole(actor?.role);
-  if (["superadmin", "admin", "hradmin"].includes(role)) return;
-
-  if (role === "departmenthead") {
-    const department = normalizeText(actor?.department);
-    if (!department) throw generateError("Department scope is missing", 403);
-    match.department = { $regex: new RegExp(`^${escapeRegex(department)}$`, "i") };
-    return;
-  }
-
-  if (role === "hr") {
-    const scope = actor?.hrScope || {};
-    const departments = (Array.isArray(scope.departments) ? scope.departments : [])
-      .map((item: unknown) => normalizeText(item))
-      .filter(Boolean);
-    if (!departments.length) throw generateError("HR department scope is missing", 403);
-    match.$and = match.$and || [];
-    match.$and.push({
-      $or: departments.map((department: string) => ({
-        department: { $regex: new RegExp(`^${escapeRegex(department)}$`, "i") },
-      })),
-    });
-
-    const teams = (Array.isArray(scope.teams) ? scope.teams : [])
-      .map((item: unknown) => normalizeText(item))
-      .filter(Boolean);
-    if (teams.length) {
-      match.$and.push({
-        $or: teams.map((team: string) => ({
-          team: { $regex: new RegExp(`^${escapeRegex(team)}$`, "i") },
-        })),
-      });
-    }
-
-    const locationIds = normalizeObjectIdList(
-      scope.officeLocations || scope.officeLocationIds || scope.locations || scope.locationIds
-    );
-    if (locationIds.length) {
-      match.officeLocation = {
-        $in: locationIds.map((id) => new mongoose.Types.ObjectId(id)),
-      };
-    }
-    return;
-  }
-
-  throw generateError("You cannot view company policy coverage", 403);
+  Object.assign(match, workforceEmployeeReadScope(actor));
 }
 
 async function mapWithConcurrency<T, R>(
@@ -1024,6 +981,7 @@ export async function listPolicyAuditLogService(req: any, res: Response, next: N
     const match: any = { company: companyObjectId };
     if (entityType) match.entityType = entityType;
     if (entityId) match.entityId = new mongoose.Types.ObjectId(validateObjectId(entityId, "audit entity id"));
+    await scopePolicyAuditQuery(req, companyObjectId, match);
     const [logs, total] = await Promise.all([
       WorkforcePolicyAuditLog.find(match)
         .populate("actor", "name username role")
