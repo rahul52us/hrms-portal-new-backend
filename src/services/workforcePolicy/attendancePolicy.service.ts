@@ -517,7 +517,7 @@ export async function createAttendancePolicyService(req: any, res: Response, nex
       entityId: policy._id as mongoose.Types.ObjectId,
       action: "created",
       actor: actorId,
-      details: { code, initialVersionId: version._id, effectiveFrom },
+      details: { code, initialVersionId: version._id, effectiveFrom, changeReason: version.changeReason },
     });
 
     return res.status(201).json({
@@ -635,7 +635,7 @@ export async function createAttendancePolicyVersionService(req: any, res: Respon
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_created",
       actor: actorId,
-      details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom },
+      details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason },
     });
 
     return res.status(201).json({
@@ -687,7 +687,7 @@ export async function updateAttendancePolicyVersionService(req: any, res: Respon
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_updated",
       actor: actorId,
-      details: { policyId: policy._id, versionNumber: version.versionNumber },
+      details: { policyId: policy._id, versionNumber: version.versionNumber, changeReason: version.changeReason },
     });
 
     return res.status(200).json({ success: true, message: "Attendance policy draft updated", data: version });

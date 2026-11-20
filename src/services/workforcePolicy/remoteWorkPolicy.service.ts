@@ -210,7 +210,7 @@ export async function createRemoteWorkPolicyService(req: any, res: Response, nex
     const policy = await RemoteWorkPolicy.create({ company: companyObjectId, name, code, description: normalizeText(req.body.description), latestVersionNumber: 1, createdBy: actorId });
     createdPolicyId = policy._id as mongoose.Types.ObjectId;
     const version = await RemoteWorkPolicyVersion.create({ company: companyObjectId, policy: policy._id, versionNumber: 1, status: "draft", effectiveFrom, changeReason: normalizeText(req.body.changeReason) || "Initial remote-work configuration", rules, createdBy: actorId });
-    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_policy", entityId: policy._id as mongoose.Types.ObjectId, action: "created", actor: actorId, details: { code, initialVersionId: version._id, effectiveFrom } });
+    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_policy", entityId: policy._id as mongoose.Types.ObjectId, action: "created", actor: actorId, details: { code, initialVersionId: version._id, effectiveFrom, changeReason: version.changeReason } });
     return res.status(201).json({ success: true, message: "Remote-work policy draft created", data: { policy, version } });
   } catch (error: any) {
     if (createdPolicyId) await RemoteWorkPolicy.deleteOne({ _id: createdPolicyId }).catch(() => undefined);
@@ -262,7 +262,7 @@ export async function createRemoteWorkPolicyVersionService(req: any, res: Respon
     const updated = await RemoteWorkPolicy.findOneAndUpdate({ _id: policy._id, company: companyObjectId, status: "active" }, { $inc: { latestVersionNumber: 1 } }, { new: true });
     if (!updated) throw generateError("Remote-work policy is no longer active", 409);
     const version = await RemoteWorkPolicyVersion.create({ company: companyObjectId, policy: policy._id, versionNumber: updated.latestVersionNumber, status: "draft", effectiveFrom, changeReason: normalizeText(req.body.changeReason), rules, createdBy: actorId });
-    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_version", entityId: version._id as mongoose.Types.ObjectId, action: "draft_created", actor: actorId, details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom } });
+    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_version", entityId: version._id as mongoose.Types.ObjectId, action: "draft_created", actor: actorId, details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason } });
     return res.status(201).json({ success: true, message: "Remote-work policy version draft created", data: version });
   } catch (error) {
     next(error);
@@ -283,7 +283,7 @@ export async function updateRemoteWorkPolicyVersionService(req: any, res: Respon
     if (req.body.effectiveFrom !== undefined) version.effectiveFrom = parseEffectiveDate(req.body.effectiveFrom, "effective from date", false);
     if (req.body.changeReason !== undefined) version.changeReason = normalizeText(req.body.changeReason);
     await version.save();
-    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_version", entityId: version._id as mongoose.Types.ObjectId, action: "draft_updated", actor: actorId, details: { policyId: policy._id, versionNumber: version.versionNumber } });
+    await writePolicyAudit({ company: companyObjectId, entityType: "remote_work_version", entityId: version._id as mongoose.Types.ObjectId, action: "draft_updated", actor: actorId, details: { policyId: policy._id, versionNumber: version.versionNumber, changeReason: version.changeReason } });
     return res.status(200).json({ success: true, message: "Remote-work policy draft updated", data: version });
   } catch (error) {
     next(error);

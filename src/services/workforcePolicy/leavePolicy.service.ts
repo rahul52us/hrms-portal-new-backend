@@ -845,7 +845,7 @@ export async function createLeavePolicyService(req: any, res: Response, next: Ne
       entityId: policy._id as mongoose.Types.ObjectId,
       action: "created",
       actor: actorId,
-      details: { code, initialVersionId: version._id, effectiveFrom, ruleCount: rules.length },
+      details: { code, initialVersionId: version._id, effectiveFrom, ruleCount: rules.length, changeReason: version.changeReason },
     });
     return res.status(201).json({
       success: true,
@@ -957,7 +957,7 @@ export async function createLeavePolicyVersionService(req: any, res: Response, n
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_created",
       actor: actorId,
-      details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom },
+      details: { policyId: policy._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason },
     });
     return res.status(201).json({
       success: true,
@@ -1006,7 +1006,7 @@ export async function updateLeavePolicyVersionService(req: any, res: Response, n
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_updated",
       actor: actorId,
-      details: { policyId: policy._id, versionNumber: version.versionNumber },
+      details: { policyId: policy._id, versionNumber: version.versionNumber, changeReason: version.changeReason },
     });
     return res.status(200).json({ success: true, message: "Leave policy draft updated", data: version });
   } catch (error) {

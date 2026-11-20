@@ -218,7 +218,7 @@ export async function createHolidayCalendarService(req: any, res: Response, next
       entityId: calendar._id as mongoose.Types.ObjectId,
       action: "created",
       actor: actorId,
-      details: { code, initialVersionId: version._id, holidayCount: holidays.length },
+      details: { code, initialVersionId: version._id, holidayCount: holidays.length, changeReason: version.changeReason },
     });
 
     return res.status(201).json({
@@ -286,7 +286,7 @@ export async function createHolidayCalendarVersionService(req: any, res: Respons
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_created",
       actor: actorId,
-      details: { calendarId: calendar._id, versionNumber: version.versionNumber },
+      details: { calendarId: calendar._id, versionNumber: version.versionNumber, changeReason: version.changeReason },
     });
     return res.status(201).json({
       success: true,
@@ -329,7 +329,7 @@ export async function updateHolidayCalendarVersionService(req: any, res: Respons
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_updated",
       actor: actorId,
-      details: { calendarId: calendar._id, holidayCount: version.holidays.length },
+      details: { calendarId: calendar._id, holidayCount: version.holidays.length, changeReason: version.changeReason },
     });
     return res.status(200).json({ success: true, message: "Holiday calendar draft updated", data: version });
   } catch (error) {
@@ -385,7 +385,7 @@ export async function publishHolidayCalendarVersionService(req: any, res: Respon
       entityId: version._id as mongoose.Types.ObjectId,
       action: "published",
       actor: actorId,
-      details: { calendarId: calendar._id, versionNumber: version.versionNumber, effectiveFrom },
+      details: { calendarId: calendar._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason },
     });
     return res.status(200).json({
       success: true,

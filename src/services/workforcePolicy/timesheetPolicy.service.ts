@@ -115,7 +115,7 @@ export const createTimesheetPolicy = handler(async (req, ctx, session) => {
   const [version] = await Version.create([{ company: ctx.company, policy: policy._id, versionNumber: 1,
     effectiveFrom: effectiveDate(req.body.effectiveFrom), rules,
     changeReason: shortText(req.body.changeReason || "Initial timesheet policy", "Change reason", 3, 500), createdBy: ctx.actor }], { session });
-  await audit(ctx, session, "timesheet_policy", policy._id, "created", { versionId: version._id, rules: version.rules });
+  await audit(ctx, session, "timesheet_policy", policy._id, "created", { versionId: version._id, rules: version.rules, changeReason: version.changeReason });
   return { data: { policy, version }, message: "Timesheet policy draft created" };
 }, true, 201);
 
@@ -127,7 +127,7 @@ export const createTimesheetPolicyVersion = handler(async (req, ctx, session) =>
   const [version] = await Version.create([{ company: ctx.company, policy: policy._id, versionNumber: policy.latestVersionNumber + 1,
     effectiveFrom: effectiveDate(req.body.effectiveFrom), rules: normalizeTimesheetRules(req.body.rules, source?.rules),
     changeReason: shortText(req.body.changeReason, "Change reason", 3, 500), createdBy: ctx.actor }], { session });
-  await audit(ctx, session, "timesheet_version", version._id, "draft_created", { policyId: policy._id, versionNumber: version.versionNumber });
+  await audit(ctx, session, "timesheet_version", version._id, "draft_created", { policyId: policy._id, versionNumber: version.versionNumber, changeReason: version.changeReason });
   return { data: version, message: "Timesheet policy version draft created" };
 }, true, 201);
 

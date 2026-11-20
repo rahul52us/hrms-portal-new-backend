@@ -27,6 +27,7 @@ async function main() {
   const chain = (data: any) => ({ select() { return this; }, sort() { return this; }, session() { return this; }, lean: async () => data });
   let lookups = 0;
   const created: any[] = [];
+  const auditEvents: any[] = [];
   // Query doubles exercise the actual handlers without connecting to any company database.
   Company.findOne = ((filter: any) => chain(String(filter._id) === String(company) ? { _id: company, company_name: "Fixture company", is_active: true } : null)) as any;
   User.find = ((filter: any) => {
@@ -49,7 +50,7 @@ async function main() {
     const stored = { ...input, _id: new mongoose.Types.ObjectId() }; created.push(stored);
     return [{ ...stored, populate: async () => undefined, toObject: () => stored }];
   }) as any;
-  Audit.create = (async () => ({})) as any;
+  Audit.create = (async (input: any) => { auditEvents.push(input); return {}; }) as any;
   const call = async (handler: any, query: any = {}, user: any = actor, body: any = {}) => {
     let status = 0, response: any, failure: any;
     await handler({ user, query, body, params: {} }, { status(value: number) { status = value; return this; }, json(value: any) { response = value; return this; } }, (error: any) => { failure = error; });
@@ -94,6 +95,8 @@ async function main() {
       await assert.rejects(call(createPolicyAssignmentService, {}, actor, { companyId: String(company), resourceType: "attendance_policy", resourceId: String(policy), scopeType: "employee", scopeId: String(employee._id), effectiveFrom: "2026-11-20", changeReason: "Fixture rejection" }), (error: any) => error.statusCode === 404);
     }
     assert.equal(created.length, 3, "Invalid targets cannot create assignment records");
+    assert.equal(auditEvents.length, 3);
+    assert.ok(auditEvents.every((event) => event.details.changeReason === "Fixture assignment"), "Assignment audit retains the searchable supplied reason");
   } finally {
     User.find = original.userFind; User.countDocuments = original.userCount; User.findOne = original.userOne;
     Company.findOne = original.companyOne; AttendancePolicy.findOne = original.policyOne; AttendanceVersion.findOne = original.versionOne;

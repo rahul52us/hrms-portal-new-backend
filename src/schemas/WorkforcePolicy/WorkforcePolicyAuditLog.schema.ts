@@ -61,6 +61,7 @@ const WorkforcePolicyAuditLogSchema = new Schema<WorkforcePolicyAuditLogI>(
 );
 
 WorkforcePolicyAuditLogSchema.index({ company: 1, entityType: 1, entityId: 1, createdAt: -1 });
+WorkforcePolicyAuditLogSchema.index({ company: 1, createdAt: -1, _id: -1 });
 
 const WorkforcePolicyAuditLog =
   (mongoose.models.WorkforcePolicyAuditLog as mongoose.Model<WorkforcePolicyAuditLogI>) ||

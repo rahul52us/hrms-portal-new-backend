@@ -344,7 +344,7 @@ export async function createApprovalWorkflowService(req: any, res: Response, nex
         entityId: workflow._id as mongoose.Types.ObjectId,
         action: "created",
         actor: actorId,
-        details: { code, applicableTo, versionNumber: 1, effectiveFrom },
+        details: { code, applicableTo, versionNumber: 1, effectiveFrom, changeReason: version.changeReason },
       }, session);
     });
     return res.status(201).json({ success: true, data: { workflow, version }, message: "Approval workflow draft created" });
@@ -520,6 +520,7 @@ export async function publishApprovalWorkflowVersionService(req: any, res: Respo
           autoApprove: version.autoApprove,
           applicableTo,
           effectiveFrom,
+          changeReason: version.changeReason,
         },
       }, session);
     });

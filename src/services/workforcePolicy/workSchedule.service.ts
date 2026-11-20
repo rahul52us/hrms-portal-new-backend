@@ -308,7 +308,7 @@ export async function createWorkScheduleService(req: any, res: Response, next: N
       entityId: schedule._id as mongoose.Types.ObjectId,
       action: "created",
       actor: actorId,
-      details: { code, initialVersionId: version._id, effectiveFrom },
+      details: { code, initialVersionId: version._id, effectiveFrom, changeReason: version.changeReason },
     });
     return res.status(201).json({
       success: true,
@@ -424,7 +424,7 @@ export async function createWorkScheduleVersionService(req: any, res: Response, 
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_created",
       actor: actorId,
-      details: { scheduleId: schedule._id, versionNumber: version.versionNumber, effectiveFrom },
+      details: { scheduleId: schedule._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason },
     });
     return res.status(201).json({
       success: true,
@@ -470,7 +470,7 @@ export async function updateWorkScheduleVersionService(req: any, res: Response, 
       entityId: version._id as mongoose.Types.ObjectId,
       action: "draft_updated",
       actor: actorId,
-      details: { scheduleId: schedule._id, versionNumber: version.versionNumber },
+      details: { scheduleId: schedule._id, versionNumber: version.versionNumber, changeReason: version.changeReason },
     });
     return res.status(200).json({
       success: true,
@@ -532,7 +532,7 @@ export async function publishWorkScheduleVersionService(req: any, res: Response,
       entityId: version._id as mongoose.Types.ObjectId,
       action: "published",
       actor: actorId,
-      details: { scheduleId: schedule._id, versionNumber: version.versionNumber, effectiveFrom },
+      details: { scheduleId: schedule._id, versionNumber: version.versionNumber, effectiveFrom, changeReason: version.changeReason },
     });
     return res.status(200).json({
       success: true,

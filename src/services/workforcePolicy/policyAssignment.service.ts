@@ -25,6 +25,7 @@ import WorkforcePolicyAssignment, {
 } from "../../schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema";
 import WorkforcePolicyAuditLog from "../../schemas/WorkforcePolicy/WorkforcePolicyAuditLog.schema";
 import { policyAssignmentReadFilter, scopePolicyAuditQuery, workforceEmployeeReadScope } from "./workforcePolicyReadScope";
+import { applyPolicyAuditFilters } from "./policyAuditFilters";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
 import {
   ensurePolicyManager,
@@ -418,6 +419,7 @@ export async function createPolicyAssignmentService(req: any, res: Response, nex
         scopeId: scope.scopeId,
         effectiveFrom,
         effectiveTo,
+        changeReason,
       },
     }, session);
     return assignment;
@@ -982,10 +984,11 @@ export async function listPolicyAuditLogService(req: any, res: Response, next: N
     if (entityType) match.entityType = entityType;
     if (entityId) match.entityId = new mongoose.Types.ObjectId(validateObjectId(entityId, "audit entity id"));
     await scopePolicyAuditQuery(req, companyObjectId, match);
+    await applyPolicyAuditFilters(req.query, companyObjectId, match);
     const [logs, total] = await Promise.all([
       WorkforcePolicyAuditLog.find(match)
-        .populate("actor", "name username role")
-        .sort({ createdAt: -1 })
+        .populate("actor", "name username code role")
+        .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
