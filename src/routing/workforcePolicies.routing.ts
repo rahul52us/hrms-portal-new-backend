@@ -34,6 +34,7 @@ import {
   endPolicyAssignmentService,
   getPolicyCoverageService,
   listPolicyAssignmentsService,
+  listPolicyAssignmentEmployeesService,
   listPolicyAuditLogService,
   resolveEmployeePolicyService,
 } from "../services/workforcePolicy/policyAssignment.service";
@@ -174,6 +175,7 @@ workforcePoliciesRouting.post(
   publishRemoteWorkPolicyVersionService
 );
 
+workforcePoliciesRouting.get("/assignment-employees", listPolicyAssignmentEmployeesService);
 workforcePoliciesRouting.get("/assignments", listPolicyAssignmentsService);
 workforcePoliciesRouting.post("/assignments", createPolicyAssignmentService);
 workforcePoliciesRouting.post("/assignments/:assignmentId/end", endPolicyAssignmentService);

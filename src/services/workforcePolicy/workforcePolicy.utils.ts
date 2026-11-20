@@ -13,6 +13,8 @@ export const POLICY_SCOPE_PRIORITY: Record<string, number> = {
   employee: 500,
 };
 
+export const WORKFORCE_ROLE_PATTERN = /^(user|admin|hr|hr[-\s]?admin|head[-\s]?hr|hr[-\s]?executive|manager|departmenthead|department head|department-head|l\d+[-\s]?manager)$/i;
+
 export function normalizeText(value: unknown) {
   return String(value || "").trim();
 }

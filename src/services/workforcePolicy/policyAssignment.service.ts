@@ -38,10 +38,9 @@ import {
   POLICY_SCOPE_PRIORITY,
   resolvePolicyCompany,
   validateObjectId,
+  WORKFORCE_ROLE_PATTERN,
   writePolicyAudit,
 } from "./workforcePolicy.utils";
-
-const WORKFORCE_ROLE_PATTERN = /^(user|manager|departmenthead|department head|department-head|l\d+[-\s]?manager)$/i;
 
 function normalizeObjectIdList(value: any) {
   const source = Array.isArray(value) ? value : value ? [value] : [];
@@ -221,7 +220,7 @@ async function resolveScope(options: {
   const employee = await User.findOne({
     _id: scopeObjectId,
     company: options.company,
-    deletedAt: { $exists: false },
+    deletedAt: null,
   })
     .select("name username role")
     .lean();
@@ -241,6 +240,31 @@ function getAssignmentState(assignment: any, at = new Date()) {
   if (time < start) return "scheduled";
   if (time >= end) return "ended";
   return "active";
+}
+
+export async function listPolicyAssignmentEmployeesService(req: any, res: Response, next: NextFunction) {
+  try {
+    ensurePolicyManager(req);
+    const { companyObjectId } = await resolvePolicyCompany(req, req.query.companyId);
+    const page = Number(req.query.page ?? 1), limit = Number(req.query.limit ?? 25);
+    if (Array.isArray(req.query.page) || Array.isArray(req.query.limit) || !Number.isSafeInteger(page) || page < 1 || page > 100000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw generateError("Use a valid page and a limit between 1 and 50", 400);
+    }
+    if (req.query.search !== undefined && typeof req.query.search !== "string") throw generateError("Search must be text", 400);
+    const search = normalizeText(req.query.search);
+    if (search.length > 100) throw generateError("Search cannot exceed 100 characters", 400);
+    const match: any = { company: companyObjectId, deletedAt: null, role: { $regex: WORKFORCE_ROLE_PATTERN } };
+    if (search) {
+      const pattern = new RegExp(escapeRegex(search), "i");
+      match.$or = [{ name: pattern }, { code: pattern }, { username: pattern }];
+    }
+    // Assignment managers need a small identity lookup, not employee-management access or a full roster.
+    const [data, total] = await Promise.all([
+      User.find(match).select("_id name code username role").sort({ name: 1, _id: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+      User.countDocuments(match),
+    ]);
+    return res.status(200).json({ success: true, data, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } });
+  } catch (error) { next(error); }
 }
 
 export async function listPolicyAssignmentsService(req: any, res: Response, next: NextFunction) {
