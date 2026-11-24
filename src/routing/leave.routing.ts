@@ -8,6 +8,7 @@ import {
   createLeaveRequestService,
   getEligibleLeaveTypesService,
   getLeaveRequestService,
+  getLeaveRequestSetupService,
   listLeaveBalancesService,
   listLeaveRequestsService,
   listLeaveTransactionsService,
@@ -61,6 +62,7 @@ leaveRouting.post("/year-end/run", runLeaveYearEndService);
 leaveRouting.get("/year-end/runs", listLeaveYearEndRunsService);
 leaveRouting.get("/year-end/closures", listLeaveYearEndClosuresService);
 leaveRouting.post("/requests/preview", previewLeaveRequestService);
+leaveRouting.get("/requests/setup", getLeaveRequestSetupService);
 leaveRouting.post("/requests", createLeaveRequestService);
 leaveRouting.get("/requests", listLeaveRequestsService);
 leaveRouting.get("/requests/:requestId", getLeaveRequestService);

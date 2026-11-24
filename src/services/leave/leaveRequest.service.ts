@@ -39,7 +39,7 @@ import {
 } from "./leaveAttendance.service";
 import { calculateEmployeeLeaveRequest } from "./leaveRequestCalculator.service";
 import { parseAttendanceDate } from "../attendance/employeeDayContext.utils";
-import { resolveLeaveYear } from "./leaveRequestCalculator.utils";
+import { enumerateDateKeys, resolveLeaveYear } from "./leaveRequestCalculator.utils";
 import {
   LEAVE_DOCUMENT_MIME_TYPES,
   validateUploadSignature,
@@ -442,6 +442,26 @@ async function notifyLeaveEmployee(options: {
     },
     options.session
   );
+}
+
+export async function getLeaveRequestSetupService(req: any, res: Response, next: NextFunction) {
+  try {
+    const actor = getLeaveActor(req);
+    const company = resolveLeaveCompanyId(actor, req.query?.companyId);
+    const employee = await loadEmployee(company, req.query?.employeeId || actor._id);
+    ensureEmployeeInActorScope(actor, employee, PERMISSION_KEYS.VIEW_LEAVE_REQUESTS, "You cannot check leave setup for this employee");
+    if (typeof req.query?.fromDate !== "string" || typeof req.query?.toDate !== "string") throw generateError("From date and To date are required in YYYY-MM-DD format", 400);
+    const dates = enumerateDateKeys(req.query.fromDate, req.query.toDate);
+    const versionCache = new Map<string, Promise<any>>();
+    const issues: Array<{ date: string; code: "work_schedule_missing" }> = [];
+    for (const attendanceDate of dates) {
+      const context = await resolveEmployeeDayContext({ companyId: company, employeeId: employee._id, attendanceDate, versionCache });
+      // Match the calculator's guard; mandatory holidays and weekly offs keep their existing treatment.
+      if (context.dayType === "unconfigured") issues.push({ date: attendanceDate, code: "work_schedule_missing" });
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.status(200).json({ success: true, data: { fromDate: dates[0], toDate: dates[dates.length - 1], ready: issues.length === 0, issues } });
+  } catch (error) { next(error); }
 }
 
 export async function previewLeaveRequestService(req: any, res: Response, next: NextFunction) {

@@ -43,6 +43,14 @@ function context(date: string, dayType = "working_day", overrides: any = {}) {
 }
 
 function run() {
+  assert.throws(() => calculateLeaveRequest({
+    leaveTypeId,
+    leaveUnit: "days",
+    fromDate: "2026-08-24",
+    toDate: "2026-08-24",
+    contexts: [context("2026-08-24", "unconfigured")],
+    currentDate: "2026-08-21",
+  }), (error: any) => error.statusCode === 422 && /Work schedule is not configured on 2026-08-24/.test(error.message), "The authoritative calculation guard must remain even with a UI pre-check");
   assert.deepEqual(resolveLeaveYear("2026-03-31", 4, 1), {
     leaveYearKey: "2025-04-01:2026-03-31",
     leaveYearStart: "2025-04-01",
