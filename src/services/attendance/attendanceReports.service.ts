@@ -489,6 +489,7 @@ async function sendReportExport(res: Response, options: {
   rows: Array<Array<string | number>>;
 }) {
   const filename = `${options.name}-${new Date().toISOString().slice(0, 10)}`;
+  res.setHeader("X-Export-Row-Count", String(options.rows.length));
   if (options.format === "csv") {
     const rows = [...reportMetadataRows(options.name, options.filters), [], options.headers, ...options.rows];
     const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");

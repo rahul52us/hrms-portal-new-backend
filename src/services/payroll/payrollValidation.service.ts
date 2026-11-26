@@ -375,3 +375,68 @@ export async function decidePayrollValidationIssueService(req: any, res: Respons
     next(error);
   }
 }
+
+// Bounded transactions preserve per-issue evidence without loading a whole workforce.
+export async function acknowledgeOpenPayrollWarningsService(req: any, res: Response, next: NextFunction) {
+  try {
+    ensurePayrollRunManager(req);
+    const { companyObjectId } = await resolvePayrollCompany(req, req.body?.companyId, true, "review payroll validation warnings");
+    const actor = getPayrollActor(req);
+    const actorId = getPayrollActorId(req);
+    const runId = objectId(req.params.runId, "payroll run id");
+    const reason = requiredReason(req.body?.reason);
+    const expectedVersion = Number(req.body?.expectedVersion);
+    const calculationVersion = Number(req.body?.expectedCalculationVersion);
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1 || !Number.isInteger(calculationVersion) || calculationVersion < 1) {
+      throw generateError("Expected run and calculation versions are required", 422);
+    }
+    let acknowledgedCount = 0;
+    let hasMore = false;
+    await mongoose.connection.transaction(async (session) => {
+      // Reset on transaction retries; nothing is counted until this attempt commits.
+      acknowledgedCount = 0;
+      hasMore = false;
+      const run: any = await PayrollRun.findOne({ _id: runId, company: companyObjectId }).session(session).lean();
+      if (!run) throw generateError("Payroll run not found", 404);
+      if (run.status !== "draft" || run.calculationStatus !== "calculated") throw generateError("Only calculated draft payroll warnings can be acknowledged", 409);
+      if (Number(run.version) !== expectedVersion || Number(run.calculationVersion) !== calculationVersion) throw generateError("Payroll run changed. Refresh and review its warnings again", 409);
+      const warnings: any[] = await EmployeePayrollResult.aggregate([
+        { $match: { company: companyObjectId, payrollRun: runId, calculationVersion } },
+        { $unwind: "$issues" },
+        { $match: { "issues.severity": "warning" } },
+        decisionLookup(),
+        ...resolutionFields(),
+        { $match: { resolutionStatus: "open" } },
+        { $sort: { _id: 1, "issues.category": 1, "issues.code": 1 } },
+        { $limit: 101 },
+        { $project: { _id: 1, employee: 1, issues: 1 } },
+      ]).session(session);
+      hasMore = warnings.length > 100;
+      const batch = warnings.slice(0, 100);
+      if (!batch.length) return;
+      await PayrollValidationDecision.create(batch.map((item) => ({
+        company: companyObjectId, payrollRun: runId, calculationVersion,
+        employeePayrollResult: item._id, employee: item.employee,
+        issueCode: item.issues.code, issueCategory: item.issues.category,
+        issueSeverity: "warning", action: "acknowledge", reason, actor: actorId,
+        actorNameSnapshot: text(actor?.name || actor?.username || actor?.code) || "Payroll reviewer",
+        actorCodeSnapshot: text(actor?.code),
+      })), { session, ordered: true });
+      const update = await PayrollRun.updateOne(
+        { _id: runId, company: companyObjectId, status: "draft", calculationStatus: "calculated", calculationVersion, version: expectedVersion },
+        { $inc: { version: 1 } }, { session }
+      );
+      if (update.modifiedCount !== 1) throw generateError("Payroll run changed while warnings were being reviewed", 409);
+      await writePayrollAudit({
+        company: companyObjectId, entityType: "payroll_run", entityId: runId,
+        action: "validation_warnings_bulk_acknowledged", actor: actorId, reason,
+        details: { calculationVersion, acknowledgedCount: batch.length },
+      }, session);
+      acknowledgedCount = batch.length;
+    });
+    return res.status(acknowledgedCount ? 201 : 200).json({
+      success: true, message: acknowledgedCount ? "Payroll warnings acknowledged" : "No open payroll warnings remain",
+      data: await populatedRun(companyObjectId, runId), acknowledgedCount, hasMore,
+    });
+  } catch (error) { next(error); }
+}

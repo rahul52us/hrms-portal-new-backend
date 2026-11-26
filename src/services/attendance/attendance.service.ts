@@ -1179,6 +1179,7 @@ export async function downloadMyAttendanceStatementService(
     ]);
     if (!employee) throw generateError("Employee account was not found", 404);
     const csv = buildAttendanceStatementCsv(records);
+    res.setHeader("X-Export-Row-Count", String(records.length));
     const employeeCode = text((employee as any).code || "employee").replace(/[^a-zA-Z0-9_-]/g, "-");
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(

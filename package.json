@@ -126,6 +126,7 @@
     "test:payroll-employee-snapshots": "ts-node src/services/payroll/payrollEmployeeSnapshot.test.ts",
     "test:payroll-calculation": "ts-node src/services/payroll/payrollCalculation.test.ts",
     "test:payroll-validation": "ts-node src/services/payroll/payrollValidation.test.ts",
+    "test:payroll-validation-bulk": "ts-node src/services/payroll/payrollValidationBulk.test.ts",
     "test:payroll-review": "ts-node src/services/payroll/payrollRunReview.test.ts",
     "test:payroll-finalization": "ts-node src/services/payroll/payrollFinalization.test.ts",
     "test:payroll-payslips": "ts-node src/services/payroll/payrollPayslip.test.ts",

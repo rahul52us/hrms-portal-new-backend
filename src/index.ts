@@ -43,6 +43,7 @@ const corsOptions = {
   methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
   credentials: false,
   allowedHeaders: ["Content-Type", "Authorization", "X-Attendance-Device-Id", "Idempotency-Key"],
+  exposedHeaders: ["Content-Disposition", "X-Export-Row-Count"],
 };
 
 app.use(cors(corsOptions));

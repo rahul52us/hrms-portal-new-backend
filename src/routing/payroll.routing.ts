@@ -63,6 +63,7 @@ import {
 } from "../services/payroll/payrollCalculation.service";
 import {
   decidePayrollValidationIssueService,
+  acknowledgeOpenPayrollWarningsService,
   listPayrollValidationIssuesService,
 } from "../services/payroll/payrollValidation.service";
 import {
@@ -223,6 +224,7 @@ payrollRouting.post("/runs/:runId/reopen", reopenPayrollRunService);
 payrollRouting.get("/runs/:runId/finalized-results/:resultId/adjustment-options", getPayrollAdjustmentOptionsService);
 payrollRouting.post("/runs/:runId/finalized-results/:resultId/adjustments", createPayrollAdjustmentService);
 payrollRouting.get("/runs/:runId/validation", listPayrollValidationIssuesService);
+payrollRouting.post("/runs/:runId/validation/acknowledge-open", acknowledgeOpenPayrollWarningsService);
 payrollRouting.post("/runs/:runId/validation/:resultId/issues/:issueCode/decision", decidePayrollValidationIssueService);
 payrollRouting.get("/runs/:runId/one-time-inputs", listPayrollOneTimeInputsService);
 payrollRouting.post("/runs/:runId/one-time-inputs", createPayrollOneTimeInputService);
