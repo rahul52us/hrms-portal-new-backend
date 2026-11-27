@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "test:policy-assignment-employees": "ts-node src/services/workforcePolicy/policyAssignmentEmployees.test.ts",
+    "test:request-company-context": "ts-node src/modules/config/requestCompanyContext.test.ts",
     "test:workforce-policy-models": "ts-node src/schemas/WorkforcePolicy/WorkforcePolicyAssignment.schema.test.ts",
     "assets:warranty:reminders": "ts-node src/scripts/runAssetWarrantyReminders.ts",
     "assets:exports:run": "ts-node src/scripts/runAssetExports.ts",

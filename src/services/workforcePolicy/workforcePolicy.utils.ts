@@ -3,6 +3,7 @@ import { generateError } from "../../config/Error/functions";
 import Company from "../../schemas/company/Company";
 import WorkforcePolicyAuditLog from "../../schemas/WorkforcePolicy/WorkforcePolicyAuditLog.schema";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
+import { getAuthenticatedCompany } from "../../modules/config/requestCompanyContext";
 import { ensurePermission, PERMISSION_KEYS } from "../permissions/permission.utils";
 
 export const POLICY_SCOPE_PRIORITY: Record<string, number> = {
@@ -122,7 +123,13 @@ export async function resolvePolicyCompany(req: any, requestedCompanyInput?: unk
     });
   }
 
-  const company = await Company.findOne({
+  const authenticatedCompany = !mutation ? getAuthenticatedCompany(req, companyId) : null;
+  const company = authenticatedCompany ? {
+    _id: authenticatedCompany._id,
+    company_name: authenticatedCompany.company_name,
+    companyCode: authenticatedCompany.companyCode,
+    is_active: authenticatedCompany.is_active,
+  } : await Company.findOne({
     _id: new mongoose.Types.ObjectId(companyId),
     deletedAt: { $exists: false },
   })

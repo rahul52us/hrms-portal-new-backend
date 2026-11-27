@@ -6,6 +6,7 @@ import Company from "../../schemas/company/Company";
 import { generateError, handleErrorMessage } from "./function";
 import { attachEffectivePermissions } from "../../services/permissions/permission.utils";
 import { ensureUserAccountEnabled } from "../../services/company/utils/activityGuards";
+import { setAuthenticatedCompany } from "./requestCompanyContext";
 import {
   canUserLogin,
   getUserAccountStatus,
@@ -38,9 +39,10 @@ const authenticate = async (req: any, res: Response, next: NextFunction) => {
     const company =
       user.company
         ? await Company.findById(user.company)
-            .select("company_name companyCode primaryThemeColor sidebarColors departments rolePermissions")
+            .select("company_name companyCode primaryThemeColor sidebarColors departments rolePermissions is_active deletedAt payrollSettings")
             .lean()
         : null;
+    setAuthenticatedCompany(req, company);
     const userWithPermissions = attachEffectivePermissions({
       user,
       company,

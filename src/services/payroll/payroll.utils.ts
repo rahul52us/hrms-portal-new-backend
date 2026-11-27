@@ -3,6 +3,7 @@ import { generateError } from "../../config/Error/functions";
 import Company from "../../schemas/company/Company";
 import PayrollAuditLog from "../../schemas/Payroll/PayrollAuditLog.schema";
 import { ensureCompanyManagementAccess } from "../company/utils/activityGuards";
+import { getAuthenticatedCompany } from "../../modules/config/requestCompanyContext";
 import {
   ensurePermission,
   hasPermission,
@@ -155,7 +156,15 @@ export async function resolvePayrollCompany(
     });
   }
 
-  const company = await Company.findOne({
+  const authenticatedCompany = !mutation ? getAuthenticatedCompany(req, companyId) : null;
+  const company = authenticatedCompany ? {
+    _id: authenticatedCompany._id,
+    company_name: authenticatedCompany.company_name,
+    companyCode: authenticatedCompany.companyCode,
+    is_active: authenticatedCompany.is_active,
+    payrollSettings: authenticatedCompany.payrollSettings,
+    rolePermissions: authenticatedCompany.rolePermissions,
+  } : await Company.findOne({
     _id: new mongoose.Types.ObjectId(companyId),
     deletedAt: { $exists: false },
   })
